@@ -34,27 +34,36 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
   ({ width, height, isActive, tool, color, lineWidth }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [strokes, setStrokes] = useState<Stroke[]>([]);
+    const strokesRef = useRef<Stroke[]>([]); // Ref mirror to avoid stale closure in imperative handle
     const currentStroke = useRef<Stroke | null>(null);
     const isDrawing = useRef(false);
 
-    // Expose handle methods to parent
+    // Keep ref in sync with state
+    useEffect(() => {
+      strokesRef.current = strokes;
+    }, [strokes]);
+
+    // Expose handle methods to parent – use ref for hasStrokes to avoid stale closure
     useImperativeHandle(ref, () => ({
-      clear: () => setStrokes([]),
+      clear: () => {
+        strokesRef.current = [];
+        setStrokes([]);
+      },
       getDataUrl: () => canvasRef.current?.toDataURL('image/png') ?? null,
-      hasStrokes: () => strokes.length > 0,
-    }), [strokes]);
+      hasStrokes: () => strokesRef.current.length > 0,
+    }), []); // Empty deps – safe because we read from ref, not state
 
     // Re-render canvas whenever strokes change
     useEffect(() => {
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!canvas || !canvas.width || !canvas.height) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       for (const stroke of strokes) {
-        if (stroke.points.length === 0) continue;
+        if (!stroke || !stroke.points || stroke.points.length === 0) continue;
         ctx.save();
         ctx.strokeStyle = stroke.color;
         ctx.fillStyle = stroke.color;
@@ -77,7 +86,6 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         } else if (stroke.type === 'text' && stroke.text && stroke.points.length > 0) {
           ctx.font = `bold ${Math.max(14, stroke.lineWidth * 6)}px Inter, sans-serif`;
           ctx.globalCompositeOperation = 'source-over';
-          // Shadow for readability
           ctx.shadowColor = 'rgba(0,0,0,0.8)';
           ctx.shadowBlur = 4;
           ctx.fillText(stroke.text, stroke.points[0].x, stroke.points[0].y);
@@ -85,16 +93,18 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
         ctx.restore();
       }
-    }, [strokes, width, height]);
+    }, [strokes]);
 
     const getPos = (e: React.MouseEvent | React.TouchEvent): Point | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       if ('touches' in e) {
         const touch = e.touches[0];
+        if (!touch) return null;
         return { x: (touch.clientX - rect.left) * scaleX, y: (touch.clientY - rect.top) * scaleY };
       }
       return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
@@ -108,25 +118,32 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
       if (tool === 'text') {
         const text = window.prompt('Beschriftung eingeben:');
-        if (text) {
-          setStrokes(prev => [...prev, { type: 'text', color, lineWidth, points: [pos], text }]);
+        if (text && text.trim()) {
+          const newStroke: Stroke = { type: 'text', color, lineWidth, points: [pos], text: text.trim() };
+          strokesRef.current = [...strokesRef.current, newStroke];
+          setStrokes(prev => [...prev, newStroke]);
         }
         isDrawing.current = false;
         return;
       }
 
-      currentStroke.current = { type: tool, color, lineWidth, points: [pos] };
-      // Immediately add to strokes so it renders
-      setStrokes(prev => [...prev, currentStroke.current!]);
+      const newStroke: Stroke = { type: tool, color, lineWidth, points: [pos] };
+      currentStroke.current = newStroke;
+      strokesRef.current = [...strokesRef.current, newStroke];
+      setStrokes(prev => [...prev, newStroke]);
     };
 
     const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isActive || !isDrawing.current || !currentStroke.current) return;
       const pos = getPos(e);
       if (!pos) return;
-      // Update the last stroke (in-place mutation for performance)
+
+      // Mutate the current stroke's points array directly (avoids unnecessary re-renders during drag)
       currentStroke.current.points.push(pos);
+
+      // Trigger re-render by replacing last stroke in state
       setStrokes(prev => {
+        if (prev.length === 0) return prev;
         const updated = [...prev];
         updated[updated.length - 1] = { ...currentStroke.current! };
         return updated;
@@ -138,11 +155,15 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       currentStroke.current = null;
     };
 
+    // Guard against zero dimensions (prevents blank canvas crash)
+    const safeWidth = width > 0 ? width : 1;
+    const safeHeight = height > 0 ? height : 1;
+
     return (
       <canvas
         ref={canvasRef}
-        width={width}
-        height={height}
+        width={safeWidth}
+        height={safeHeight}
         onMouseDown={handlePointerDown}
         onMouseMove={handlePointerMove}
         onMouseUp={handlePointerUp}
@@ -170,7 +191,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
 AnnotationCanvas.displayName = 'AnnotationCanvas';
 
-// ── Util: Draw an arrow from→to ───────────────────────────────────────────────
+// ── Util: Draw an arrow from→to ──────────────────────────────────────────────
 function drawArrow(ctx: CanvasRenderingContext2D, from: Point, to: Point, lw: number) {
   const headLen = Math.max(16, lw * 5);
   const dx = to.x - from.x;
@@ -182,7 +203,6 @@ function drawArrow(ctx: CanvasRenderingContext2D, from: Point, to: Point, lw: nu
   ctx.lineTo(to.x, to.y);
   ctx.stroke();
 
-  // Arrowhead
   ctx.beginPath();
   ctx.moveTo(to.x, to.y);
   ctx.lineTo(to.x - headLen * Math.cos(angle - Math.PI / 6), to.y - headLen * Math.sin(angle - Math.PI / 6));

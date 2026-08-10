@@ -1375,7 +1375,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 />
 
                 {/* 🎨 ANNOTATION DRAWING CANVAS (active when paused) */}
-                {overlayBounds && (
+                {overlayBounds && overlayBounds.width > 0 && overlayBounds.height > 0 && (
                   <AnnotationCanvas
                     ref={annotationCanvasRef}
                     width={overlayBounds.width}
