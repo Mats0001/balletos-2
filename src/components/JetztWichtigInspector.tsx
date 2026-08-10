@@ -88,7 +88,7 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
           alignItems: 'center',
           gap: '6px'
         }}>
-          <Sparkles size={12} /> JETZT WICHTIG
+          JETZT WICHTIG
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
