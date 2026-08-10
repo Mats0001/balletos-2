@@ -1691,28 +1691,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   </div>
 
                   {/* KI-Note + Referenzbild (nur bei KI_AUTO Cue-Points) */}
-                  {cue.dataSource === 'KI_AUTO' && (cue.kiNote || cue.referenceImageKey) && (
+                  {cue.dataSource === 'KI_AUTO' && cue.kiNote && (
                     <div style={{
-                      display: 'flex', gap: '10px', alignItems: 'flex-start',
-                      background: 'rgba(168,129,189,0.08)',
-                      border: '1px solid rgba(168,129,189,0.2)',
-                      borderRadius: '8px', padding: '8px',
-                      marginTop: '2px'
+                      background: 'rgba(168,129,189,0.07)',
+                      border: '1px solid rgba(168,129,189,0.18)',
+                      borderRadius: '7px', padding: '7px 10px',
+                      marginTop: '2px',
+                      display: 'flex', flexDirection: 'column', gap: '4px'
                     }}>
-                      {cue.referenceImageKey && (
-                        <img
-                          src={`/reference/${cue.referenceImageKey}.svg`}
-                          alt="Vaganova-Referenz"
-                          style={{ width: '52px', height: '78px', flexShrink: 0, borderRadius: '6px', border: '1px solid rgba(192,132,252,0.25)' }}
-                        />
-                      )}
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '9px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px', marginBottom: '4px' }}>🤖 KI-ANALYSE</div>
-                        {cue.kiNote && (
-                          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>
-                            {cue.kiNote}
-                          </div>
+                      <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        🤖 KI-ANALYSE
+                        {cue.referenceImageKey && (
+                          <span style={{ fontSize: '8px', color: 'rgba(192,132,252,0.6)', fontWeight: 600 }}>
+                            · {cue.referenceImageKey.replace(/_/g, ' ')}
+                          </span>
                         )}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.45 }}>
+                        {cue.kiNote}
                       </div>
                     </div>
                   )}
