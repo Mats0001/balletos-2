@@ -65,6 +65,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl)
   );
 
+  // VIDEO SCRUBBER STATE
+  const [videoDuration, setVideoDuration] = useState<number>(5.0);
+  const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
+
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' }>({
@@ -459,6 +463,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       videoRef.current?.removeEventListener('seeked', handleSeeked);
     };
   }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, overlayMode]);
+
+  // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onTime = () => setCurrentPlayTime(v.currentTime);
+    const onDur  = () => { if (v.duration && isFinite(v.duration)) setVideoDuration(v.duration); };
+    v.addEventListener('timeupdate', onTime);
+    v.addEventListener('durationchange', onDur);
+    v.addEventListener('loadedmetadata', onDur);
+    return () => {
+      v.removeEventListener('timeupdate', onTime);
+      v.removeEventListener('durationchange', onDur);
+      v.removeEventListener('loadedmetadata', onDur);
+    };
+  }, [selectedDevVideoUrl]);
+
+
 
   // Trigger immediate frame detection on Video Pause or Seek
   const processStaticPausedFrame = () => {
@@ -1230,7 +1252,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   playsInline
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 />
-
                 <div style={{ position: 'absolute', top: '20px', right: '16px', background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 700, color: '#fff' }}>
                   VAGANOVA MASTER REFERENZ (100%)
                 </div>
@@ -1262,16 +1283,82 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {isPlaying ? <Pause size={16} fill="#ffffff" /> : <Play size={16} fill="#ffffff" style={{ marginLeft: '2px' }} />}
               </button>
 
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#c084fc', fontWeight: 700 }}>{selectedFrameTime}</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  defaultValue="42"
-                  style={{ flex: 1, accentColor: '#a881bd', cursor: 'pointer' }}
-                />
-                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-sub)' }}>00:05.000</span>
+              {/* ── LIVE SCRUBBER mit Cue-Point-Diamonds ───────────────── */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '3px', padding: '0 4px' }}>
+                {/* Zeit-Labels */}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '10px', fontFamily: 'monospace', color: '#c084fc', fontWeight: 700 }}>
+                    {String(Math.floor(currentPlayTime / 60)).padStart(2,'0')}:{(currentPlayTime % 60).toFixed(3).padStart(6,'0')}
+                  </span>
+                  <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)' }}>
+                    {String(Math.floor(videoDuration / 60)).padStart(2,'0')}:{(videoDuration % 60).toFixed(3).padStart(6,'0')}
+                  </span>
+                </div>
+                {/* Track + Cue-Diamonds */}
+                <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
+                  {/* Hintergrund-Track */}
+                  <div style={{
+                    position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+                    height: '4px', background: 'rgba(255,255,255,0.12)', borderRadius: '4px', overflow: 'visible'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${videoDuration > 0 ? (currentPlayTime / videoDuration) * 100 : 0}%`,
+                      background: 'linear-gradient(90deg, #c084fc 0%, #a855f7 100%)',
+                      borderRadius: '4px',
+                      transition: 'width 0.1s linear'
+                    }} />
+                  </div>
+                  {/* Cue-Point Diamonds */}
+                  {cuePoints.map((cue) => {
+                    const pct = videoDuration > 0 ? (cue.timeSeconds / videoDuration) * 100 : 0;
+                    const isActive = Math.abs(currentPlayTime - cue.timeSeconds) < 0.35;
+                    return (
+                      <button
+                        key={cue.id}
+                        title={`${cue.timecodeStr} · ${cue.poseName}`}
+                        onClick={() => handleSeekToCuePoint(cue)}
+                        style={{
+                          position: 'absolute',
+                          left: `${pct}%`,
+                          transform: 'translate(-50%, 0)',
+                          width: isActive ? '13px' : '9px',
+                          height: isActive ? '13px' : '9px',
+                          background: cue.status === 'CORRECTION' ? '#ff453a' : '#30d158',
+                          border: isActive ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.55)',
+                          borderRadius: '2px',
+                          rotate: '45deg',
+                          cursor: 'pointer',
+                          zIndex: 3,
+                          transition: 'all 0.15s ease',
+                          boxShadow: isActive ? (cue.status === 'CORRECTION' ? '0 0 8px #ff453a88' : '0 0 8px #30d15888') : 'none',
+                          padding: 0
+                        }}
+                      />
+                    );
+                  })}
+                  {/* Transparentes Scrub-Input über dem Track */}
+                  <input
+                    type="range"
+                    min={0}
+                    max={videoDuration || 5}
+                    step={0.001}
+                    value={currentPlayTime}
+                    onChange={(e) => {
+                      const t = parseFloat(e.target.value);
+                      setCurrentPlayTime(t);
+                      if (videoRef.current) {
+                        videoRef.current.currentTime = t;
+                        if (refVideoRef.current) refVideoRef.current.currentTime = t;
+                      }
+                    }}
+                    style={{
+                      position: 'absolute', left: 0, right: 0, width: '100%',
+                      opacity: 0, height: '24px', cursor: 'pointer', zIndex: 4,
+                      margin: 0, padding: 0
+                    }}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '8px' }}>
