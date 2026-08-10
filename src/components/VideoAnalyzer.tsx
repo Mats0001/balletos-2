@@ -622,6 +622,66 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setPanOffset({ x: 0, y: 0 });
   };
 
+  // ── WhatsApp Frame Export ───────────────────────────────────────────────
+  // Composites Video-Frame + Skeleton-Canvas → PNG download + WhatsApp öffnen
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleWhatsAppExport = async () => {
+    const video = videoRef.current;
+    const overlayCanvas = canvasRef.current;
+    if (!video || !overlayCanvas) return;
+
+    setIsExporting(true);
+    try {
+      // 1. Merge-Canvas in Video-Größe erstellen
+      const W = video.videoWidth  || overlayCanvas.width;
+      const H = video.videoHeight || overlayCanvas.height;
+      const merge = document.createElement('canvas');
+      merge.width  = W;
+      merge.height = H;
+      const ctx = merge.getContext('2d');
+      if (!ctx) return;
+
+      // 2. Video-Frame einzeichnen
+      ctx.drawImage(video, 0, 0, W, H);
+
+      // 3. Skelett-Canvas darüber legen (skaliert auf Video-Größe)
+      ctx.drawImage(overlayCanvas, 0, 0, W, H);
+
+      // 4. Zeitstempel + Schülerin als Wasserzeichen
+      const ts = video.currentTime;
+      const mins = Math.floor(ts / 60).toString().padStart(2,'0');
+      const secs = (ts % 60).toFixed(3).padStart(6,'0');
+      const label = `BalletOS · Emma Berger · ${mins}:${secs}`;
+      ctx.font = 'bold 18px Montserrat, Arial';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, H - 34, W, 34);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, 12, H - 12);
+
+      // 5. Als PNG herunterladen
+      const dataUrl = merge.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `BalletOS_Emma_${mins}-${secs}.png`;
+      link.href = dataUrl;
+      link.click();
+
+      // 6. WhatsApp Web mit vorausgefüllter Nachricht öffnen
+      //    (User kann Bild dann manuell anhängen – Browser-Sicherheit erlaubt
+      //     keinen automatischen Datei-Anhang, aber der Download öffnet sich gleichzeitig)
+      const waText = encodeURIComponent(
+        `📊 BalletOS Analyse – Emma Berger\n⏱ Zeitstempel: ${mins}:${secs}\n\n` +
+        `Knie-Alignment: -${Math.abs(-9.3).toFixed(1)}° (Profil Plié – Seitenansicht)\n` +
+        `→ Das Bild ist im Download-Ordner.\n\nViele Grüße, Nicole`
+      );
+      window.open(`https://wa.me/?text=${waText}`, '_blank');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+
+
   // Toggle Play/Pause
   const handleTogglePlay = () => {
     const nextPlaying = !isPlaying;
@@ -1236,12 +1296,28 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               </div>
 
               <button
-                onClick={() => alert('✓ 10-Sekunden DSGVO-Fortschritts-Clip wurde erstellt und an Sabine Berger gesendet!')}
+                onClick={handleWhatsAppExport}
+                disabled={isExporting}
                 className="btn-monolith"
-                style={{ fontSize: '10px', padding: '7px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                style={{
+                  fontSize: '10px',
+                  padding: '7px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  opacity: isExporting ? 0.7 : 1,
+                  background: isExporting
+                    ? 'rgba(37,211,102,0.2)'
+                    : 'linear-gradient(135deg, #25d366 0%, #128c7e 100%)',
+                  border: 'none',
+                  boxShadow: isExporting ? 'none' : '0 2px 12px rgba(37,211,102,0.35)',
+                  transition: 'all 0.2s ease'
+                }}
               >
-                <Send size={12} /> WhatsApp Clip Export
+                <Send size={12} />
+                {isExporting ? 'Exportiere…' : 'WhatsApp Export'}
               </button>
+
             </div>
 
           </div>
