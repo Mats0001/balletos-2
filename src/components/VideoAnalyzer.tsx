@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
+import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
 import { JetztWichtigInspectorData, FeedbackObject } from '../types';
 import { videoStore, StoredVideoItem } from '../services/videoStore';
@@ -86,18 +87,30 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [isCurriculumModalOpen, setIsCurriculumModalOpen] = useState<boolean>(false);
 
   // ── ANNOTATION TOOL STATE ──────────────────────────────────────────────────
-  interface AnnotationEntry {
-    id: string;
-    timeSeconds: number;
-    timecodeStr: string;
-    dataUrl: string;       // Full PNG Base64
-    thumbnailUrl: string;  // Scaled down thumbnail
-  }
-  const [annotationEntries, setAnnotationEntries] = useState<AnnotationEntry[]>([]);
+  // AnnotationEntry is imported from AnnotationLightbox (shared type)
+  const STORAGE_KEY = `balletos_annotations_${selectedDevVideoUrl.split('/').pop()}`;
+
+  const [annotationEntries, setAnnotationEntries] = useState<AnnotationEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pen');
   const [drawingColor, setDrawingColor] = useState<string>('#ff453a');
   const [drawingLineWidth, setDrawingLineWidth] = useState<number>(3);
   const annotationCanvasRef = useRef<AnnotationCanvasHandle>(null);
+
+  // Lightbox state
+  const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
+  const [lightboxIndex, setLightboxIndex] = useState<number>(0);
+
+  // Persist annotations to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(annotationEntries));
+    } catch { /* quota exceeded – ignore */ }
+  }, [annotationEntries, STORAGE_KEY]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const refVideoRef = useRef<HTMLVideoElement>(null);
@@ -789,22 +802,36 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       const s = (timeSec % 60).toFixed(3).padStart(6, '0');
       const timecodeStr = `${String(m).padStart(2, '0')}:${s}`;
 
-      const entry = {
+      const entry: AnnotationEntry = {
         id: `ann-${Date.now()}`,
         timeSeconds: timeSec,
         timecodeStr,
         dataUrl,
         thumbnailUrl,
+        studentName: (document.querySelector('.monolith-card select, select') as HTMLSelectElement | null)?.value ?? undefined,
+        createdAt: Date.now(),
+        note: '',
       };
-      setAnnotationEntries(prev => [...prev, entry]);
+      setAnnotationEntries(prev => {
+        const updated = [...prev, entry];
+        // Open lightbox showing the new entry
+        setLightboxIndex(updated.length - 1);
+        setLightboxOpen(true);
+        return updated;
+      });
       annotationCanvasRef.current?.clear();
-
-      // Auto-download
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `balletos_annotation_${timecodeStr.replace(':', '-')}.png`;
-      a.click();
     }
+  };
+
+  // Update note on a saved annotation
+  const handleUpdateNote = (id: string, note: string) => {
+    setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, note } : e));
+  };
+
+  // Open lightbox at a specific entry index
+  const handleOpenLightbox = (index: number) => {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
   };
 
 
@@ -941,6 +968,23 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         report={curriculumReport}
         studentName="Emma Berger (6 J.)"
       />
+
+      {/* 🖼 ANNOTATION LIGHTBOX */}
+      {lightboxOpen && annotationEntries.length > 0 && (
+        <AnnotationLightbox
+          entries={annotationEntries}
+          currentIndex={lightboxIndex}
+          onClose={() => setLightboxOpen(false)}
+          onNavigate={setLightboxIndex}
+          onUpdateNote={handleUpdateNote}
+          onSeekTo={t => {
+            if (videoRef.current) {
+              videoRef.current.currentTime = t;
+              videoRef.current.pause();
+            }
+          }}
+        />
+      )}
 
       {/* JETZT WICHTIG wurde nach unten verschoben – direkt unter das Video */}
 
@@ -1257,43 +1301,39 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               padding: annotationEntries.length > 0 ? '8px 5px' : '0',
               overflowY: 'auto',
             }}>
-              {annotationEntries.map(entry => (
+              {annotationEntries.map((entry, idx) => (
                 <div
                   key={entry.id}
-                  onClick={() => {
-                    if (videoRef.current) {
-                      videoRef.current.currentTime = entry.timeSeconds;
-                      videoRef.current.pause();
-                    }
-                  }}
-                  title={`Annotation @ ${entry.timecodeStr}`}
+                  onClick={() => handleOpenLightbox(idx)}
+                  title={`${entry.timecodeStr}${entry.note ? ' · ' + entry.note.slice(0, 40) : ''}`}
                   style={{
                     cursor: 'pointer',
                     borderRadius: '5px',
                     overflow: 'hidden',
-                    border: '1px solid rgba(192,132,252,0.4)',
+                    border: '1px solid rgba(192,132,252,0.35)',
                     flexShrink: 0,
                     position: 'relative',
+                    transition: 'border-color 0.15s ease',
                   }}
                 >
                   <img src={entry.thumbnailUrl} alt={entry.timecodeStr} style={{ display: 'block', width: '100%', height: 'auto' }} />
                   <div style={{
                     position: 'absolute', bottom: 0, left: 0, right: 0,
-                    background: 'rgba(0,0,0,0.75)',
+                    background: 'rgba(0,0,0,0.8)',
                     fontSize: '7px', fontWeight: 800, color: '#c084fc',
                     textAlign: 'center', padding: '2px',
                     fontFamily: 'monospace',
                   }}>
                     {entry.timecodeStr}
                   </div>
-                  {/* Download link */}
-                  <a
-                    href={entry.dataUrl}
-                    download={`annotation_${entry.timecodeStr.replace(':', '-')}.png`}
-                    onClick={e => e.stopPropagation()}
-                    style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', borderRadius: '3px', padding: '1px 3px', fontSize: '8px', color: '#fff', textDecoration: 'none' }}
-                    title="Download PNG"
-                  >↓</a>
+                  {/* Note indicator */}
+                  {entry.note && (
+                    <div style={{ position: 'absolute', top: 3, left: 3, width: '7px', height: '7px', borderRadius: '50%', background: '#30d158', boxShadow: '0 0 4px #30d158' }} />
+                  )}
+                  {/* Expand hint on hover via title – lightbox icon */}
+                  <div style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.55)', borderRadius: '3px', padding: '1px 3px', fontSize: '9px', color: 'rgba(255,255,255,0.7)' }}>
+                    🔍
+                  </div>
                 </div>
               ))}
               {annotationEntries.length > 0 && (
