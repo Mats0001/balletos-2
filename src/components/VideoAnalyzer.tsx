@@ -212,7 +212,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       videoRef.current,
       (percent, step, total) => {
         setIndexingProgress(percent);
-        setIndexingStatusStr(`Pre-Scan Frame ${step}/${total} (${percent}%)`);
+        setIndexingStatusStr(`Frame ${step}/${total} (${percent}%)`);
       }
     );
 
@@ -964,7 +964,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         justifyContent: 'space-between',
         gap: '12px'
       }}>
-        {/* Left: Video Selector & Option 1 Pre-Scan Button */}
+        {/* Left: Video Selector & KI-Analyse Status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <select
             value={selectedDevVideoUrl}
@@ -1346,17 +1346,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   style={{ position: 'absolute', top: '20px', left: '20px', width: '60px', opacity: 0.25, pointerEvents: 'none' }}
                 />
 
-                {/* Option 1 Pre-Indexing Progress Overlay Bar */}
+                {/* KI-Analyse Progress Overlay */}
                 {isPreIndexing && (
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(10,8,14,0.92)', backdropFilter: 'blur(10px)', zIndex: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
-                    <Zap size={36} color="#30d158" style={{ filter: 'drop-shadow(0 0 12px rgba(48,209,88,0.8))' }} />
-                    <div className="font-montserrat" style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '0.5px' }}>
-                      ⚡ Option 1 Pre-Scan: {indexingStatusStr}
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', background: 'rgba(5,4,7,0.88)', zIndex: 40, backdropFilter: 'blur(4px)' }}>
+                    <Zap size={32} color="#30d158" style={{ filter: 'drop-shadow(0 0 8px #30d158)' }} />
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '0.5px' }}>
+                      ⚡ KI-Analyse: {indexingStatusStr}
                     </div>
-                    <div style={{ width: '280px', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.2)' }}>
-                      <div style={{ width: `${indexingProgress}%`, height: '100%', background: 'linear-gradient(90deg, #30d158, #c084fc)', transition: 'width 0.15s ease' }}></div>
+                    <div style={{ width: '240px', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${indexingProgress}%`, background: 'linear-gradient(90deg, #30d158, #a881bd)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
                     </div>
-                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)' }}>Ruckelfreier 60 FPS RAM-Puffer wird erstellt...</span>
+                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.55)' }}>Alle Frames werden analysiert – dauert ca. 30 Sekunden</span>
                   </div>
                 )}
 
