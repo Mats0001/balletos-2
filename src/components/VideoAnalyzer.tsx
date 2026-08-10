@@ -689,7 +689,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     vid.addEventListener('timeupdate', onTimeUpdate);
   };
 
-  // 🦴 SKELETON JOINT CLICK – hit-test landmarks, show educational popover
+  // 🦴 SKELETON JOINT CLICK – hit-test landmarks + bone segments
   // Uses generic HTMLElement so it works on the container div (events bubble from AnnotationCanvas)
   const handleSkeletonClick = (e: React.MouseEvent<HTMLElement>) => {
     if (!isPlaying === false) return; // only when paused
@@ -710,7 +710,37 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       return;
     }
 
-    // Find nearest clickable landmark within 44px radius
+    // Helper: distance from point P to line segment A-B
+    const distToSegment = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
+      const dx = bx - ax; const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+      return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    };
+
+    // Bone segments: [fromLandmark, toLandmark, representativeLandmark (for popover)]
+    // representativeLandmark = the joint that is most pedagogically relevant for this bone
+    const BONE_SEGMENTS: Array<[number, number, number]> = [
+      [11, 12, 11],  // Schulterleiste → linke Schulter
+      [11, 13, 13],  // L Oberarm → L Ellbogen
+      [13, 15, 15],  // L Unterarm → L Handgelenk
+      [12, 14, 14],  // R Oberarm → R Ellbogen
+      [14, 16, 16],  // R Unterarm → R Handgelenk
+      [23, 24, 23],  // Beckenleiste → L Hüfte
+      [11, 23, 23],  // L Rumpf → L Hüfte
+      [12, 24, 24],  // R Rumpf → R Hüfte
+      [23, 25, 25],  // L Oberschenkel → L Knie
+      [25, 27, 25],  // L Unterschenkel → L Knie
+      [27, 29, 27],  // L Fuß → L Knöchel
+      [29, 31, 31],  // L Zehe → L Zehenspitze
+      [24, 26, 26],  // R Oberschenkel → R Knie
+      [26, 28, 26],  // R Unterschenkel → R Knie
+      [28, 30, 28],  // R Fuß → R Knöchel
+      [30, 32, 32],  // R Zehe → R Zehenspitze
+    ];
+
+    // 1️⃣ Joint point hit-test (44px radius)
     let nearestIdx = -1;
     let minDist = 44;
     lm.forEach((landmark, idx) => {
@@ -722,9 +752,30 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (dist < minDist) { minDist = dist; nearestIdx = idx; }
     });
 
+    // 2️⃣ Bone segment hit-test (20px tolerance) – only if no joint was closer
+    if (nearestIdx < 0) {
+      const SEG_TOLERANCE = 20;
+      let bestSegDist = SEG_TOLERANCE;
+      for (const [fromIdx, toIdx, repIdx] of BONE_SEGMENTS) {
+        const a = lm[fromIdx]; const b = lm[toIdx];
+        if (!a || !b) continue;
+        if ((a.visibility ?? 1) < 0.3 || (b.visibility ?? 1) < 0.3) continue;
+        const ax = a.x * bounds.width; const ay = a.y * bounds.height;
+        const bx = b.x * bounds.width; const by = b.y * bounds.height;
+        const d = distToSegment(clickX, clickY, ax, ay, bx, by);
+        if (d < bestSegDist && getJointKnowledge(repIdx)) {
+          bestSegDist = d;
+          nearestIdx = repIdx;
+        }
+      }
+    }
+
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
-      // Store click in overlay-relative coords (for SVG connector)
-      setJointPopover({ landmarkIndex: nearestIdx, pixelX: clickX, pixelY: clickY });
+      // Snap popover anchor to the representative joint pixel position
+      const repLm = lm[nearestIdx];
+      const snapX = repLm ? repLm.x * bounds.width : clickX;
+      const snapY = repLm ? repLm.y * bounds.height : clickY;
+      setJointPopover({ landmarkIndex: nearestIdx, pixelX: snapX, pixelY: snapY });
       // Pause video for better exploration
       if (videoRef.current && !videoRef.current.paused) {
         videoRef.current.pause();
