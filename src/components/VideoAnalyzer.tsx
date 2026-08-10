@@ -2177,16 +2177,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         {cue.provenance === 'nicole_rejected' && <span style={{ marginLeft: '4px', color: 'rgba(255,255,255,0.3)', fontSize: '8px' }}>✕</span>}
                       </span>
                     </div>
-                    {/* Rechts: Status-Badge + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
+                    {/* Rechts: Status-Dot + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-                      <span style={{
-                        fontSize: '9px', fontWeight: 800, padding: '2px 6px', borderRadius: '6px',
-                        background: cueBgColor(cue.status),
-                        color: cueColor(cue.status),
-                        border: `1px solid ${cueBorderColor(cue.status)}`
-                      }}>
-                        {cueLabel(cue.status)}
-                      </span>
+                      {/* Status-Dot: kompakter als Badge */}
+                      <span
+                        title={cueLabel(cue.status)}
+                        style={{
+                          display: 'inline-block',
+                          width: '9px', height: '9px',
+                          borderRadius: '50%',
+                          background: cueColor(cue.status),
+                          boxShadow: `0 0 5px ${cueColor(cue.status)}99`,
+                          flexShrink: 0,
+                        }}
+                      />
                       <button onClick={(e) => handleStartEdit(cue, e)} title="Bearbeiten"
                         style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}>
                         <Edit2 size={11} />
