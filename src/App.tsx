@@ -25,6 +25,12 @@ export const App: React.FC = () => {
   }, []);
   const isPlie = exerciseName.toLowerCase().includes('pli');
 
+  // Selected cue point – lifted so RightInspectorPanel can show KI detail
+  const [selectedCue, setSelectedCue] = useState<import('./services/vaganovaPreAnalyzer').VaganovaCuePoint | null>(null);
+  const handleSelectedCue = useCallback((cue: import('./services/vaganovaPreAnalyzer').VaganovaCuePoint | null) => {
+    setSelectedCue(cue);
+  }, []);
+
   // Check URL params for standalone TV mode window
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -95,7 +101,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'analyzer' && (
-          <VideoAnalyzer onVaganovaAnalysis={handleVaganovaAnalysis} />
+          <VideoAnalyzer onVaganovaAnalysis={handleVaganovaAnalysis} onSelectedCue={handleSelectedCue} />
         )}
 
         {activeTab === 'students' && (
@@ -117,6 +123,7 @@ export const App: React.FC = () => {
         exerciseName={exerciseName}
         vaganovaAnalysis={vaganovaAnalysis}
         isPlie={isPlie}
+        selectedCue={selectedCue}
       />
     </div>
   );

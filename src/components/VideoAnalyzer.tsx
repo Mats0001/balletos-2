@@ -23,9 +23,10 @@ import { BUILD_POLICY } from '../config/buildPolicy';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
+  onSelectedCue?: (cue: VaganovaCuePoint | null) => void;
 }
 
-export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis }) => {
+export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis, onSelectedCue }) => {
   // Video Controls State
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -621,6 +622,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       }
 
       processStaticPausedFrame();
+
+      // Lift selected cue to right panel for KI detail view
+      onSelectedCue?.(cue);
     }
   };
 

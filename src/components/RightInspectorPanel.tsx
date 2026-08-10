@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Sparkles, Check, AlertTriangle, MessageSquare, Send, Mic, MicOff, Cpu } from 'lucide-react';
+import { Sparkles, Check, AlertTriangle, MessageSquare, Send, Mic, MicOff, Cpu, BookOpen, ChevronRight } from 'lucide-react';
 import { AgeGroup } from '../types';
 import { VaganovaFullAnalysis } from '../services/vaganovaAngleCalculator';
 import { VaganovaLiveMetrics } from './VaganovaLiveMetrics';
+import { VaganovaCuePoint } from '../services/vaganovaPreAnalyzer';
 
 interface Props {
   selectedStudent: string;
@@ -11,6 +12,7 @@ interface Props {
   vaganovaAnalysis?: VaganovaFullAnalysis | null;
   isPlie?: boolean;
   onSaveClassNote?: (note: string) => void;
+  selectedCue?: VaganovaCuePoint | null;
 }
 
 export const RightInspectorPanel: React.FC<Props> = ({
@@ -19,7 +21,8 @@ export const RightInspectorPanel: React.FC<Props> = ({
   exerciseName,
   vaganovaAnalysis,
   isPlie,
-  onSaveClassNote
+  onSaveClassNote,
+  selectedCue,
 }) => {
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'NICOLE' | 'KI'; text: string }>>([
     {
@@ -112,13 +115,77 @@ export const RightInspectorPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* KI-METAPHER – compact */}
+      {/* 📌 AUSGEWÄHLTER MARKER – KI-Detail (erscheint wenn Cue-Point angeklickt) */}
+      {selectedCue && (
+        <div style={{
+          background: selectedCue.status === 'CORRECTION'
+            ? 'rgba(255,69,58,0.08)' : 'rgba(48,209,88,0.08)',
+          border: `1px solid ${selectedCue.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)' : 'rgba(48,209,88,0.3)'}`,
+          borderRadius: '12px', padding: '10px 12px',
+          flexShrink: 0,
+          display: 'flex', flexDirection: 'column', gap: '8px',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: '9px', fontWeight: 800, color: selectedCue.status === 'CORRECTION' ? '#ff453a' : '#30d158', textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              {selectedCue.status === 'CORRECTION' ? <AlertTriangle size={10} /> : <Check size={10} />}
+              {selectedCue.status === 'CORRECTION' ? 'Korrektur' : 'Stärke'} · {selectedCue.timecodeStr}
+            </div>
+            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
+              {selectedCue.dataSource === 'KI_AUTO' ? '🤖 KI' : '👩‍🏫 Nicole'}
+            </span>
+          </div>
+
+          {/* Pose name */}
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>
+            {selectedCue.poseName}
+          </div>
+
+          {/* Headline */}
+          <div style={{ fontSize: '10px', color: selectedCue.status === 'CORRECTION' ? '#ff6b61' : '#5ae088', fontWeight: 600 }}>
+            {selectedCue.headline}
+          </div>
+
+          {/* Bildhafte Metapher */}
+          <div style={{
+            background: 'rgba(168,129,189,0.1)', border: '1px solid rgba(168,129,189,0.2)',
+            borderRadius: '8px', padding: '8px 10px',
+          }}>
+            <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>💡 Bildhafte Erklärung</div>
+            <div style={{ fontSize: '11px', color: '#fff', fontStyle: 'italic', lineHeight: 1.45, fontWeight: 600 }}>
+              {selectedCue.cueMetaphor}
+            </div>
+          </div>
+
+          {/* KI-Note (nur bei KI_AUTO) */}
+          {selectedCue.kiNote && (
+            <div style={{
+              background: 'rgba(255,255,255,0.04)', borderRadius: '7px', padding: '7px 10px',
+            }}>
+              <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', marginBottom: '4px' }}>🤖 Messwert-Analyse</div>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.45 }}>
+                {selectedCue.kiNote}
+              </div>
+            </div>
+          )}
+
+          {/* Wie besser machen */}
+          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingTop: '2px' }}>
+            Klick auf anderen Marker um diesen zu wechseln
+          </div>
+        </div>
+      )}
+
+      {/* KI-METAPHER – compact (nur wenn kein selectedCue) */}
+      {!selectedCue && (
       <div style={{ background: 'rgba(168,129,189,0.10)', border: '1px solid rgba(168,129,189,0.3)', padding: '10px 12px', borderRadius: '12px', flexShrink: 0 }}>
         <div style={{ fontSize: '9px', fontWeight: 700, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>💡 Metapher für Nicole:</div>
         <div style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', fontStyle: 'italic', lineHeight: '1.35' }}>
           "Knie sind Schwanenflügel – weit nach außen zur Wand!"
         </div>
       </div>
+      )}
 
       {/* POSE AVATAR ENGINE – Akkordion */}
       <details
