@@ -638,19 +638,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   };
 
   // 🦴 SKELETON JOINT CLICK – hit-test landmarks, show educational popover
-  const handleSkeletonClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Only when annotation mode is OFF (no active drawing tool set to draw)
+  // Uses generic HTMLElement so it works on the container div (events bubble from AnnotationCanvas)
+  const handleSkeletonClick = (e: React.MouseEvent<HTMLElement>) => {
+    if (!isPlaying === false) return; // only when paused
     const lm = landmarksRef.current;
     const bounds = overlayBounds;
     if (!lm || !bounds) { setJointPopover(null); return; }
 
-    const rect = e.currentTarget.getBoundingClientRect();
+    // Get click position relative to the canvas rect (the overlay area)
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+    const rect = canvasEl.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    // Find nearest clickable landmark within 40px radius
+    // Only consider clicks that are within the overlay bounds
+    if (clickX < 0 || clickY < 0 || clickX > bounds.width || clickY > bounds.height) {
+      setJointPopover(null);
+      return;
+    }
+
+    // Find nearest clickable landmark within 44px radius
     let nearestIdx = -1;
-    let minDist = 40;
+    let minDist = 44;
     lm.forEach((landmark, idx) => {
       if (!CLICKABLE_JOINT_INDICES.has(idx)) return;
       if ((landmark.visibility ?? 1) < 0.3) return;
@@ -661,6 +671,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     });
 
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
+      // Store click in overlay-relative coords (for SVG connector)
       setJointPopover({ landmarkIndex: nearestIdx, pixelX: clickX, pixelY: clickY });
       // Pause video for better exploration
       if (videoRef.current && !videoRef.current.paused) {
@@ -1405,7 +1416,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transform: `scale(${zoomLevel}) translate(${panOffset.x}%, ${panOffset.y}%)`,
               transformOrigin: 'center center',
               transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-            }}>
+            }}
+              onClick={!isPlaying ? handleSkeletonClick : undefined}
+            >
 
                 <video
                   ref={videoRef}
@@ -1449,24 +1462,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   </div>
                 )}
 
-                {/* 🎨 CANVAS SKELETON OVERLAY – 60fps direct rendering */}
+                {/* 🎨 CANVAS SKELETON OVERLAY – 60fps direct rendering, pointerEvents always none */}
                 <canvas
                   ref={canvasRef}
-                  onClick={handleSkeletonClick}
                   style={{
                     position: 'absolute',
                     top: overlayBounds ? `${overlayBounds.top}px` : 0,
                     left: overlayBounds ? `${overlayBounds.left}px` : 0,
                     width: overlayBounds ? `${overlayBounds.width}px` : '100%',
                     height: overlayBounds ? `${overlayBounds.height}px` : '100%',
-                    // Allow clicks only when paused AND not in annotation-draw mode
-                    pointerEvents: !isPlaying ? 'auto' : 'none',
-                    cursor: !isPlaying && landmarksRef.current ? 'crosshair' : 'default',
+                    pointerEvents: 'none',
                     zIndex: 25
                   }}
                 />
 
-                {/* 🎨 ANNOTATION DRAWING CANVAS (active when paused) */}
+                {/* 🎨 ANNOTATION DRAWING CANVAS – above skeleton, receives drawing events */}
                 {overlayBounds && overlayBounds.width > 0 && overlayBounds.height > 0 && (
                   <AnnotationCanvas
                     ref={annotationCanvasRef}
@@ -1478,28 +1488,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     lineWidth={drawingLineWidth}
                   />
                 )}
-                {/* 🦴 JOINT KNOWLEDGE POPOVER */}
-                {jointPopover && overlayBounds && (() => {
-                  const knowledge = getJointKnowledge(jointPopover.landmarkIndex);
-                  if (!knowledge) return null;
-                  // Joint position in full container coordinate space
-                  const jX = (overlayBounds.left ?? 0) + jointPopover.pixelX;
-                  const jY = (overlayBounds.top ?? 0) + jointPopover.pixelY;
-                  // Full container height
-                  const cH = (overlayBounds.top ?? 0) + overlayBounds.height + (overlayBounds.top ?? 0);
-                  return (
-                    <SkeletonJointPopover
-                      knowledge={knowledge}
-                      jointX={jX}
-                      jointY={jY}
-                      videoLeft={overlayBounds.left ?? 0}
-                      containerHeight={cH}
-                      vaganovaAnalysis={vaganovaAnalysis}
-                      landmarkIndex={jointPopover.landmarkIndex}
-                      onClose={() => setJointPopover(null)}
-                    />
-                  );
-                })()}
+                {/* 🦴 Joint popover is rendered OUTSIDE this overflow:hidden div – see below */}
 
               {/* Status Badge */}
               {showSkeleton && !isEngineReady && !isPreIndexing && (
@@ -1511,7 +1500,30 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
 
 
-            </div>
+            </div>{/* end videoContainerRef */}
+
+            {/* 🦴 JOINT KNOWLEDGE POPOVER – position:fixed, outside all overflow:hidden containers */}
+            {jointPopover && overlayBounds && (() => {
+              const knowledge = getJointKnowledge(jointPopover.landmarkIndex);
+              if (!knowledge) return null;
+              // Compute viewport coords from the skeleton canvas bounding rect
+              const canvasRect = canvasRef.current?.getBoundingClientRect();
+              if (!canvasRect) return null;
+              const vpJointX = canvasRect.left + jointPopover.pixelX;
+              const vpJointY = canvasRect.top + jointPopover.pixelY;
+              return (
+                <SkeletonJointPopover
+                  knowledge={knowledge}
+                  jointX={vpJointX}
+                  jointY={vpJointY}
+                  videoLeft={canvasRect.left}
+                  containerHeight={window.innerHeight}
+                  vaganovaAnalysis={vaganovaAnalysis}
+                  landmarkIndex={jointPopover.landmarkIndex}
+                  onClose={() => setJointPopover(null)}
+                />
+              );
+            })()}
 
             {/* VIEWPORT 2: MASTER REFERENCE (SPLIT-SCREEN) */}
             {splitScreenMode && (

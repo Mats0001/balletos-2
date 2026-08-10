@@ -98,18 +98,16 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const W = 258;
+  const W = 220;
   const H_EST = liveMeasurements.length > 0 ? 440 : 390;
 
-  // ── POSITION: to the LEFT of the actual video render area ────────────────
-  // popoverLeft = videoLeft - W - 12 (fits in letterbox to left of video)
-  // If videoLeft is too small (<= W+12), fall back to slight overlap but
-  // clamp so the right edge doesn't go further than videoLeft - 4
-  const idealLeft = videoLeft - W - 12;
-  const popoverLeft = Math.max(0, idealLeft);
+  // ── POSITION: fixed, to the LEFT of the video (= left of canvasRect) ────
+  // videoLeft = canvasRect.left in viewport coords
+  const idealLeft = videoLeft - W - 28;
+  const popoverLeft = Math.max(4, idealLeft);
 
   let popoverTop = jointY - H_EST / 2;
-  popoverTop = Math.max(4, Math.min(containerHeight - H_EST - 4, popoverTop));
+  popoverTop = Math.max(8, Math.min(containerHeight - H_EST - 8, popoverTop));
 
   // ── SVG CONNECTOR ─────────────────────────────────────────────────────────
   const tailX = popoverLeft + W + 2;
@@ -128,8 +126,18 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 
   return (
     <>
-      {/* SVG connector – full-container overlay */}
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 999, overflow: 'visible' }}>
+      {/* SVG connector – position:fixed, full viewport */}
+      <svg
+        style={{
+          position: 'fixed',
+          inset: 0,
+          width: '100vw',
+          height: '100vh',
+          pointerEvents: 'none',
+          zIndex: 9998,
+          overflow: 'visible',
+        }}
+      >
         <defs>
           <marker id={`arrowhead-${landmarkIndex}`} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
             <path d="M 0 1 L 8 4 L 0 7 Z" fill={connectorColor} opacity="0.9" />
@@ -153,10 +161,10 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         <circle cx={headX} cy={headY} r="4.5" fill={connectorColor} opacity="0.95" />
       </svg>
 
-      {/* POPOVER CARD */}
+      {/* POPOVER CARD – position:fixed so it is never clipped by any overflow:hidden ancestor */}
       <div
         style={{
-          position: 'absolute',
+          position: 'fixed',
           left: `${popoverLeft}px`,
           top: `${popoverTop}px`,
           width: `${W}px`,
