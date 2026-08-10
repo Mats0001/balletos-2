@@ -204,14 +204,28 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
   };
 
-  // Check if video is already cached on video change
-  // Pre-scan is NOT auto-triggered - user clicks the button manually
+  // Auto-Scan: startet automatisch wenn Video geladen ist und kein Cache vorhanden
   useEffect(() => {
-    if (!videoRef.current) return;
-    if (vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
-      setIsPreIndexing(false);
-      setIsEngineReady(true);
+    const v = videoRef.current;
+    if (!v) return;
+
+    const startScanIfNeeded = () => {
+      if (vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
+        setIsPreIndexing(false);
+        setIsEngineReady(true);
+      } else {
+        // Automatisch starten – Nicole muss nichts tun
+        triggerPreIndexingScan();
+      }
+    };
+
+    if (v.readyState >= 1) {
+      startScanIfNeeded();
+    } else {
+      v.addEventListener('loadedmetadata', startScanIfNeeded, { once: true });
+      return () => v.removeEventListener('loadedmetadata', startScanIfNeeded);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevVideoUrl]);
 
   // 🚀 60 FPS CANVAS-BASED RENDER LOOP
@@ -860,32 +874,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             <Upload size={12} /> Upload
           </button>
 
-          {/* ⚡ Pre-Scan – Haupt-CTA */}
-          <button
-            onClick={triggerPreIndexingScan}
-            disabled={isPreIndexing}
-            style={{
-              background: isPreIndexing
-                ? 'rgba(48,209,88,0.15)'
-                : 'linear-gradient(135deg, #30d158 0%, #1d7a35 100%)',
-              color: '#ffffff',
-              border: 'none',
-              padding: '6px 16px',
-              borderRadius: '10px',
-              fontSize: '10px',
-              fontWeight: 800,
-              cursor: isPreIndexing ? 'default' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: isPreIndexing ? 'none' : '0 2px 14px rgba(48,209,88,0.35)',
-              letterSpacing: '0.3px',
-              transition: 'all 0.18s ease'
-            }}
-          >
-            <Zap size={12} />
-            {isPreIndexing ? 'Analysiere…' : 'Smooth Pre-Scan'}
-          </button>
+          {/* ⚡ Scan-Status Indicator (ersetzt den manuellen Button) */}
+          {isPreIndexing && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '6px',
+              background: 'rgba(48,209,88,0.12)',
+              border: '1px solid rgba(48,209,88,0.3)',
+              borderRadius: '10px', padding: '5px 12px',
+              fontSize: '10px', fontWeight: 700, color: '#30d158'
+            }}>
+              <span style={{
+                width: '7px', height: '7px', borderRadius: '50%',
+                background: '#30d158',
+                animation: 'pulse 1s ease-in-out infinite',
+                flexShrink: 0
+              }} />
+              Skelett-Analyse {indexingProgress}%
+            </div>
+          )}
         </div>
 
         {/* Mitte: Overlay-Toggles – modernes Chip-Design */}
