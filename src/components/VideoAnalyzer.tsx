@@ -2081,18 +2081,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 >
                   {/* ─── ACCORDION HEADER (immer sichtbar) ─── */}
                   <div
-                    onClick={() => { toggleCueExpanded(cue.id); handleSeekToCuePoint(cue); }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '9px 12px',
-                      cursor: 'pointer',
-                      userSelect: 'none',
                     }}
                   >
-                    {/* Links: Timecode + Name */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                    {/* Links: Chevron + Timecode + Name – klickbar fürs Akkordion */}
+                    <div
+                      onClick={() => { toggleCueExpanded(cue.id); handleSeekToCuePoint(cue); }}
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1, cursor: 'pointer', userSelect: 'none' }}
+                    >
                       {/* Chevron */}
                       <span style={{
                         fontSize: '9px', color: '#c084fc', opacity: 0.7,
@@ -2110,7 +2110,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         {cue.provenance === 'nicole_rejected' && <span style={{ marginLeft: '4px', color: 'rgba(255,255,255,0.3)', fontSize: '8px' }}>✕</span>}
                       </span>
                     </div>
-                    {/* Rechts: Status-Badge + Edit/Delete */}
+                    {/* Rechts: Status-Badge + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
                       <span style={{
                         fontSize: '9px', fontWeight: 800, padding: '2px 6px', borderRadius: '6px',
