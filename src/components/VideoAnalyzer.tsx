@@ -83,6 +83,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [videoDuration, setVideoDuration] = useState<number>(5.0);
   const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
+  const slowMoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
@@ -648,6 +649,44 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // Lift selected cue to right panel for KI detail view
       onSelectedCue?.(cue);
     }
+  };
+
+  // 🎬 Slow-Mo Clip: spielt 3 Sekunden (real) um den Cue-Point bei 0.25x ab, dann Stopp
+  const handleSlowMoClip = (cue: VaganovaCuePoint) => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    const startAt = Math.max(0, cue.timeSeconds - 0.5); // 0.5s vor dem Cue-Point
+    const endAt = cue.timeSeconds + 2.5;                // 3s Video-Fenster insgesamt
+
+    if (slowMoTimerRef.current) clearTimeout(slowMoTimerRef.current);
+
+    vid.currentTime = startAt;
+    vid.playbackRate = 0.25;
+    setPlaybackSpeed(0.25);
+    vid.play();
+    setIsPlaying(true);
+
+    // Auto-Stopp nach 3 Echtzeit-Sekunden (= 12s Videoinhalt)
+    slowMoTimerRef.current = setTimeout(() => {
+      vid.pause();
+      setIsPlaying(false);
+      vid.playbackRate = 1;
+      setPlaybackSpeed(1);
+    }, 3000);
+
+    // Oder sofort stoppen wenn Video-Zeitmarke erreicht
+    const onTimeUpdate = () => {
+      if (vid.currentTime >= endAt) {
+        vid.pause();
+        setIsPlaying(false);
+        vid.playbackRate = 1;
+        setPlaybackSpeed(1);
+        if (slowMoTimerRef.current) clearTimeout(slowMoTimerRef.current);
+        vid.removeEventListener('timeupdate', onTimeUpdate);
+      }
+    };
+    vid.addEventListener('timeupdate', onTimeUpdate);
   };
 
   // 🦴 SKELETON JOINT CLICK – hit-test landmarks, show educational popover
@@ -2318,7 +2357,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   )}
 
                     {/* Frame anspringen */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '4px' }}>
+                    <div
+                      onClick={(e) => { e.stopPropagation(); handleSlowMoClip(cue); }}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '4px', cursor: 'pointer', userSelect: 'none' }}
+                    >
                       <span>Frame (Slow-Mo 0.25x) anspringen</span>
                       <ChevronRight size={10} />
                     </div>
