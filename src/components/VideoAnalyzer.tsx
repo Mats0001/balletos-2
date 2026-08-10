@@ -1929,19 +1929,22 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
             <button
               onClick={handleAddCuePointAtCurrentFrame}
+              disabled={isPreIndexing}
               style={{
-                background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
-                color: '#ffffff',
+                background: isPreIndexing
+                  ? 'rgba(168,129,189,0.15)'
+                  : 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+                color: isPreIndexing ? 'rgba(255,255,255,0.3)' : '#ffffff',
                 border: 'none',
                 padding: '4px 8px',
                 borderRadius: '6px',
                 fontSize: '10px',
                 fontWeight: 800,
-                cursor: 'pointer',
+                cursor: isPreIndexing ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
-                boxShadow: '0 0 10px rgba(168,129,189,0.4)'
+                boxShadow: isPreIndexing ? 'none' : '0 0 10px rgba(168,129,189,0.4)'
               }}
             >
               <Plus size={12} /> Marker
@@ -2013,7 +2016,41 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
           {/* Cue Points List */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
-            {cuePoints.map((cue) => {
+
+            {/* Loading-Placeholder während KI-Analyse */}
+            {isPreIndexing ? (
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                gap: '12px', padding: '32px 16px', flex: 1
+              }}>
+                {/* Pulsing Zap */}
+                <div style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>
+                  <Zap size={28} color="#a881bd" style={{ filter: 'drop-shadow(0 0 6px #a881bd55)' }} />
+                </div>
+                <div style={{ fontSize: '11px', fontWeight: 700, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 1.5 }}>
+                  KI analysiert Video…
+                </div>
+                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', textAlign: 'center', lineHeight: 1.6 }}>
+                  Marker werden nach der Analyse<br />automatisch angezeigt.
+                </div>
+                {/* Shimmer Skeleton-Lines */}
+                {[80, 65, 72].map((w, i) => (
+                  <div key={i} style={{
+                    height: '36px', borderRadius: '8px', width: `${w}%`,
+                    background: 'linear-gradient(90deg, rgba(168,129,189,0.06) 0%, rgba(168,129,189,0.12) 50%, rgba(168,129,189,0.06) 100%)',
+                    backgroundSize: '200% 100%',
+                    animation: `shimmer 1.8s ease-in-out ${i * 0.2}s infinite`,
+                    border: '1px solid rgba(168,129,189,0.1)'
+                  }} />
+                ))}
+                <style>{`
+                  @keyframes shimmer {
+                    0%   { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                  }
+                `}</style>
+              </div>
+            ) : cuePoints.map((cue) => {
               const isSelected = selectedFrameTime === cue.timecodeStr;
               const isEditing = editingCueId === cue.id;
 
@@ -2284,6 +2321,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 </div>
               );
             })}
+            {!isPreIndexing && cuePoints.length === 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '24px 16px', color: 'rgba(255,255,255,0.3)', fontSize: '10px', textAlign: 'center' }}>
+                <ListVideo size={20} color="rgba(192,132,252,0.3)" />
+                <span>Noch keine Marker.<br />Drücke <strong style={{color:'#c084fc'}}>+ Marker</strong> um einen anzulegen.</span>
+              </div>
+            )}
+            {/* end isPreIndexing ternary – map above closes with }) */}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
