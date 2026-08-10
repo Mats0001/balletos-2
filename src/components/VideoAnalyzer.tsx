@@ -20,6 +20,8 @@ import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
 import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
+import { SkeletonJointPopover } from './SkeletonJointPopover';
+import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeletonJointKnowledge';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -106,6 +108,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Lightbox state
   const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
   const [lightboxIndex, setLightboxIndex] = useState<number>(0);
+
+  // 🦴 Joint popover state
+  const [jointPopover, setJointPopover] = useState<{
+    landmarkIndex: number;
+    pixelX: number;
+    pixelY: number;
+  } | null>(null);
 
   // Persist annotations to localStorage whenever they change
   useEffect(() => {
@@ -625,6 +634,41 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
       // Lift selected cue to right panel for KI detail view
       onSelectedCue?.(cue);
+    }
+  };
+
+  // 🦴 SKELETON JOINT CLICK – hit-test landmarks, show educational popover
+  const handleSkeletonClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only when annotation mode is OFF (no active drawing tool set to draw)
+    const lm = landmarksRef.current;
+    const bounds = overlayBounds;
+    if (!lm || !bounds) { setJointPopover(null); return; }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+
+    // Find nearest clickable landmark within 40px radius
+    let nearestIdx = -1;
+    let minDist = 40;
+    lm.forEach((landmark, idx) => {
+      if (!CLICKABLE_JOINT_INDICES.has(idx)) return;
+      if ((landmark.visibility ?? 1) < 0.3) return;
+      const px = landmark.x * bounds.width;
+      const py = landmark.y * bounds.height;
+      const dist = Math.hypot(px - clickX, py - clickY);
+      if (dist < minDist) { minDist = dist; nearestIdx = idx; }
+    });
+
+    if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
+      setJointPopover({ landmarkIndex: nearestIdx, pixelX: clickX, pixelY: clickY });
+      // Pause video for better exploration
+      if (videoRef.current && !videoRef.current.paused) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+    } else {
+      setJointPopover(null);
     }
   };
 
@@ -1408,13 +1452,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* 🎨 CANVAS SKELETON OVERLAY – 60fps direct rendering */}
                 <canvas
                   ref={canvasRef}
+                  onClick={handleSkeletonClick}
                   style={{
                     position: 'absolute',
                     top: overlayBounds ? `${overlayBounds.top}px` : 0,
                     left: overlayBounds ? `${overlayBounds.left}px` : 0,
                     width: overlayBounds ? `${overlayBounds.width}px` : '100%',
                     height: overlayBounds ? `${overlayBounds.height}px` : '100%',
-                    pointerEvents: 'none',
+                    // Allow clicks only when paused AND not in annotation-draw mode
+                    pointerEvents: !isPlaying ? 'auto' : 'none',
+                    cursor: !isPlaying && landmarksRef.current ? 'crosshair' : 'default',
                     zIndex: 25
                   }}
                 />
@@ -1431,6 +1478,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     lineWidth={drawingLineWidth}
                   />
                 )}
+                {/* 🦴 JOINT KNOWLEDGE POPOVER */}
+                {jointPopover && overlayBounds && (() => {
+                  const knowledge = getJointKnowledge(jointPopover.landmarkIndex);
+                  if (!knowledge) return null;
+                  return (
+                    <SkeletonJointPopover
+                      knowledge={knowledge}
+                      pixelX={jointPopover.pixelX + (overlayBounds?.left ?? 0)}
+                      pixelY={jointPopover.pixelY + (overlayBounds?.top ?? 0)}
+                      containerWidth={overlayBounds.width + (overlayBounds?.left ?? 0) * 2}
+                      containerHeight={overlayBounds.height + (overlayBounds?.top ?? 0) * 2}
+                      onClose={() => setJointPopover(null)}
+                    />
+                  );
+                })()}
 
               {/* Status Badge */}
               {showSkeleton && !isEngineReady && !isPreIndexing && (
