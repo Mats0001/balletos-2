@@ -168,14 +168,19 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 
       {/* POPOVER CARD – zwischen Video und rechtem Panel, überdeckt NIE die Live-Messwerte */}
       <div
+        className="skeleton-popover-scroll"
         style={{
           position: 'fixed',
           right: `${popoverRight}px`,
           top: `${popoverTop}px`,
           width: `${W}px`,
-          maxHeight: 'calc(100vh - 24px)',
+          // maxHeight: verbleibender Platz ab popoverTop bis zum unteren Rand (16px Abstand)
+          maxHeight: `calc(100vh - ${popoverTop + 16}px)`,
           overflowX: 'hidden',
           overflowY: 'auto',
+          // Scrollbar sichtbar + passend zum Dark Theme
+          scrollbarWidth: 'thin',
+          scrollbarColor: `${color}60 rgba(255,255,255,0.05)`,
           zIndex: 9999,
           background: 'rgba(8,4,18,0.97)',
           backdropFilter: 'blur(24px)',
@@ -255,7 +260,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         )}
 
         {/* BODY – knowledge sections */}
-        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+        <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
 
           <Section icon={<BookOpen size={9} />} label="Was ist hier zu sehen?" color={color}>
             {knowledge.anatomyNote}
@@ -302,6 +307,11 @@ export const SkeletonJointPopover: React.FC<Props> = ({
             from { opacity: 0; transform: translateX(20px) scale(0.96); }
             to   { opacity: 1; transform: translateX(0)   scale(1); }
           }
+          /* Webkit Scrollbar – passend zum Dark Theme */
+          .skeleton-popover-scroll::-webkit-scrollbar { width: 4px; }
+          .skeleton-popover-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 2px; }
+          .skeleton-popover-scroll::-webkit-scrollbar-thumb { background: ${color}55; border-radius: 2px; }
+          .skeleton-popover-scroll::-webkit-scrollbar-thumb:hover { background: ${color}99; }
         `}</style>
       </div>
     </>
