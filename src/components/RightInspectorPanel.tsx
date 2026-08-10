@@ -177,15 +177,7 @@ export const RightInspectorPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* KI-METAPHER – compact (nur wenn kein selectedCue) */}
-      {!selectedCue && (
-      <div style={{ background: 'rgba(168,129,189,0.10)', border: '1px solid rgba(168,129,189,0.3)', padding: '10px 12px', borderRadius: '12px', flexShrink: 0 }}>
-        <div style={{ fontSize: '9px', fontWeight: 700, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>💡 Metapher für Nicole:</div>
-        <div style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', fontStyle: 'italic', lineHeight: '1.35' }}>
-          "Knie sind Schwanenflügel – weit nach außen zur Wand!"
-        </div>
-      </div>
-      )}
+      {/* KI-METAPHER: TODO – dynamisch aus Analyse befüllen, nicht hardcoded */}
 
       {/* POSE AVATAR ENGINE – TODO: wieder einkommentieren wenn bereit
       <details
