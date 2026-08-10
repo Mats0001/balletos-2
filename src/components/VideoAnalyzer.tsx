@@ -1287,12 +1287,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     max={videoDuration || 5}
                     step={0.001}
                     value={currentPlayTime}
-                    onMouseDown={() => setIsScrubbing(true)}
+                    onMouseDown={() => {
+                      setIsScrubbing(true);
+                      // Sofort pausieren beim Anfassen
+                      if (videoRef.current) videoRef.current.pause();
+                      if (refVideoRef.current) refVideoRef.current.pause();
+                      setIsPlaying(false);
+                    }}
                     onMouseUp={() => {
                       setIsScrubbing(false);
+                      // Bleibt pausiert – Play-Button startet neu
                       processStaticPausedFrame();
                     }}
-                    onTouchStart={() => setIsScrubbing(true)}
+                    onTouchStart={() => {
+                      setIsScrubbing(true);
+                      if (videoRef.current) videoRef.current.pause();
+                      if (refVideoRef.current) refVideoRef.current.pause();
+                      setIsPlaying(false);
+                    }}
                     onTouchEnd={() => {
                       setIsScrubbing(false);
                       processStaticPausedFrame();
@@ -1311,6 +1323,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       margin: 0, padding: 0
                     }}
                   />
+
                 </div>
               </div>
 
