@@ -126,14 +126,6 @@ export const Navbar: React.FC<Props> = ({
               <option key={s} value={s.split(' ')[0]} style={{ background: '#14121a' }}>{s}</option>
             ))}
           </select>
-
-          <div style={{ fontSize: '10px', fontWeight: 700, color: '#c8a2c8', textTransform: 'uppercase', letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-            <Sliders size={12} color="#c8a2c8" /> Methode
-          </div>
-          <div style={{ fontSize: '10px', color: '#f3effa', fontWeight: 600, background: 'rgba(168, 129, 189, 0.15)', padding: '6px 10px', borderRadius: '10px', border: '1px solid rgba(168, 129, 189, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Feather size={12} color="#c084fc" />
-            <span>Vaganova Method v3.4</span>
-          </div>
         </div>
       </div>
 
