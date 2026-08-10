@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap } from 'lucide-react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown } from 'lucide-react';
+import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
 import { JetztWichtigInspectorData, FeedbackObject } from '../types';
 import { videoStore, StoredVideoItem } from '../services/videoStore';
@@ -84,6 +85,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // VAGANOVA CURRICULUM MODAL STATE
   const [isCurriculumModalOpen, setIsCurriculumModalOpen] = useState<boolean>(false);
 
+  // ── ANNOTATION TOOL STATE ──────────────────────────────────────────────────
+  interface AnnotationEntry {
+    id: string;
+    timeSeconds: number;
+    timecodeStr: string;
+    dataUrl: string;       // Full PNG Base64
+    thumbnailUrl: string;  // Scaled down thumbnail
+  }
+  const [annotationEntries, setAnnotationEntries] = useState<AnnotationEntry[]>([]);
+  const [drawingTool, setDrawingTool] = useState<DrawingTool>('pen');
+  const [drawingColor, setDrawingColor] = useState<string>('#ff453a');
+  const [drawingLineWidth, setDrawingLineWidth] = useState<number>(3);
+  const annotationCanvasRef = useRef<AnnotationCanvasHandle>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const refVideoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,6 +107,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const videoPanelRef = useRef<HTMLDivElement>(null); // Outer panel: Video + Canvas + Scrubber
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const annotationMergeCanvasRef = useRef<HTMLCanvasElement>(null); // Off-screen merge canvas
 
   // ── FRAME SYNC FOUNDATION (2026-08-10) ───────────────────────────────────
   // Each pose result is tagged with the exact video timestamp it came from.
@@ -703,6 +719,95 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
   };
 
+  // \u2500\u2500 ANNOTATION: PNG-Export (merge video + skeleton + annotation) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const handleSaveAnnotation = () => {
+    const video = videoRef.current;
+    const skeletonCanvas = canvasRef.current;
+    const annotDataUrl = annotationCanvasRef.current?.getDataUrl();
+    if (!video || !overlayBounds) return;
+
+    const W = overlayBounds.width;
+    const H = overlayBounds.height;
+
+    // 1. Off-screen merge canvas
+    const merge = document.createElement('canvas');
+    merge.width = W;
+    merge.height = H;
+    const ctx = merge.getContext('2d');
+    if (!ctx) return;
+
+    // 2. Draw video frame (cropped to overlay bounds)
+    try {
+      const vW = video.videoWidth;
+      const vH = video.videoHeight;
+      // letterbox offset in video coords
+      const scaleX = W / vW;
+      const scaleY = H / vH;
+      const scale = Math.min(scaleX, scaleY);
+      const srcW = W / scale;
+      const srcH = H / scale;
+      const srcX = (vW - srcW) / 2;
+      const srcY = (vH - srcH) / 2;
+      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, W, H);
+    } catch {
+      ctx.fillStyle = '#050407';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 3. Skeleton canvas overlay
+    if (skeletonCanvas) {
+      ctx.drawImage(skeletonCanvas, 0, 0, W, H);
+    }
+
+    // 4. Annotation overlay
+    if (annotDataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, W, H);
+        finalize(merge, ctx);
+      };
+      img.src = annotDataUrl;
+    } else {
+      finalize(merge, ctx);
+    }
+
+    function finalize(merge: HTMLCanvasElement, _ctx: CanvasRenderingContext2D) {
+      const dataUrl = merge.toDataURL('image/png');
+
+      // Thumbnail (30% scale)
+      const thumbW = Math.round(W * 0.3);
+      const thumbH = Math.round(H * 0.3);
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = thumbW;
+      thumbCanvas.height = thumbH;
+      const tctx = thumbCanvas.getContext('2d');
+      tctx?.drawImage(merge, 0, 0, thumbW, thumbH);
+      const thumbnailUrl = thumbCanvas.toDataURL('image/png');
+
+      const timeSec = video!.currentTime;
+      const m = Math.floor(timeSec / 60);
+      const s = (timeSec % 60).toFixed(3).padStart(6, '0');
+      const timecodeStr = `${String(m).padStart(2, '0')}:${s}`;
+
+      const entry = {
+        id: `ann-${Date.now()}`,
+        timeSeconds: timeSec,
+        timecodeStr,
+        dataUrl,
+        thumbnailUrl,
+      };
+      setAnnotationEntries(prev => [...prev, entry]);
+      annotationCanvasRef.current?.clear();
+
+      // Auto-download
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `balletos_annotation_${timecodeStr.replace(':', '-')}.png`;
+      a.click();
+    }
+  };
+
+
   // Sync isFullscreen state mit Browser-Event
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -1136,6 +1241,69 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         {/* LEFT PANEL: UNCLUTTERED MAIN VIDEO VIEWPORT */}
         <div ref={videoPanelRef} className="monolith-card" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0, background: isFullscreen ? '#000' : undefined }}>
           
+          {/* ── ANNOTATION ROW: Thumbnails | Video | Tool Strip ── */}
+          <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
+
+            {/* LEFT: Annotation Thumbnail Strip */}
+            <div style={{
+              width: annotationEntries.length > 0 ? '72px' : '0px',
+              transition: 'width 0.3s ease',
+              overflow: 'hidden',
+              flexShrink: 0,
+              background: 'rgba(0,0,0,0.6)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              padding: annotationEntries.length > 0 ? '8px 5px' : '0',
+              overflowY: 'auto',
+            }}>
+              {annotationEntries.map(entry => (
+                <div
+                  key={entry.id}
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = entry.timeSeconds;
+                      videoRef.current.pause();
+                    }
+                  }}
+                  title={`Annotation @ ${entry.timecodeStr}`}
+                  style={{
+                    cursor: 'pointer',
+                    borderRadius: '5px',
+                    overflow: 'hidden',
+                    border: '1px solid rgba(192,132,252,0.4)',
+                    flexShrink: 0,
+                    position: 'relative',
+                  }}
+                >
+                  <img src={entry.thumbnailUrl} alt={entry.timecodeStr} style={{ display: 'block', width: '100%', height: 'auto' }} />
+                  <div style={{
+                    position: 'absolute', bottom: 0, left: 0, right: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    fontSize: '7px', fontWeight: 800, color: '#c084fc',
+                    textAlign: 'center', padding: '2px',
+                    fontFamily: 'monospace',
+                  }}>
+                    {entry.timecodeStr}
+                  </div>
+                  {/* Download link */}
+                  <a
+                    href={entry.dataUrl}
+                    download={`annotation_${entry.timecodeStr.replace(':', '-')}.png`}
+                    onClick={e => e.stopPropagation()}
+                    style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', borderRadius: '3px', padding: '1px 3px', fontSize: '8px', color: '#fff', textDecoration: 'none' }}
+                    title="Download PNG"
+                  >↓</a>
+                </div>
+              ))}
+              {annotationEntries.length > 0 && (
+                <div style={{ fontSize: '7px', color: 'rgba(255,255,255,0.3)', textAlign: 'center', paddingTop: '4px' }}>
+                  {annotationEntries.length} PNG{annotationEntries.length > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+
+            {/* CENTER: Video Grid */}
           <div style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
             
             {/* VIEWPORT 1: HD BALLET VIDEO STREAM (NATIVE RELATIVE OVERLAY WRAP) */}
@@ -1206,6 +1374,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   }}
                 />
 
+                {/* 🎨 ANNOTATION DRAWING CANVAS (active when paused) */}
+                {overlayBounds && (
+                  <AnnotationCanvas
+                    ref={annotationCanvasRef}
+                    width={overlayBounds.width}
+                    height={overlayBounds.height}
+                    isActive={!isPlaying}
+                    tool={drawingTool}
+                    color={drawingColor}
+                    lineWidth={drawingLineWidth}
+                  />
+                )}
 
               {/* Status Badge */}
               {showSkeleton && !isEngineReady && !isPreIndexing && (
@@ -1240,6 +1420,113 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             )}
 
           </div>
+
+            {/* RIGHT: Annotation Tool Strip (visible when paused) */}
+            <div style={{
+              width: !isPlaying ? '52px' : '0px',
+              transition: 'width 0.3s ease',
+              overflow: 'hidden',
+              flexShrink: 0,
+              background: 'rgba(10,8,14,0.9)',
+              borderLeft: !isPlaying ? '1px solid rgba(192,132,252,0.2)' : 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '4px',
+              padding: !isPlaying ? '10px 6px' : '0',
+            }}>
+              {/* Pause indicator */}
+              <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'center' }}>
+                ✏️
+              </div>
+
+              {/* Tool buttons */}
+              {([
+                { tool: 'pen' as DrawingTool, icon: <Pen size={14} />, label: 'Stift' },
+                { tool: 'arrow' as DrawingTool, icon: <ArrowRight size={14} />, label: 'Pfeil' },
+                { tool: 'text' as DrawingTool, icon: <Type size={14} />, label: 'Text' },
+                { tool: 'eraser' as DrawingTool, icon: <Eraser size={14} />, label: 'Radierer' },
+              ] as const).map(({ tool: t, icon, label }) => (
+                <button
+                  key={t}
+                  onClick={() => setDrawingTool(t)}
+                  title={label}
+                  style={{
+                    width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                    background: drawingTool === t ? 'rgba(192,132,252,0.3)' : 'rgba(255,255,255,0.06)',
+                    color: drawingTool === t ? '#c084fc' : 'rgba(255,255,255,0.5)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: drawingTool === t ? '0 0 0 1px rgba(192,132,252,0.5)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >{icon}</button>
+              ))}
+
+              <div style={{ width: '30px', height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+
+              {/* Color swatches */}
+              {['#ff453a', '#ff9f0a', '#ffd60a', '#30d158', '#64d2ff', '#c084fc', '#ffffff'].map(c => (
+                <button
+                  key={c}
+                  onClick={() => setDrawingColor(c)}
+                  title={c}
+                  style={{
+                    width: '22px', height: '22px', borderRadius: '50%', border: 'none', cursor: 'pointer',
+                    background: c,
+                    outline: drawingColor === c ? `2px solid #fff` : '2px solid transparent',
+                    outlineOffset: '2px',
+                    transition: 'outline 0.15s ease',
+                    flexShrink: 0,
+                  }}
+                />
+              ))}
+
+              <div style={{ width: '30px', height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+
+              {/* Line width */}
+              {[2, 4, 7].map(w => (
+                <button
+                  key={w}
+                  onClick={() => setDrawingLineWidth(w)}
+                  title={`Stärke ${w}`}
+                  style={{
+                    width: '36px', height: '20px', borderRadius: '6px', border: 'none', cursor: 'pointer',
+                    background: drawingLineWidth === w ? 'rgba(192,132,252,0.3)' : 'rgba(255,255,255,0.06)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div style={{ width: '18px', height: `${w}px`, background: drawingColor, borderRadius: `${w}px` }} />
+                </button>
+              ))}
+
+              <div style={{ width: '30px', height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+
+              {/* Save PNG */}
+              <button
+                onClick={handleSaveAnnotation}
+                title="Als PNG speichern"
+                style={{
+                  width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+                  color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 0 8px rgba(168,129,189,0.5)',
+                }}
+              ><ImageDown size={14} /></button>
+
+              {/* Clear */}
+              <button
+                onClick={() => annotationCanvasRef.current?.clear()}
+                title="Zeichnung löschen"
+                style={{
+                  width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  background: 'rgba(255,69,58,0.15)',
+                  color: '#ff453a', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              ><X size={14} /></button>
+            </div>
+
+          </div>{/* end ANNOTATION ROW flex */}
 
           {/* JETZT WICHTIG – direkt unter Video, keine separate Zeile nötig */}
           <JetztWichtigInspector data={inspectorData} />
