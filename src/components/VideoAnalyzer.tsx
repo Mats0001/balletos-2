@@ -790,8 +790,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         studentName="Emma Berger (6 J.)"
       />
 
-      {/* 1️⃣ HIGH-EXECUTIVE INSPECTOR BAR */}
-      <JetztWichtigInspector data={inspectorData} />
+      {/* JETZT WICHTIG wurde nach unten verschoben – direkt unter das Video */}
 
       {/* Hidden File Input for Native Video Upload */}
       <input
@@ -894,7 +893,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* CoG Lot */}
           <button
             onClick={() => setShowCoG(!showCoG)}
-            title="Schwerpunkt-Lot ein/aus"
+            title="CoG – Schwerpunkt-Lot anzeigen
+↑ zeigt ob der Körperschwerpunkt
+  über der Standfläche liegt"
             style={{
               background: showCoG ? 'rgba(48,209,88,0.18)' : 'transparent',
               color: showCoG ? '#30d158' : 'rgba(255,255,255,0.45)',
@@ -908,13 +909,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transition: 'all 0.15s ease'
             }}
           >
-            <Disc size={11} /> CoG
+            <Disc size={12} />
           </button>
 
           {/* Trajektorien */}
           <button
             onClick={() => setShowMotionTrails(!showMotionTrails)}
-            title="Bewegungstrajektorien ein/aus"
+            title="Trajektorien – Bewegungspfade
+↑ zeigt Gelenk-Bewegungsspuren
+  der letzten Frames"
             style={{
               background: showMotionTrails ? 'rgba(192,132,252,0.18)' : 'transparent',
               color: showMotionTrails ? '#c084fc' : 'rgba(255,255,255,0.45)',
@@ -928,13 +931,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transition: 'all 0.15s ease'
             }}
           >
-            <PulseIcon size={11} /> Trajekt.
+            <PulseIcon size={12} />
           </button>
 
           {/* AR-Winkel */}
           <button
             onClick={() => setShowAngleArcs(!showAngleArcs)}
-            title="Winkelbögen ein/aus"
+            title="Winkel – Gelenk-Winkelbögen
+↑ visuelle Bogen-Darstellung
+  der gemessenen Winkel"
             style={{
               background: showAngleArcs ? 'rgba(255,214,10,0.15)' : 'transparent',
               color: showAngleArcs ? '#ffd60a' : 'rgba(255,255,255,0.45)',
@@ -948,7 +953,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transition: 'all 0.15s ease'
             }}
           >
-            <Compass size={11} /> Winkel
+            <Compass size={12} />
           </button>
         </div>
 
@@ -1172,13 +1177,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 </div>
               )}
 
-              {/* Minimal Clean Viewport Overlay Label */}
-              <div style={{ position: 'absolute', bottom: '16px', left: '16px', zIndex: 30, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: COLOR_GOOD }}></span>
-                <span className="font-montserrat" style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff' }}>
-                  Schülerin: Emma Berger · {currentVideoObj.title}
-                </span>
-              </div>
+
 
             </div>
 
@@ -1204,8 +1203,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
           </div>
 
+          {/* JETZT WICHTIG – direkt unter Video, keine separate Zeile nötig */}
+          <JetztWichtigInspector data={inspectorData} />
+
           {/* BOTTOM TIMELINE & CONTROLS DOCK */}
-          <div style={{ padding: '12px 18px', background: 'rgba(10, 8, 14, 0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ padding: '10px 18px', background: 'rgba(10, 8, 14, 0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               <button
