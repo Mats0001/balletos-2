@@ -8,7 +8,7 @@ import { vaganovaPoseEngine } from '../services/vaganovaPoseEngine';
 import { vaganovaEvidenceEngine } from '../services/vaganovaEvidenceEngine';
 import { vaganovaMotionClassifier, MotionClassificationResult } from '../services/vaganovaMotionClassifier';
 import { vaganova3DKinematics, ReconstructedSkeleton } from '../services/vaganova3DKinematics';
-import { vaganovaPreAnalyzer, VaganovaCuePoint } from '../services/vaganovaPreAnalyzer';
+import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport } from '../services/vaganovaPreAnalyzer';
 import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
 import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
@@ -60,6 +60,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
   const [detectedWorldLandmarks, setDetectedWorldLandmarks] = useState<PoseLandmark[] | null>(null);
   const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
+  const [analysisReport, setAnalysisReport] = useState<AutoAnalysisReport | null>(null);
 
   // AI & TEACHER EDITABLE CUE-POINTS STATE
   const [cuePoints, setCuePoints] = useState<VaganovaCuePoint[]>(
@@ -204,6 +205,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     if (videoRef.current) {
       videoRef.current.play().catch(() => {});
     }
+
+    // Auto-Analyse: KI-Cue-Points aus echten Frame-Daten generieren
+    const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
+    if (autoCuePoints.length > 0) {
+      // Bestehende Cue-Points behalten + KI-Points ergänzen (keine Duplikate)
+      setCuePoints(prev => {
+        const existingIds = new Set(prev.map(p => p.id));
+        const newPoints = autoCuePoints.filter(p => !existingIds.has(p.id));
+        return [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
+      });
+    }
+    setAnalysisReport(report);
   };
 
   // Auto-Scan: startet automatisch wenn Video geladen ist und kein Cache vorhanden
@@ -1451,6 +1464,69 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             </button>
           </div>
 
+          {/* KI-ANALYSE-REPORT (erscheint nach Pre-Scan automatisch) */}
+          {analysisReport && (
+            <div style={{
+              background: 'rgba(168,129,189,0.07)',
+              border: '1px solid rgba(168,129,189,0.25)',
+              borderRadius: '10px',
+              padding: '10px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              {/* Report-Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '10px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px' }}>
+                  🤖 KI-ANALYSE-REPORT
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {analysisReport.strengths.length > 0 && (
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#30d158', background: 'rgba(48,209,88,0.12)', padding: '2px 7px', borderRadius: '6px' }}>
+                      ✅ {analysisReport.strengths.length} Stärke{analysisReport.strengths.length > 1 ? 'n' : ''}
+                    </span>
+                  )}
+                  {analysisReport.corrections.length > 0 && (
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#ff453a', background: 'rgba(255,69,58,0.12)', padding: '2px 7px', borderRadius: '6px' }}>
+                      ⚠️ {analysisReport.corrections.length} Korrektur{analysisReport.corrections.length > 1 ? 'en' : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Stärken */}
+              {analysisReport.strengths.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#30d158', marginBottom: '3px' }}>STÄRKEN</div>
+                  {analysisReport.strengths.map((s, i) => (
+                    <div key={i} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                      <span>• {s.label}</span>
+                      <span style={{ color: '#30d158', fontWeight: 700 }}>{s.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Korrekturen */}
+              {analysisReport.corrections.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#ff453a', marginBottom: '3px' }}>KORREKTUREN</div>
+                  {analysisReport.corrections.map((c, i) => (
+                    <div key={i} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                      <span>• {c.label}</span>
+                      <span style={{ color: '#ff453a', fontWeight: 700, fontFamily: 'monospace' }}>{c.timecode} · {c.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Footer */}
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '5px' }}>
+                {analysisReport.framesAnalyzed} Frames analysiert · {analysisReport.durationSec.toFixed(1)}s Video
+              </div>
+            </div>
+          )}
+
           {/* Cue Points List */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
             {cuePoints.map((cue) => {
@@ -1613,6 +1689,33 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       <Volume2 size={11} /> 🔊 KI-Sprach-Cue anhören
                     </button>
                   </div>
+
+                  {/* KI-Note + Referenzbild (nur bei KI_AUTO Cue-Points) */}
+                  {cue.dataSource === 'KI_AUTO' && (cue.kiNote || cue.referenceImageKey) && (
+                    <div style={{
+                      display: 'flex', gap: '10px', alignItems: 'flex-start',
+                      background: 'rgba(168,129,189,0.08)',
+                      border: '1px solid rgba(168,129,189,0.2)',
+                      borderRadius: '8px', padding: '8px',
+                      marginTop: '2px'
+                    }}>
+                      {cue.referenceImageKey && (
+                        <img
+                          src={`/reference/${cue.referenceImageKey}.svg`}
+                          alt="Vaganova-Referenz"
+                          style={{ width: '52px', height: '78px', flexShrink: 0, borderRadius: '6px', border: '1px solid rgba(192,132,252,0.25)' }}
+                        />
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '9px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px', marginBottom: '4px' }}>🤖 KI-ANALYSE</div>
+                        {cue.kiNote && (
+                          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>
+                            {cue.kiNote}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '2px' }}>
                     <span>Frame (Slow-Mo 0.25x) anspringen</span>

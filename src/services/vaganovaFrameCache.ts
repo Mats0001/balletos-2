@@ -198,6 +198,11 @@ export class VaganovaFrameCacheService {
     return !!cached && cached.frames.length > 10;
   }
 
+  /** Returns all cached frames for a video (for post-scan analysis). */
+  public getFrames(videoUrl: string): FrameEntry[] {
+    return this.cache.get(videoUrl)?.frames ?? [];
+  }
+
   /**
    * Clear cache for a specific video or all videos.
    */
