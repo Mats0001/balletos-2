@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { JetztWichtigInspectorData } from '../types';
-import { Sparkles, CheckCircle2, Mic, MicOff, AlertCircle } from 'lucide-react';
+import { CheckCircle2, Check, AlertCircle } from 'lucide-react';
+
 
 interface Props {
   data: JetztWichtigInspectorData;
@@ -11,6 +12,7 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
   const [isListening, setIsListening] = useState<boolean>(false);
   const [dictatedText, setDictatedText] = useState<string>('');
   const [isApplied, setIsApplied] = useState<boolean>(false);
+  const [isHovered, setIsHovered] = useState<boolean>(false);
 
   // WebSpeech Speech-to-Text Dictation Handler
   const handleToggleDictation = () => {
@@ -88,30 +90,32 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
         </div>
       </div>
 
-      {/* Right: clean action pill – STT wird später ergänzt */}
+      {/* Right: Icon-only Übernehmen – dezent, Hover bringt Farbe */}
       <button
         onClick={handleApply}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        title={isApplied ? 'Gespeichert' : 'Befund übernehmen'}
         style={{
           background: isApplied
-            ? 'linear-gradient(135deg, #30d158 0%, #248a3d 100%)'
-            : 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
-          color: '#ffffff',
-          border: 'none',
-          padding: '6px 16px',
-          borderRadius: '20px',
-          fontSize: '10px',
-          fontWeight: 800,
+            ? 'rgba(48,209,88,0.15)'
+            : isHovered
+            ? 'rgba(192,132,252,0.2)'
+            : 'transparent',
+          color: isApplied ? '#30d158' : isHovered ? '#c084fc' : 'rgba(255,255,255,0.35)',
+          border: `1px solid ${isApplied ? 'rgba(48,209,88,0.4)' : isHovered ? 'rgba(192,132,252,0.4)' : 'rgba(255,255,255,0.12)'}`,
+          width: '28px',
+          height: '28px',
+          borderRadius: '8px',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          boxShadow: isApplied ? '0 0 12px rgba(48,209,88,0.4)' : '0 0 12px rgba(192,132,252,0.4)',
-          transition: 'all 0.25s ease',
-          letterSpacing: '0.5px'
+          justifyContent: 'center',
+          flexShrink: 0,
+          transition: 'all 0.2s ease'
         }}
       >
-        <CheckCircle2 size={12} />
-        <span>{isApplied ? 'Gespeichert ✓' : 'Übernehmen'}</span>
+        {isApplied ? <Check size={14} /> : <CheckCircle2 size={14} />}
       </button>
     </div>
   );
