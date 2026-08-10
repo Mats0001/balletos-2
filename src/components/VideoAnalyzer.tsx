@@ -1375,28 +1375,36 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 ))}
               </div>
 
-              {/* Vollbild-Button */}
+              {/* Vollbild-Button – sichtbarer */}
               <button
                 onClick={handleToggleFullscreen}
-                onMouseEnter={e => (e.currentTarget.style.color = '#c084fc')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}
-                title={isFullscreen ? 'Vollbild beenden' : 'Vollbild (Video + Skelett)'}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = 'rgba(192,132,252,0.2)';
+                  e.currentTarget.style.borderColor = 'rgba(192,132,252,0.7)';
+                  e.currentTarget.style.color = '#c084fc';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = 'rgba(192,132,252,0.08)';
+                  e.currentTarget.style.borderColor = 'rgba(192,132,252,0.35)';
+                  e.currentTarget.style.color = 'rgba(255,255,255,0.7)';
+                }}
+                title={isFullscreen ? 'Vollbild beenden (ESC)' : 'Vollbild – Video + Skelett'}
                 style={{
-                  background: 'transparent',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  color: 'rgba(255,255,255,0.4)',
-                  width: '30px',
-                  height: '30px',
+                  background: 'rgba(192,132,252,0.08)',
+                  border: '1px solid rgba(192,132,252,0.35)',
+                  color: 'rgba(255,255,255,0.7)',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '8px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
-                  transition: 'color 0.2s ease, border-color 0.2s ease'
+                  transition: 'all 0.2s ease'
                 }}
               >
-                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
               </button>
 
             </div>
