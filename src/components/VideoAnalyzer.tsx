@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap } from 'lucide-react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap } from 'lucide-react';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
 import { JetztWichtigInspectorData, FeedbackObject } from '../types';
 import { videoStore, StoredVideoItem } from '../services/videoStore';
@@ -26,6 +26,7 @@ interface VideoAnalyzerProps {
 export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis }) => {
   // Video Controls State
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [showSkeleton, setShowSkeleton] = useState<boolean>(true);
   const [showAngleArcs, setShowAngleArcs] = useState<boolean>(true);
@@ -88,6 +89,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const isProcessingRef = useRef<boolean>(false);
   const processingStartTimeRef = useRef<number>(0);
   const videoContainerRef = useRef<HTMLDivElement>(null);
+  const videoPanelRef = useRef<HTMLDivElement>(null); // Outer panel: Video + Canvas + Scrubber
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // ── FRAME SYNC FOUNDATION (2026-08-10) ───────────────────────────────────
@@ -677,6 +679,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
   };
 
+  // Fullscreen: ganzer Panel (Video + Canvas + Scrubber)
+  const handleToggleFullscreen = () => {
+    const panel = videoPanelRef.current;
+    if (!panel) return;
+    if (!document.fullscreenElement) {
+      panel.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
+  // Sync isFullscreen state mit Browser-Event
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
   // Speed Control
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
@@ -1101,7 +1121,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 360px', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
         
         {/* LEFT PANEL: UNCLUTTERED MAIN VIDEO VIEWPORT */}
-        <div className="monolith-card" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0 }}>
+        <div ref={videoPanelRef} className="monolith-card" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0, background: isFullscreen ? '#000' : undefined }}>
           
           <div style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
             
@@ -1355,6 +1375,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 ))}
               </div>
 
+              {/* Vollbild-Button */}
+              <button
+                onClick={handleToggleFullscreen}
+                onMouseEnter={e => (e.currentTarget.style.color = '#c084fc')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.4)')}
+                title={isFullscreen ? 'Vollbild beenden' : 'Vollbild (Video + Skelett)'}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  color: 'rgba(255,255,255,0.4)',
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  transition: 'color 0.2s ease, border-color 0.2s ease'
+                }}
+              >
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
 
             </div>
 
