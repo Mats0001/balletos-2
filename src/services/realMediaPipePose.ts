@@ -97,16 +97,26 @@ export class RealMediaPipePoseService {
         this.isProcessingFrame = false;
       });
 
-      // Downscale input for faster inference (960×1280 → 480×640)
+      // Downscale input for faster inference.
+      // ACTUAL MATH for 960×1280 portrait (longest edge = 1280):
+      //   scale = min(480/960, 480/1280) = min(0.500, 0.375) = 0.375
+      //   dstW = 960 × 0.375 = 360
+      //   dstH = 1280 × 0.375 = 480
+      // Result: 360×480 (NOT 480×640 as the old comment claimed)
+      // For 1920×1080 landscape (longest edge = 1920):
+      //   scale = min(480/1920, 480/1080) = min(0.250, 0.444) = 0.250
+      //   dstW = 480, dstH = 270 → 480×270
+      // TODO (Sprint 2): Make MAX_INPUT_DIM adaptive (480=fast/720=accurate)
+      // and log actual dims to FrameDescriptor for reproducibility.
       const srcW = videoElem instanceof HTMLVideoElement ? videoElem.videoWidth : videoElem.width;
       const srcH = videoElem instanceof HTMLVideoElement ? videoElem.videoHeight : videoElem.height;
       const maxDim = RealMediaPipePoseService.MAX_INPUT_DIM;
-      
+
       if (srcW > maxDim || srcH > maxDim) {
         const scale = Math.min(maxDim / srcW, maxDim / srcH);
         const dstW = Math.round(srcW * scale);
         const dstH = Math.round(srcH * scale);
-        
+
         if (!this.offscreenCanvas) {
           this.offscreenCanvas = document.createElement('canvas');
           this.offscreenCtx = this.offscreenCanvas.getContext('2d');
@@ -114,7 +124,7 @@ export class RealMediaPipePoseService {
         this.offscreenCanvas.width = dstW;
         this.offscreenCanvas.height = dstH;
         this.offscreenCtx!.drawImage(videoElem, 0, 0, dstW, dstH);
-        
+
         await this.pose.send({ image: this.offscreenCanvas });
       } else {
         await this.pose.send({ image: videoElem });

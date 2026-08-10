@@ -69,35 +69,47 @@ class VaganovaArmAnalyzer {
       y: (sk.pelvisL.y + sk.pelvisR.y) / 2
     };
 
+    // P1 FIX (2026-08-10): Replace fixed pixel thresholds with body-normalized values.
+    // Reference: shoulder width (shoulder-to-shoulder distance in pixels).
+    // This makes classification independent of video resolution and camera distance.
+    // Advisor finding: same pose at 4K vs 960p had different results due to fixed px.
+    const shoulderWidth = Math.abs(sk.shoulderR.x - sk.shoulderL.x) || 100;
+    // Torso height (neck to pelvis center)
+    const torsoHeight = Math.abs(sk.neck.y - pelvisCenter.y) || 150;
+
     const classify = (shoulder: KinematicPoint, elbow: KinematicPoint, wrist: KinematicPoint): VaganovaArmPosition => {
       const elbowAngle = this.angle3P(shoulder, elbow, wrist);
-      
+
       // Allongé: Arm nearly straight and extended away from body
-      if (elbowAngle > 160 && Math.abs(wrist.x - sk.neck.x) > 80) {
+      // Was: wrist.x > 80px from neck → now: wrist > 0.7 × shoulderWidth from neck
+      if (elbowAngle > 160 && Math.abs(wrist.x - sk.neck.x) > shoulderWidth * 0.7) {
         return 'ALLONGE';
       }
 
-      // 3rd Position: Wrist above head level
+      // 3rd Position: Wrist above head level (no px threshold – y comparison is ratio-safe)
       if (wrist.y < sk.head.y) {
         return 'THIRD';
       }
 
-      // Préparatoire: Wrist below hip level
-      if (wrist.y > pelvisCenter.y + 30) {
+      // Préparatoire: Wrist clearly below hip level
+      // Was: pelvisCenter.y + 30px → now: pelvisCenter.y + 0.2 × torsoHeight
+      if (wrist.y > pelvisCenter.y + torsoHeight * 0.2) {
         return 'PREPARATOIRE';
       }
 
       // 1st Position: Wrists near navel/sternum height and close to body centerline
-      if (wrist.y <= pelvisCenter.y && wrist.y >= sk.neck.y && Math.abs(wrist.x - sk.neck.x) <= 100) {
+      // Was: wrist.x within 100px of neck → now: within 0.9 × shoulderWidth
+      if (wrist.y <= pelvisCenter.y && wrist.y >= sk.neck.y && Math.abs(wrist.x - sk.neck.x) <= shoulderWidth * 0.9) {
          return 'FIRST';
       }
 
       // 2nd Position: Wrists near shoulder height and far from centerline
-      if (Math.abs(wrist.y - shoulder.y) <= 60 && Math.abs(wrist.x - sk.neck.x) > 120) {
+      // Was: |wrist.y - shoulder.y| ≤ 60px AND |wrist.x - neck.x| > 120px
+      //      → now: ≤ 0.4×torsoHeight AND > 1.1×shoulderWidth
+      if (Math.abs(wrist.y - shoulder.y) <= torsoHeight * 0.4 && Math.abs(wrist.x - sk.neck.x) > shoulderWidth * 1.1) {
          return 'SECOND';
       }
 
-      // Default
       return 'TRANSITION';
     };
 
@@ -126,10 +138,17 @@ class VaganovaArmAnalyzer {
   public analyzeElbowQuality(sk: ReconstructedSkeleton): ElbowAnalysis {
     const analyze = (shoulder: KinematicPoint, elbow: KinematicPoint, wrist: KinematicPoint) => {
       const angleDeg = this.angle3P(shoulder, elbow, wrist);
-      
+
       let heightStatus: ArmQualityStatus = 'CORRECT';
-      // elbow.y < shoulder.y - 15 means elbow is ABOVE shoulder by >15px (since y increases downward)
-      if (elbow.y < shoulder.y - 15) {
+      // P1 FIX: elbow height threshold was hardcoded 15px.
+      // Use shoulder width as body-relative reference instead.
+      // Shoulder width is available from the parent scope via sk, but here we only have
+      // the 3 points. Use elbow-to-shoulder distance as scale reference.
+      const segmentLen = Math.sqrt(
+        Math.pow(elbow.x - shoulder.x, 2) + Math.pow(elbow.y - shoulder.y, 2)
+      ) || 50;
+      // elbow above shoulder by >20% of upper arm length = ERROR
+      if (elbow.y < shoulder.y - segmentLen * 0.2) {
         heightStatus = 'ERROR';
       } else if (elbow.y < shoulder.y) {
         heightStatus = 'WARNING';
