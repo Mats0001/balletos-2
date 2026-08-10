@@ -1,17 +1,23 @@
 import React, { useEffect } from 'react';
-import { X, BookOpen, Zap, Dumbbell, AlertTriangle } from 'lucide-react';
+import { X, BookOpen, Zap, Dumbbell, AlertTriangle, TrendingDown, TrendingUp, CheckCircle } from 'lucide-react';
 import { JointKnowledge } from '../services/skeletonJointKnowledge';
+import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
 
 interface Props {
   knowledge: JointKnowledge;
-  /** Raw click X in the full parent container coordinate space */
+  /** Joint X in parent container coords */
   jointX: number;
-  /** Raw click Y in the full parent container coordinate space */
+  /** Joint Y in parent container coords */
   jointY: number;
-  containerWidth: number;
+  /** Left offset of the actual video render area within the container */
+  videoLeft: number;
   containerHeight: number;
   onClose: () => void;
   onAddToCueManager?: () => void;
+  /** Live frame analysis – if provided, shows specific real-time measurements */
+  vaganovaAnalysis?: VaganovaFullAnalysis | null;
+  /** Landmark index for mapping to specific measurements */
+  landmarkIndex: number;
 }
 
 const REGION_COLORS: Record<string, string> = {
@@ -23,16 +29,67 @@ const REGION_COLORS: Record<string, string> = {
   foot: '#f472b6',
 };
 
+/** Maps landmark index to relevant VaganovaFullAnalysis fields */
+function getLiveMeasurements(
+  idx: number,
+  va: VaganovaFullAnalysis | null | undefined
+): Array<{ key: string; m: VaganovaMeasurement }> {
+  if (!va) return [];
+  const pick = (key: keyof VaganovaFullAnalysis): { key: string; m: VaganovaMeasurement } | null => {
+    const m = va[key] as VaganovaMeasurement | null;
+    return m ? { key, m } : null;
+  };
+  const MAP: Record<number, Array<keyof VaganovaFullAnalysis>> = {
+    0:  ['headTilt', 'plumbDeviation'],
+    11: ['shoulderSymmetry', 'shoulderElevationL', 'epaulement'],
+    12: ['shoulderSymmetry', 'shoulderElevationR', 'epaulement'],
+    13: ['armLineQualityL', 'portDeBrasL'],
+    14: ['armLineQualityR', 'portDeBrasR'],
+    15: ['armLineQualityL', 'portDeBrasL'],
+    16: ['armLineQualityR', 'portDeBrasR'],
+    23: ['pelvicTilt', 'turnoutL', 'spineTilt'],
+    24: ['pelvicTilt', 'turnoutR', 'spineTilt'],
+    25: ['knieFlexionL', 'valgusDriftL', 'turnoutL'],
+    26: ['knieFlexionR', 'valgusDriftR', 'turnoutR'],
+    27: ['knieFlexionL', 'valgusDriftL'],
+    28: ['knieFlexionR', 'valgusDriftR'],
+    29: ['knieFlexionL', 'turnoutL'],
+    30: ['knieFlexionR', 'turnoutR'],
+    31: ['turnoutL', 'knieFlexionL'],
+    32: ['turnoutR', 'knieFlexionR'],
+  };
+  const keys = MAP[idx] ?? [];
+  return keys.map(k => pick(k)).filter(Boolean) as Array<{ key: string; m: VaganovaMeasurement }>;
+}
+
+function statusColor(status?: string) {
+  if (status === 'ERROR') return '#ff453a';
+  if (status === 'WARNING') return '#ffd60a';
+  if (status === 'CORRECT') return '#30d158';
+  return 'rgba(255,255,255,0.4)';
+}
+
+function formatValue(m: VaganovaMeasurement) {
+  if (m.measurement_class === 'not_measurable') return '–';
+  const v = Math.abs(m.value);
+  if (m.unit === 'deg' || m.unit === 'delta_deg') return `${v.toFixed(1)}°`;
+  if (m.unit === 'ratio') return v.toFixed(2);
+  return v.toFixed(1);
+}
+
 export const SkeletonJointPopover: React.FC<Props> = ({
   knowledge,
   jointX,
   jointY,
-  containerWidth,
+  videoLeft,
   containerHeight,
   onClose,
   onAddToCueManager,
+  vaganovaAnalysis,
+  landmarkIndex,
 }) => {
   const color = REGION_COLORS[knowledge.region] ?? '#c084fc';
+  const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
 
   // ESC to close
   useEffect(() => {
@@ -41,94 +98,59 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const W = 266;
-  const H_EST = 390;
+  const W = 258;
+  const H_EST = liveMeasurements.length > 0 ? 440 : 390;
 
-  // ── POSITION: always LEFT of the video, vertically centred on the joint ──
-  const popoverLeft = 4;
+  // ── POSITION: to the LEFT of the actual video render area ────────────────
+  // popoverLeft = videoLeft - W - 12 (fits in letterbox to left of video)
+  // If videoLeft is too small (<= W+12), fall back to slight overlap but
+  // clamp so the right edge doesn't go further than videoLeft - 4
+  const idealLeft = videoLeft - W - 12;
+  const popoverLeft = Math.max(0, idealLeft);
+
   let popoverTop = jointY - H_EST / 2;
-  // Clamp vertically
   popoverTop = Math.max(4, Math.min(containerHeight - H_EST - 4, popoverTop));
 
   // ── SVG CONNECTOR ─────────────────────────────────────────────────────────
-  // Arrow tail: right edge of popover, at its vertical centre
   const tailX = popoverLeft + W + 2;
   const tailY = popoverTop + H_EST / 2;
-  // Arrow head: the joint pixel, with a small dot radius offset
   const headX = jointX;
   const headY = jointY;
-
-  // Cubic bezier control points for a gentle S-curve
   const cp1X = tailX + (headX - tailX) * 0.45;
   const cp1Y = tailY;
   const cp2X = tailX + (headX - tailX) * 0.55;
   const cp2Y = headY;
 
-  // Compute angle of line at arrowhead for the triangle rotation
-  const dx = headX - cp2X;
-  const dy = headY - cp2Y;
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  // Dominant live status for connector colour
+  const hasError = liveMeasurements.some(({ m }) => m.status === 'ERROR');
+  const hasWarning = liveMeasurements.some(({ m }) => m.status === 'WARNING');
+  const connectorColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : color;
 
   return (
     <>
       {/* SVG connector – full-container overlay */}
-      <svg
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          pointerEvents: 'none',
-          zIndex: 999,
-          overflow: 'visible',
-        }}
-      >
+      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 999, overflow: 'visible' }}>
         <defs>
-          <marker
-            id={`arrow-${knowledge.region}`}
-            markerWidth="8"
-            markerHeight="8"
-            refX="4"
-            refY="4"
-            orient="auto"
-          >
-            <path
-              d="M 0 1 L 8 4 L 0 7 Z"
-              fill={color}
-              opacity="0.9"
-            />
+          <marker id={`arrowhead-${landmarkIndex}`} markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+            <path d="M 0 1 L 8 4 L 0 7 Z" fill={connectorColor} opacity="0.9" />
           </marker>
         </defs>
-
-        {/* Glow shadow path (wider, blur effect) */}
-        <path
-          d={`M ${tailX} ${tailY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${headX} ${headY}`}
-          fill="none"
-          stroke={color}
-          strokeWidth="6"
-          strokeOpacity="0.12"
-          strokeLinecap="round"
-        />
-        {/* Main dashed line */}
-        <path
-          d={`M ${tailX} ${tailY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${headX - 8} ${headY}`}
-          fill="none"
-          stroke={color}
-          strokeWidth="1.5"
-          strokeOpacity="0.85"
-          strokeDasharray="5 4"
-          strokeLinecap="round"
-          markerEnd={`url(#arrow-${knowledge.region})`}
-        />
-        {/* Dot at tail (popover attachment point) */}
-        <circle cx={tailX} cy={tailY} r="3" fill={color} opacity="0.6" />
-        {/* Pulsing ring at joint */}
-        <circle cx={headX} cy={headY} r="8" fill="none" stroke={color} strokeWidth="1.5" opacity="0.5">
-          <animate attributeName="r" values="6;13;6" dur="2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.6;0;0.6" dur="2s" repeatCount="indefinite" />
+        {/* glow */}
+        <path d={`M ${tailX} ${tailY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${headX} ${headY}`}
+          fill="none" stroke={connectorColor} strokeWidth="7" strokeOpacity="0.1" strokeLinecap="round" />
+        {/* dashed line */}
+        <path d={`M ${tailX} ${tailY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${headX - 7} ${headY}`}
+          fill="none" stroke={connectorColor} strokeWidth="1.5" strokeOpacity="0.85"
+          strokeDasharray="5 4" strokeLinecap="round" markerEnd={`url(#arrowhead-${landmarkIndex})`} />
+        {/* tail dot */}
+        <circle cx={tailX} cy={tailY} r="3" fill={connectorColor} opacity="0.6" />
+        {/* pulsing joint ring */}
+        <circle cx={headX} cy={headY} r="8" fill="none" stroke={connectorColor} strokeWidth="1.5" opacity="0.5">
+          <animate attributeName="r" values="6;14;6" dur="2s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.7;0;0.7" dur="2s" repeatCount="indefinite" />
         </circle>
-        {/* Static inner dot */}
-        <circle cx={headX} cy={headY} r="4" fill={color} opacity="0.9" />
+        {/* static joint dot */}
+        <circle cx={headX} cy={headY} r="4.5" fill={connectorColor} opacity="0.95" />
       </svg>
 
       {/* POPOVER CARD */}
@@ -139,116 +161,130 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           top: `${popoverTop}px`,
           width: `${W}px`,
           zIndex: 1000,
-          background: 'rgba(10,6,18,0.96)',
-          backdropFilter: 'blur(18px)',
-          WebkitBackdropFilter: 'blur(18px)',
-          border: `1px solid ${color}55`,
-          borderRight: `3px solid ${color}`,
+          background: 'rgba(8,4,16,0.97)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          border: `1px solid ${color}50`,
+          borderRight: `3px solid ${connectorColor}`,
           borderRadius: '14px',
-          boxShadow: `0 8px 40px rgba(0,0,0,0.75), 0 0 0 1px ${color}18, inset 0 1px 0 rgba(255,255,255,0.06)`,
+          boxShadow: `0 10px 48px rgba(0,0,0,0.85), 0 0 0 1px ${color}15, inset 0 1px 0 rgba(255,255,255,0.05)`,
           overflow: 'hidden',
-          animation: 'popoverSlideIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
+          animation: 'popoverSlideIn 0.22s cubic-bezier(0.34,1.4,0.64,1)',
           pointerEvents: 'all',
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Glow accent top */}
-        <div style={{
-          position: 'absolute', top: 0, left: '25%', right: '25%', height: '1px',
-          background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
-          opacity: 0.8,
-        }} />
-
-        {/* Right-edge glow line matching arrow attachment */}
-        <div style={{
-          position: 'absolute', right: 0, top: '30%', bottom: '30%', width: '3px',
-          background: `linear-gradient(180deg, transparent, ${color}, transparent)`,
-        }} />
+        {/* top glow */}
+        <div style={{ position: 'absolute', top: 0, left: '20%', right: '20%', height: '1px', background: `linear-gradient(90deg, transparent, ${color}, transparent)`, opacity: 0.9 }} />
 
         {/* HEADER */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '11px 13px 9px',
-          borderBottom: `1px solid ${color}25`,
-          background: `linear-gradient(135deg, ${color}1a 0%, transparent 100%)`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <span style={{ fontSize: '18px' }}>{knowledge.emoji}</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px 8px', borderBottom: `1px solid ${color}20`, background: `linear-gradient(135deg, ${color}18 0%, transparent 100%)` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '17px' }}>{knowledge.emoji}</span>
             <div>
-              <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>
-                {knowledge.name}
-              </div>
+              <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{knowledge.name}</div>
               <div style={{ fontSize: '9px', fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
                 {knowledge.region} · Vaganova
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', borderRadius: '6px', width: '24px', height: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-          >
-            <X size={12} />
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <X size={11} />
           </button>
         </div>
 
-        {/* BODY */}
-        <div style={{ padding: '10px 13px', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '310px', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${color}40 transparent` }}>
+        {/* LIVE FRAME ANALYSIS – top priority block when data available */}
+        {liveMeasurements.length > 0 && (
+          <div style={{ margin: '8px 10px 0', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <div style={{ fontSize: '8px', fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.9px', marginBottom: '2px' }}>
+              ⚡ Aktueller Frame · Live-Messung
+            </div>
+            {liveMeasurements.map(({ key, m }) => {
+              const sc = statusColor(m.status);
+              const isError = m.status === 'ERROR';
+              const isMeasurable = m.measurement_class !== 'not_measurable';
+              return (
+                <div key={key} style={{ background: isError ? 'rgba(255,69,58,0.1)' : 'rgba(255,255,255,0.04)', border: `1px solid ${sc}35`, borderRadius: '8px', padding: '6px 9px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isMeasurable ? '3px' : 0 }}>
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: 'rgba(255,255,255,0.65)' }}>{m.label}</span>
+                    {isMeasurable && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 900, color: sc, fontFamily: 'monospace' }}>
+                          {formatValue(m)}
+                        </span>
+                        {m.status === 'ERROR' && <TrendingDown size={11} color="#ff453a" />}
+                        {m.status === 'WARNING' && <span style={{ fontSize: '10px' }}>⚠️</span>}
+                        {m.status === 'CORRECT' && <CheckCircle size={11} color="#30d158" />}
+                      </div>
+                    )}
+                  </div>
+                  {isMeasurable && m.norm && (
+                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.35 }}>
+                      Standard: {m.norm}
+                    </div>
+                  )}
+                  {!isMeasurable && m.not_measurable_reason && (
+                    <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)' }}>
+                      {m.not_measurable_reason}
+                    </div>
+                  )}
+                  {isError && (
+                    <div style={{ fontSize: '9px', color: '#ff6b61', fontWeight: 700, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <AlertTriangle size={9} /> Korrektur erforderlich
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-          {/* a) Anatomie */}
-          <Section icon={<BookOpen size={10} />} label="Was ist hier zu sehen?" color={color}>
+        {/* BODY – knowledge sections */}
+        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '7px', maxHeight: '240px', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${color}40 transparent` }}>
+
+          <Section icon={<BookOpen size={9} />} label="Was ist hier zu sehen?" color={color}>
             {knowledge.anatomyNote}
           </Section>
 
-          {/* b) Vaganova Regel */}
-          <Section icon={<span style={{ fontSize: '10px' }}>📐</span>} label="Vaganova-Standard" color={color}>
+          <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Vaganova-Standard" color={color}>
             {knowledge.vaganovaRule}
           </Section>
 
-          {/* c) Wie & Warum */}
-          <Section icon={<Zap size={10} />} label="Wie & Warum" color={color} highlight>
+          <Section icon={<Zap size={9} />} label="Wie & Warum" color={color} highlight>
             {knowledge.howAndWhy}
           </Section>
 
           {/* Typischer Fehler */}
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start', background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.2)', borderRadius: '8px', padding: '6px 8px' }}>
-            <AlertTriangle size={10} style={{ color: '#ff453a', flexShrink: 0, marginTop: '1px' }} />
-            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.45 }}>
-              <span style={{ fontWeight: 800, color: '#ff6b61', marginRight: '4px' }}>Typischer Fehler:</span>
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'flex-start', background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.18)', borderRadius: '7px', padding: '5px 7px' }}>
+            <AlertTriangle size={9} style={{ color: '#ff453a', flexShrink: 0, marginTop: '1px' }} />
+            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>
+              <span style={{ fontWeight: 800, color: '#ff6b61', marginRight: '3px' }}>Typischer Fehler:</span>
               {knowledge.commonMistake}
             </div>
           </div>
 
-          {/* d) Übung */}
-          <Section icon={<Dumbbell size={10} />} label={knowledge.exerciseTitle} color="#30d158">
+          <Section icon={<Dumbbell size={9} />} label={knowledge.exerciseTitle} color="#30d158">
             {knowledge.exercise}
           </Section>
         </div>
 
         {/* FOOTER */}
-        <div style={{ padding: '8px 13px', borderTop: `1px solid ${color}20`, display: 'flex', gap: '6px' }}>
+        <div style={{ padding: '7px 10px', borderTop: `1px solid ${color}18`, display: 'flex', gap: '5px' }}>
           {onAddToCueManager && (
-            <button
-              onClick={() => { onAddToCueManager(); onClose(); }}
-              style={{
-                flex: 1, background: `linear-gradient(135deg, ${color}30 0%, ${color}15 100%)`,
-                border: `1px solid ${color}50`, color, borderRadius: '7px', padding: '5px 8px',
-                fontSize: '9px', fontWeight: 800, cursor: 'pointer', letterSpacing: '0.3px',
-              }}
-            >
+            <button onClick={() => { onAddToCueManager(); onClose(); }}
+              style={{ flex: 1, background: `linear-gradient(135deg, ${color}25 0%, ${color}12 100%)`, border: `1px solid ${color}45`, color, borderRadius: '6px', padding: '5px 7px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}>
               + Zum Cue-Manager
             </button>
           )}
-          <button
-            onClick={onClose}
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', borderRadius: '7px', padding: '5px 10px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
-          >
+          <button onClick={onClose}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.45)', borderRadius: '6px', padding: '5px 9px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}>
             Schliessen
           </button>
         </div>
 
         <style>{`
           @keyframes popoverSlideIn {
-            from { opacity: 0; transform: translateX(-10px) scale(0.96); }
+            from { opacity: 0; transform: translateX(-12px) scale(0.95); }
             to   { opacity: 1; transform: translateX(0) scale(1); }
           }
         `}</style>
@@ -266,15 +302,11 @@ interface SectionProps {
 }
 
 const Section: React.FC<SectionProps> = ({ icon, label, color, children, highlight }) => (
-  <div style={{
-    background: highlight ? `${color}0f` : 'rgba(255,255,255,0.03)',
-    border: highlight ? `1px solid ${color}30` : '1px solid rgba(255,255,255,0.06)',
-    borderRadius: '8px', padding: '7px 9px',
-  }}>
-    <div style={{ fontSize: '8px', fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+  <div style={{ background: highlight ? `${color}0e` : 'rgba(255,255,255,0.025)', border: highlight ? `1px solid ${color}28` : '1px solid rgba(255,255,255,0.05)', borderRadius: '7px', padding: '6px 8px' }}>
+    <div style={{ fontSize: '8px', fontWeight: 800, color, textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
       {icon} {label}
     </div>
-    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.5 }}>
+    <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.72)', lineHeight: 1.45 }}>
       {children}
     </div>
   </div>

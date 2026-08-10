@@ -1483,18 +1483,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   const knowledge = getJointKnowledge(jointPopover.landmarkIndex);
                   if (!knowledge) return null;
                   // Joint position in full container coordinate space
-                  const jX = (overlayBounds?.left ?? 0) + jointPopover.pixelX;
-                  const jY = (overlayBounds?.top ?? 0) + jointPopover.pixelY;
-                  // Full container dimensions (video player outer div)
-                  const cW = (overlayBounds?.left ?? 0) + overlayBounds.width + (overlayBounds?.left ?? 0);
-                  const cH = (overlayBounds?.top ?? 0) + overlayBounds.height + (overlayBounds?.top ?? 0);
+                  const jX = (overlayBounds.left ?? 0) + jointPopover.pixelX;
+                  const jY = (overlayBounds.top ?? 0) + jointPopover.pixelY;
+                  // Full container height
+                  const cH = (overlayBounds.top ?? 0) + overlayBounds.height + (overlayBounds.top ?? 0);
                   return (
                     <SkeletonJointPopover
                       knowledge={knowledge}
                       jointX={jX}
                       jointY={jY}
-                      containerWidth={cW}
+                      videoLeft={overlayBounds.left ?? 0}
                       containerHeight={cH}
+                      vaganovaAnalysis={vaganovaAnalysis}
+                      landmarkIndex={jointPopover.landmarkIndex}
                       onClose={() => setJointPopover(null)}
                     />
                   );
