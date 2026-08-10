@@ -79,103 +79,99 @@ export const RightInspectorPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* LIVE VAGANOVA MESSWERTE – fills available height */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0 }}>
-        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-          📐 VAGANOVA LIVE-MESSWERTE
-          <span style={{ fontSize: '9px', background: 'rgba(48,209,88,0.15)', color: '#30d158', border: '1px solid rgba(48,209,88,0.3)', borderRadius: '6px', padding: '1px 6px', fontWeight: 700, animation: 'pulse 2s infinite' }}>LIVE</span>
-        </div>
-        {/* Scrollable metrics container with gradient scroll-indicator */}
-        <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
-          <div
-            id="vaganova-metrics-scroll"
-            style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '12px',
-              padding: '10px 12px',
-              height: '100%',
-              overflowY: 'auto',
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'rgba(168,129,189,0.4) transparent',
-            }}
-          >
-            <VaganovaLiveMetrics vaganovaAnalysis={vaganovaAnalysis ?? null} isPlie={isPlie} />
-          </div>
-          {/* Scroll-fade indicator at bottom */}
-          <div style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0, height: '32px',
-            background: 'linear-gradient(to top, rgba(14,10,20,0.9) 0%, transparent 100%)',
-            borderRadius: '0 0 12px 12px', pointerEvents: 'none'
-          }} />
-          <div style={{
-            position: 'absolute', bottom: '4px', left: '50%', transform: 'translateX(-50%)',
-            fontSize: '9px', color: 'rgba(168,129,189,0.6)', pointerEvents: 'none', userSelect: 'none'
-          }}>▾ scrollen</div>
-        </div>
-      </div>
+      {/* ─── LIVE MESSWERTE + SELECTED CUE – teilen sich den verfügbaren Platz ─── */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '8px' }}>
 
-      {/* 📌 AUSGEWÄHLTER MARKER – KI-Detail (erscheint wenn Cue-Point angeklickt) */}
-      {selectedCue && (
-        <div style={{
-          background: selectedCue.status === 'CORRECTION'
-            ? 'rgba(255,69,58,0.08)' : 'rgba(48,209,88,0.08)',
-          border: `1px solid ${selectedCue.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)' : 'rgba(48,209,88,0.3)'}`,
-          borderRadius: '12px', padding: '10px 12px',
-          flexShrink: 0,
-          display: 'flex', flexDirection: 'column', gap: '8px',
-          animation: 'fadeIn 0.2s ease',
-        }}>
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '9px', fontWeight: 800, color: selectedCue.status === 'CORRECTION' ? '#ff453a' : '#30d158', textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              {selectedCue.status === 'CORRECTION' ? <AlertTriangle size={10} /> : <Check size={10} />}
-              {selectedCue.status === 'CORRECTION' ? 'Korrektur' : 'Stärke'} · {selectedCue.timecodeStr}
+        {/* LIVE VAGANOVA MESSWERTE */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0 }}>
+          <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            📐 VAGANOVA LIVE-MESSWERTE
+            <span style={{ fontSize: '9px', background: 'rgba(48,209,88,0.15)', color: '#30d158', border: '1px solid rgba(48,209,88,0.3)', borderRadius: '6px', padding: '1px 6px', fontWeight: 700, animation: 'pulse 2s infinite' }}>LIVE</span>
+          </div>
+          {/* Scrollable metrics container */}
+          <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+            <div
+              id="vaganova-metrics-scroll"
+              style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                padding: '10px 12px',
+                height: '100%',
+                overflowY: 'auto',
+                scrollbarWidth: 'thin',
+                scrollbarColor: 'rgba(168,129,189,0.4) transparent',
+              }}
+            >
+              <VaganovaLiveMetrics vaganovaAnalysis={vaganovaAnalysis ?? null} isPlie={isPlie} />
             </div>
-            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
-              {selectedCue.dataSource === 'KI_AUTO' ? '🤖 KI' : '👩‍🏫 Nicole'}
-            </span>
-          </div>
-
-          {/* Pose name */}
-          <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>
-            {selectedCue.poseName}
-          </div>
-
-          {/* Headline */}
-          <div style={{ fontSize: '10px', color: selectedCue.status === 'CORRECTION' ? '#ff6b61' : '#5ae088', fontWeight: 600 }}>
-            {selectedCue.headline}
-          </div>
-
-          {/* Bildhafte Metapher */}
-          <div style={{
-            background: 'rgba(168,129,189,0.1)', border: '1px solid rgba(168,129,189,0.2)',
-            borderRadius: '8px', padding: '8px 10px',
-          }}>
-            <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>💡 Bildhafte Erklärung</div>
-            <div style={{ fontSize: '11px', color: '#fff', fontStyle: 'italic', lineHeight: 1.45, fontWeight: 600 }}>
-              {selectedCue.cueMetaphor}
-            </div>
-          </div>
-
-          {/* KI-Note (nur bei KI_AUTO) */}
-          {selectedCue.kiNote && (
+            {/* Scroll-fade indicator at bottom */}
             <div style={{
-              background: 'rgba(255,255,255,0.04)', borderRadius: '7px', padding: '7px 10px',
-            }}>
-              <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', marginBottom: '4px' }}>🤖 Messwert-Analyse</div>
-              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.45 }}>
-                {selectedCue.kiNote}
-              </div>
-            </div>
-          )}
-
-          {/* Wie besser machen */}
-          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingTop: '2px' }}>
-            Klick auf anderen Marker um diesen zu wechseln
+              position: 'absolute', bottom: 0, left: 0, right: 0, height: '32px',
+              background: 'linear-gradient(to top, rgba(14,10,20,0.9) 0%, transparent 100%)',
+              borderRadius: '0 0 12px 12px', pointerEvents: 'none'
+            }} />
+            <div style={{
+              position: 'absolute', bottom: '4px', left: '50%', transform: 'translateX(-50%)',
+              fontSize: '9px', color: 'rgba(168,129,189,0.6)', pointerEvents: 'none', userSelect: 'none'
+            }}>▾ scrollen</div>
           </div>
         </div>
-      )}
+
+        {/* 📌 AUSGEWÄHLTER MARKER – unter Messwerte, flexShrink:0 */}
+        {selectedCue && (
+          <div style={{
+            background: selectedCue.status === 'CORRECTION'
+              ? 'rgba(255,69,58,0.08)'
+              : selectedCue.status === 'WARNING'
+              ? 'rgba(255,159,10,0.08)'
+              : 'rgba(48,209,88,0.08)',
+            border: `1px solid ${
+              selectedCue.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)'
+              : selectedCue.status === 'WARNING' ? 'rgba(255,159,10,0.35)'
+              : 'rgba(48,209,88,0.3)'}`,
+            borderRadius: '12px', padding: '10px 12px',
+            flexShrink: 0,
+            display: 'flex', flexDirection: 'column', gap: '8px',
+            animation: 'fadeIn 0.2s ease',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{
+                fontSize: '9px', fontWeight: 800,
+                color: selectedCue.status === 'CORRECTION' ? '#ff453a' : selectedCue.status === 'WARNING' ? '#ff9f0a' : '#30d158',
+                textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '4px'
+              }}>
+                {selectedCue.status === 'CORRECTION' ? <AlertTriangle size={10} /> : selectedCue.status === 'WARNING' ? <AlertTriangle size={10} /> : <Check size={10} />}
+                {selectedCue.status === 'CORRECTION' ? 'Fehler' : selectedCue.status === 'WARNING' ? 'Beobachten' : 'Stärke'} · {selectedCue.timecodeStr}
+              </div>
+              <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
+                {selectedCue.dataSource === 'KI_AUTO' ? '🤖 KI' : '👩‍🏫 Nicole'}
+              </span>
+            </div>
+            {/* Pose name */}
+            <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>{selectedCue.poseName}</div>
+            {/* Headline */}
+            <div style={{ fontSize: '10px', fontWeight: 600,
+              color: selectedCue.status === 'CORRECTION' ? '#ff6b61' : selectedCue.status === 'WARNING' ? '#ffb340' : '#5ae088'
+            }}>{selectedCue.headline}</div>
+            {/* Metapher */}
+            <div style={{ background: 'rgba(168,129,189,0.1)', border: '1px solid rgba(168,129,189,0.2)', borderRadius: '8px', padding: '8px 10px' }}>
+              <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>💡 Bildhafte Erklärung</div>
+              <div style={{ fontSize: '11px', color: '#fff', fontStyle: 'italic', lineHeight: 1.45, fontWeight: 600 }}>{selectedCue.cueMetaphor}</div>
+            </div>
+            {/* KI-Note */}
+            {selectedCue.kiNote && (
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '7px', padding: '7px 10px' }}>
+                <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', marginBottom: '4px' }}>🤖 Messwert-Analyse</div>
+                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.45 }}>{selectedCue.kiNote}</div>
+              </div>
+            )}
+            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingTop: '2px' }}>Klick auf anderen Marker um diesen zu wechseln</div>
+          </div>
+        )}
+
+      </div>{/* end shared flex column */}
 
       {/* KI-METAPHER – compact (nur wenn kein selectedCue) */}
       {!selectedCue && (
