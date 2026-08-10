@@ -99,6 +99,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pen');
   const [drawingColor, setDrawingColor] = useState<string>('#ff453a');
   const [drawingLineWidth, setDrawingLineWidth] = useState<number>(3);
+  const [saveWithSkeleton, setSaveWithSkeleton] = useState<boolean>(true);
   const annotationCanvasRef = useRef<AnnotationCanvasHandle>(null);
 
   // Lightbox state
@@ -767,8 +768,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       ctx.fillRect(0, 0, W, H);
     }
 
-    // 3. Skeleton canvas overlay
-    if (skeletonCanvas) {
+    // 3. Skeleton canvas overlay (optional)
+    if (skeletonCanvas && saveWithSkeleton) {
       ctx.drawImage(skeletonCanvas, 0, 0, W, H);
     }
 
@@ -1541,6 +1542,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               ))}
 
               <div style={{ width: '30px', height: '1px', background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+
+              {/* Skeleton toggle */}
+              <button
+                onClick={() => setSaveWithSkeleton(v => !v)}
+                title={saveWithSkeleton ? 'Skelett ausblenden beim Speichern' : 'Skelett einblenden beim Speichern'}
+                style={{
+                  width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                  background: saveWithSkeleton ? 'rgba(48,209,88,0.18)' : 'rgba(255,255,255,0.06)',
+                  color: saveWithSkeleton ? '#30d158' : 'rgba(255,255,255,0.4)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '14px',
+                  transition: 'all 0.2s ease',
+                  boxShadow: saveWithSkeleton ? '0 0 6px rgba(48,209,88,0.3)' : 'none',
+                }}
+              >🦴</button>
 
               {/* Save PNG */}
               <button
