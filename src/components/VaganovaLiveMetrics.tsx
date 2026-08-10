@@ -1,5 +1,5 @@
 import React from 'react';
-import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
+import { VaganovaFullAnalysis, VaganovaMeasurement, MeasurementClass } from '../services/vaganovaAngleCalculator';
 
 interface Props {
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -12,33 +12,79 @@ const STATUS_COLOR: Record<string, string> = {
   ERROR:   '#ff453a',
 };
 
+// Class badge config – epistemological transparency
+const CLASS_BADGE: Record<MeasurementClass, { label: string; color: string; bg: string }> = {
+  vaganova_relation:          { label: 'VR',  color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  pedagogical_nominal_angle:  { label: 'PED', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
+  research_observation:       { label: 'OBS', color: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
+  individual_baseline:        { label: 'BAS', color: '#34d399', bg: 'rgba(52,211,153,0.12)' },
+  validated_system_threshold: { label: 'VAL', color: '#f9a8d4', bg: 'rgba(249,168,212,0.12)' },
+  not_measurable:             { label: '—',   color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
+};
+
 const MetricRow: React.FC<{ m: VaganovaMeasurement | null; label?: string }> = ({ m, label }) => {
   if (!m) return null;
-  const color = STATUS_COLOR[m.status ?? 'CORRECT'] ?? '#30d158';
-  const icon  = m.status === 'CORRECT' ? '✓' : m.status === 'WARNING' ? '⚠' : '✗';
+
   const displayLabel = label ?? m.label;
-  const displayVal = m.unit === 'deg'
-    ? `${Math.round(m.value)}°`
-    : m.unit === 'ratio'
-    ? `${m.value > 0 ? '+' : ''}${m.value.toFixed(1)}%`
-    : `${Math.round(m.value)}`;
+  const cls = m.measurement_class;
+  const badge = CLASS_BADGE[cls];
+
+  // not_measurable: special compact display
+  if (cls === 'not_measurable') {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
+        opacity: 0.6,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flex: 1 }}>
+          <span style={{ fontSize: '10px', color: '#6b7280', minWidth: '12px' }}>⊘</span>
+          <span style={{ fontSize: '10px', color: '#9ca3af', fontStyle: 'italic' }}>{displayLabel}</span>
+        </div>
+        <span style={{
+          fontSize: '8px', background: badge.bg, color: badge.color,
+          border: `1px solid ${badge.color}44`, borderRadius: '4px',
+          padding: '1px 5px', fontWeight: 700, letterSpacing: '0.5px'
+        }}>nicht messbar</span>
+      </div>
+    );
+  }
+
+  const color = STATUS_COLOR[m.status ?? 'CORRECT'] ?? '#30d158';
+  const icon  = m.status === 'CORRECT' ? '✓' : m.status === 'WARNING' ? '⚠' : m.status === 'ERROR' ? '✗' : '○';
+
+  // Format value
+  let displayVal = '';
+  if (m.unit === 'deg')         displayVal = `${Math.round(m.value)}°`;
+  else if (m.unit === 'delta_deg') displayVal = `${m.value > 0 ? '+' : ''}${m.value.toFixed(1)}°Δ`;
+  else if (m.unit === 'ratio')  displayVal = `${m.value > 0 ? '+' : ''}${m.value.toFixed(1)}%`;
+  else                          displayVal = `${Math.round(m.value)}`;
 
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
+      padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-        <span style={{ fontSize: '11px', color, fontWeight: 700, minWidth: '12px' }}>{icon}</span>
-        <span style={{ fontSize: '11px', color: '#c8c8d8', lineHeight: '1.3' }}>{displayLabel}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: '10px', color, fontWeight: 700, minWidth: '12px', flexShrink: 0 }}>{icon}</span>
+        <span style={{ fontSize: '10px', color: '#c8c8d8', lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayLabel}</span>
       </div>
-      <div style={{
-        fontSize: '12px', fontWeight: 800, color,
-        background: `${color}18`, border: `1px solid ${color}44`,
-        borderRadius: '8px', padding: '2px 8px', marginLeft: '8px',
-        fontFamily: 'monospace', letterSpacing: '0.5px'
-      }}>
-        {displayVal}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+        {/* Epistemological class badge */}
+        <span title={cls} style={{
+          fontSize: '7px', background: badge.bg, color: badge.color,
+          border: `1px solid ${badge.color}44`, borderRadius: '4px',
+          padding: '1px 4px', fontWeight: 700, letterSpacing: '0.5px', cursor: 'help'
+        }}>{badge.label}</span>
+        {/* Value chip */}
+        <div style={{
+          fontSize: '11px', fontWeight: 800, color,
+          background: `${color}18`, border: `1px solid ${color}44`,
+          borderRadius: '6px', padding: '1px 7px',
+          fontFamily: 'monospace', letterSpacing: '0.5px', minWidth: '42px', textAlign: 'center'
+        }}>
+          {displayVal}
+        </div>
       </div>
     </div>
   );
@@ -46,23 +92,40 @@ const MetricRow: React.FC<{ m: VaganovaMeasurement | null; label?: string }> = (
 
 const SectionHeader: React.FC<{ label: string }> = ({ label }) => (
   <div style={{
-    fontSize: '9px', fontWeight: 800, color: '#a881bd',
+    fontSize: '8px', fontWeight: 800, color: '#a881bd',
     textTransform: 'uppercase', letterSpacing: '1.2px',
-    marginTop: '10px', marginBottom: '4px',
+    marginTop: '8px', marginBottom: '2px',
+    display: 'flex', alignItems: 'center', gap: '4px'
   }}>
     {label}
   </div>
 );
 
+// Legend for class badges
+const Legend: React.FC = () => (
+  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+    {(Object.entries(CLASS_BADGE) as [MeasurementClass, typeof CLASS_BADGE[MeasurementClass]][]).map(([key, b]) => (
+      <span key={key} title={key} style={{
+        fontSize: '7px', background: b.bg, color: b.color,
+        border: `1px solid ${b.color}44`, borderRadius: '4px',
+        padding: '1px 5px', fontWeight: 700, letterSpacing: '0.4px', cursor: 'help'
+      }}>{b.label}</span>
+    ))}
+    <span style={{ fontSize: '7px', color: '#6b7280', alignSelf: 'center' }}>← Datenklasse (hover)</span>
+  </div>
+);
+
 export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isPlie }) => {
   if (!va) return (
-    <div style={{ fontSize: '11px', color: '#888', padding: '8px 0', textAlign: 'center' }}>
+    <div style={{ fontSize: '11px', color: '#6b7280', padding: '8px 0', textAlign: 'center' }}>
       Warte auf Skeleton-Daten…
     </div>
   );
 
   return (
     <div style={{ fontSize: '11px' }}>
+      <Legend />
+
       <SectionHeader label="Kopf / Hals" />
       <MetricRow m={va.headTilt} label="Kopfneigung" />
 
@@ -76,26 +139,30 @@ export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isP
       <MetricRow m={va.armLineQualityR} label="Arm-Linie rechts" />
 
       <SectionHeader label="Rumpf · Aplomb" />
-      <MetricRow m={va.spineTilt}  label="Wirbelsäule (Aplomb)" />
-      <MetricRow m={va.pelvicTilt} label="Becken-Neigung" />
+      <MetricRow m={va.spineTilt}  label="Wirbelsäule" />
+      <MetricRow m={va.pelvicTilt} label="Becken" />
 
-      <SectionHeader label={isPlie ? 'Beine · Plié (FPPA)' : 'Beine · Stand'} />
+      <SectionHeader label={isPlie ? 'Beine · Plié' : 'Beine · Stand'} />
       <MetricRow m={va.knieFlexionL}  label="Knieflexion links" />
       <MetricRow m={va.knieFlexionR}  label="Knieflexion rechts" />
-      <MetricRow m={va.valgusDriftL}  label="Valgus-Drift links" />
-      <MetricRow m={va.valgusDriftR}  label="Valgus-Drift rechts" />
+      <MetricRow m={va.valgusDriftL}  label="Knie-Drift links" />
+      <MetricRow m={va.valgusDriftR}  label="Knie-Drift rechts" />
 
       <SectionHeader label="Turnout · En Dehors" />
       <MetricRow m={va.turnoutL} label="Turnout links" />
       <MetricRow m={va.turnoutR} label="Turnout rechts" />
 
+      <SectionHeader label="Gesamt" />
+      <MetricRow m={va.plumbDeviation} label="Lotabweichung" />
+
       {isPlie && (
         <div style={{
-          marginTop: '8px', padding: '6px 10px',
-          background: 'rgba(255,214,10,0.08)', border: '1px solid rgba(255,214,10,0.25)',
-          borderRadius: '8px', fontSize: '10px', color: '#ffd60a', lineHeight: '1.4'
+          marginTop: '8px', padding: '6px 8px',
+          background: 'rgba(255,214,10,0.06)', border: '1px solid rgba(255,214,10,0.2)',
+          borderRadius: '6px', fontSize: '9px', color: '#ffd60a', lineHeight: '1.4'
         }}>
-          ⚠ Plié: Valgus-Drift biomechanisch unvermeidbar (NIH: Ø30°). Knie über Mittelfuß?
+          ⚠ Plié: Knie-Drift zeigt nur <strong>relative Änderung</strong> zur Ausgangsposition (Asaeda 2024).
+          Kein absoluter Valgus-Grenzwert aus Webcam.
         </div>
       )}
     </div>

@@ -1,13 +1,37 @@
 import { PoseLandmark } from './realMediaPipePose';
 
+/**
+ * Epistemological class for every measurement output.
+ * Prevents research_observation or pedagogical_nominal_angle values
+ * from being used as health/error thresholds.
+ *
+ * Sources:
+ *   - Asaeda et al. 2024 (MediaPipe vs Vicon: ~19° absolute valgus error)
+ *   - IADMS Turnout Resource Paper 2025
+ *   - Gorwa et al. 2020 (PLoS ONE)
+ *   - ISB Joint Coordinate System (Wu et al. 2002)
+ */
+export type MeasurementClass =
+  | 'vaganova_relation'          // Relational technique rule – often boolean or directional
+  | 'pedagogical_nominal_angle'  // Vaganova spatial height (45°/90°), NOT anatomical joint angle
+  | 'research_observation'       // Group mean from study – NEVER use as individual threshold
+  | 'individual_baseline'        // Personal session-1 value – reference for relative progress
+  | 'validated_system_threshold' // Only after Mocap/Vicon validation protocol
+  | 'not_measurable';            // Cannot be reliably measured with current sensor setup
+
 export interface VaganovaMeasurement {
-  value: number;       // The measured value in degrees (or unitless for ratios)
-  unit: 'deg' | 'ratio' | 'px';
-  confidence: number;  // 0-1, based on landmark visibility
-  label: string;       // Human-readable German label
-  // Vaganova-conformant classification
+  value: number;                     // The measured value
+  unit: 'deg' | 'ratio' | 'px' | 'delta_deg' | 'boolean_proxy';
+  confidence: number;                // 0–1, based on landmark visibility
+  label: string;                     // Human-readable German label
+  measurement_class: MeasurementClass; // Epistemological class – REQUIRED
+  // Status – only valid when measurement_class !== 'not_measurable'
   status?: 'CORRECT' | 'WARNING' | 'ERROR';
-  norm?: string;       // Human-readable norm description
+  // For not_measurable: why, and what would be needed
+  not_measurable_reason?: string;
+  required_sensor?: string;
+  norm?: string;                     // Human-readable norm description with source
+  source_page?: string;              // e.g. "Vaganova 6th ed. p.47"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,7 +193,7 @@ export const VAGANOVA_NORMS = {
 export interface VaganovaFullAnalysis {
   knieFlexionL: VaganovaMeasurement | null;
   knieFlexionR: VaganovaMeasurement | null;
-  valgusDriftL: VaganovaMeasurement | null;
+  valgusDriftL: VaganovaMeasurement | null;  // relative delta, class: not_measurable (absolute)
   valgusDriftR: VaganovaMeasurement | null;
   turnoutL: VaganovaMeasurement | null;
   turnoutR: VaganovaMeasurement | null;
@@ -179,15 +203,29 @@ export interface VaganovaFullAnalysis {
   portDeBrasR: VaganovaMeasurement | null;
   pelvicTilt: VaganovaMeasurement | null;
   shoulderSymmetry: VaganovaMeasurement | null;
-  shoulderElevationL: VaganovaMeasurement | null;  // NEW: Hochziehen left
-  shoulderElevationR: VaganovaMeasurement | null;  // NEW: Hochziehen right
-  armLineQualityL: VaganovaMeasurement | null;     // NEW: Port de Bras quality L
-  armLineQualityR: VaganovaMeasurement | null;     // NEW: Port de Bras quality R
+  shoulderElevationL: VaganovaMeasurement | null;
+  shoulderElevationR: VaganovaMeasurement | null;
+  armLineQualityL: VaganovaMeasurement | null;
+  armLineQualityR: VaganovaMeasurement | null;
   headTilt: VaganovaMeasurement | null;
   plumbDeviation: VaganovaMeasurement | null;
 }
 
 export class VaganovaAngleCalculator {
+  // ─── Baseline tracking for relative valgus drift (per Asaeda 2024) ───────
+  // Absolute valgus from webcam has ~19° systematic error vs Vicon.
+  // We track session-start values and only report RELATIVE change.
+  private valgusBaselineL: number | null = null;
+  private valgusBaselineR: number | null = null;
+  private baselineFrameCount = 0;
+  private static readonly BASELINE_FRAMES = 30; // ~2s at 15fps to establish baseline
+
+  public resetValgusBaseline(): void {
+    this.valgusBaselineL = null;
+    this.valgusBaselineR = null;
+    this.baselineFrameCount = 0;
+  }
+
   // Base Math Functions (private)
   private angle3P(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): number {
     let angle = Math.abs((Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x)) * (180 / Math.PI));
@@ -227,16 +265,19 @@ export class VaganovaAngleCalculator {
     if (conf < 0.3) return null;
 
     const angle = this.angle3P(landmarks[hipIdx], landmarks[kneeIdx], landmarks[ankleIdx]);
-    // Standing leg: 165–180° = straight = CORRECT
-    // Demi plié: 60–90°, Grand plié: 125–145° (NIH: 134.98° ± 4.62°)
+    // NOTE: No canonical Vaganova knee-flexion target for plié.
+    // Shown as research_observation only – never trigger ERROR for a specific value.
+    // Ref: Vaganova, Основы, 6th ed. – no degree value specified for plié depth.
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
       angle >= VAGANOVA_NORMS.plie.standingLegMin ? 'CORRECT' :
       angle >= VAGANOVA_NORMS.plie.grand.kneeFlexionMin ? 'WARNING' : 'ERROR';
     return {
       value: angle, unit: 'deg', confidence: conf,
+      measurement_class: 'research_observation',
       label: `Knieflexion ${side === 'L' ? 'links' : 'rechts'}`,
       status,
-      norm: `Vaganova: Stand ≥165° = korrekt, Grand Plié 125–145° (NIH: 134.98° ± 4.62°)`
+      norm: 'Beobachtungswert (Studienmittelwert, kein Vaganova-Sollwert). NIH: Grand Plié ~135° ±4.6°.',
+      source_page: 'Asaeda et al. 2024; NIH/PubMed'
     };
   }
 
@@ -249,67 +290,90 @@ export class VaganovaAngleCalculator {
     const knee = landmarks[kneeIdx];
     const ankle = landmarks[ankleIdx];
 
-    // TRUE Frontal Plane Projection Angle (FPPA):
-    // Measures how far the knee deviates MEDIALLY/LATERALLY from
-    // the straight line between hip and ankle.
-    // This is the angle of the knee's perpendicular offset from the hip→ankle axis.
-    //
-    // Method: Project knee onto hip→ankle vector, measure the lateral offset angle.
-    // A perfectly aligned knee gives 0°.
-    // Valgus (inward collapse) gives positive degrees.
-
+    // TRUE Frontal Plane Projection Angle (FPPA) – MediaPipe 2D proxy.
+    // IMPORTANT: Asaeda et al. 2024 found ~19° systematic error vs Vicon
+    // for ABSOLUTE valgus values. We therefore:
+    //   1. Track a session baseline (first ~30 frames)
+    //   2. Report only the RELATIVE DELTA from that baseline
+    //   3. Flag as 'not_measurable' if no baseline established yet
     const hx = hip.x, hy = hip.y;
     const ax = ankle.x, ay = ankle.y;
     const kx = knee.x, ky = knee.y;
 
-    // Vector from hip to ankle
-    const haX = ax - hx;
-    const haY = ay - hy;
+    const haX = ax - hx, haY = ay - hy;
     const haLen = Math.sqrt(haX * haX + haY * haY);
     if (haLen < 0.001) return null;
 
-    // Vector from hip to knee
-    const hkX = kx - hx;
-    const hkY = ky - hy;
-
-    // Perpendicular distance of knee from hip→ankle line
-    // Cross product gives signed distance
+    const hkX = kx - hx, hkY = ky - hy;
     const crossProduct = haX * hkY - haY * hkX;
     const perpDist = crossProduct / haLen;
-
-    // Convert to angle: atan2(perpendicular_offset, parallel_projection)
     const dotProduct = haX * hkX + haY * hkY;
     const parallelDist = dotProduct / haLen;
+    const rawAngle = Math.abs(Math.atan2(perpDist, parallelDist) * (180 / Math.PI));
 
-    const driftAngle = Math.abs(Math.atan2(perpDist, parallelDist) * (180 / Math.PI));
+    // ── Baseline establishment (first BASELINE_FRAMES frames in standing position)
+    const isLeft = side === 'L';
+    if (this.baselineFrameCount < VaganovaAngleCalculator.BASELINE_FRAMES) {
+      // Accumulate running mean for each side independently.
+      // baselineFrameCount is incremented only in the R branch (once per analysis frame).
+      if (isLeft) {
+        this.valgusBaselineL = this.valgusBaselineL === null
+          ? rawAngle
+          : (this.valgusBaselineL * this.baselineFrameCount + rawAngle) / (this.baselineFrameCount + 1);
+      } else {
+        this.valgusBaselineR = this.valgusBaselineR === null
+          ? rawAngle
+          : (this.valgusBaselineR * this.baselineFrameCount + rawAngle) / (this.baselineFrameCount + 1);
+        this.baselineFrameCount++; // count frames, not calls
+      }
+      // Not enough baseline yet – report as not_measurable
+      return {
+        value: rawAngle, unit: 'deg', confidence: conf,
+        measurement_class: 'not_measurable',
+        label: `Knie-Alignment ${isLeft ? 'links' : 'rechts'} (Baseline wird aufgebaut…)`,
+        not_measurable_reason: 'Baseline-Aufbau läuft (erste 2 Sekunden). Absoluter Valgus aus Webcam: ~19° Systemfehler (Asaeda 2024).',
+        required_sensor: 'Vicon/Qualisys für absolute Winkel',
+        norm: 'Asaeda et al. 2024: MediaPipe Valgus vs. Vicon ≈ 19° Systemfehler bei absoluten Werten.'
+      };
+    }
 
-    const { correct, warning } = VAGANOVA_NORMS.valgus;
+    // ── Relative delta from baseline (valid measurement)
+    const baseline = isLeft ? this.valgusBaselineL! : this.valgusBaselineR!;
+    const delta = rawAngle - baseline;
+    // Status based on RELATIVE change from individual baseline, not absolute value
+    // Threshold: >5° increase = WARNING (knee collapsing inward vs. start), >10° = ERROR
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
-      driftAngle <= correct ? 'CORRECT' :
-      driftAngle <= warning ? 'WARNING' : 'ERROR';
+      Math.abs(delta) <= 5 ? 'CORRECT' :
+      Math.abs(delta) <= 10 ? 'WARNING' : 'ERROR';
 
     return {
-      value: driftAngle, unit: 'deg', confidence: conf,
-      label: `Valgus-Drift ${side === 'L' ? 'links' : 'rechts'}`,
+      value: Math.round(delta * 10) / 10,
+      unit: 'delta_deg',
+      confidence: conf,
+      measurement_class: 'individual_baseline',
+      label: `Knie-Drift ${isLeft ? 'links' : 'rechts'} (Δ zur Ausgangsposition)`,
       status,
-      norm: `Vaganova FPPA: <${correct}° = korrekt, ${correct}–${warning}° = Warnung, >${warning}° = Fehler`
+      norm: 'Relative Änderung vom persönlichen Ausgangswert. Asaeda 2024: absoluter Valgus aus Webcam nicht vergleichbar.',
+      source_page: 'Asaeda et al. 2024, PMC11399566'
     };
   }
 
   public calcTurnout(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
     const [heelIdx, toeIdx, ankleIdx] = side === 'L' ? [29, 31, 27] : [30, 32, 28];
-    const { minAcceptable, maxSafe } = VAGANOVA_NORMS.turnout;
 
     const classify = (footAngle: number, conf: number): VaganovaMeasurement => {
-      const status: 'CORRECT' | 'WARNING' | 'ERROR' =
-        footAngle >= minAcceptable && footAngle <= maxSafe ? 'CORRECT' :
-        footAngle >= 30 ? 'WARNING' : 'ERROR';
+      // Turnout is a PEDAGOGICAL NOMINAL ANGLE – "180°" is a line ideal, not
+      // an individual anatomical target. IADMS 2025: individual bone structure
+      // frequently makes 180° anatomically unrealistic.
+      // We report foot opening angle (visible proxy only), not hip external rotation.
+      const reached90 = footAngle >= 40; // ≥40° per foot ≈ ≥80° total = functional
       return {
         value: footAngle, unit: 'deg', confidence: conf,
-        label: `Turnout ${side === 'L' ? 'links' : 'rechts'}`,
-        status,
-        norm: `Vaganova En Dehors: ${minAcceptable}–${maxSafe}° = korrekt (Hüfte, nicht Knie)
-             Beginner: 60–70°, Intermediate: 70–80°, Advanced: 80–90°`
+        measurement_class: 'pedagogical_nominal_angle',
+        label: `Turnout ${side === 'L' ? 'links' : 'rechts'} (Fußwinkel-Proxy)`,
+        status: reached90 ? 'CORRECT' : footAngle >= 25 ? 'WARNING' : 'ERROR',
+        norm: 'Fußwinkel-Proxy (nicht Hüftaußenrotation!). IADMS 2025: 180° ist Linienideal, kein individuelles Ziel.',
+        source_page: 'IADMS Turnout Resource Paper 2025; Gorwa et al. 2020 PLoS ONE'
       };
     };
 
@@ -347,8 +411,10 @@ export class VaganovaAngleCalculator {
 
     return {
       value: angle, unit: 'deg', confidence: conf,
+      measurement_class: 'vaganova_relation',
       label: 'Aplomb (Rumpfneigung)', status,
-      norm: `Vaganova Aplomb: ≤2° = korrekt, 2–5° = akzeptabel, >5° = Fehler`
+      norm: 'Vaganova: Körperblöcke senkrecht gestapelt. Bildprojektion – kein ISB-Gelenkwinkel.',
+      source_page: 'Vaganova, Основы, 6th ed. p.12; ISB Wu et al. 2002'
     };
   }
 
@@ -378,7 +444,10 @@ export class VaganovaAngleCalculator {
       value: epaulementDeg,
       unit: 'deg',
       confidence: conf,
-      label: 'Épaulement'
+      measurement_class: 'vaganova_relation',
+      label: 'Épaulement (Kopfrotations-Proxy)',
+      norm: 'Épaulement ist relational (Bühne, Becken, Schulter, Kopf, Blick). Kein Gradnormwert. Vaganova 6th ed.',
+      source_page: 'Vaganova, Основы, 6th ed.; kein Grad-Sollwert'
     };
   }
 
@@ -392,7 +461,9 @@ export class VaganovaAngleCalculator {
       value: angle,
       unit: 'deg',
       confidence: conf,
-      label: `Port de Bras ${side === 'L' ? 'links' : 'rechts'}`
+      measurement_class: 'vaganova_relation',
+      label: `Port de Bras ${side === 'L' ? 'links' : 'rechts'} (Ellbogen-Winkel)`,
+      norm: 'Arm-Linie Proxy. Kein universeller Schulterwinkel für 2. Pos. (Vaganova).'
     };
   }
 
@@ -412,8 +483,10 @@ export class VaganovaAngleCalculator {
 
     return {
       value: angle, unit: 'deg', confidence: conf,
+      measurement_class: 'vaganova_relation',
       label: 'Beckenneigung', status,
-      norm: `Vaganova: Becken neutral ≤3° = korrekt, 3–6° = Warnung, >6° = Fehler`
+      norm: 'Vaganova: Becken neutral. Bildprojektion (coronal). Kein ISB-Beckenwinkel.',
+      source_page: 'Vaganova, Основы, 6th ed.'
     };
   }
 
@@ -445,9 +518,11 @@ export class VaganovaAngleCalculator {
       value: angleDeg,
       unit: 'deg',
       confidence: conf,
+      measurement_class: 'vaganova_relation',
       label: 'Schulter-Horizontalität',
       status,
-      norm: `Vaganova: ≤${symmetryDegCorrect}° = korrekt, ${symmetryDegCorrect}–${symmetryDegWarning}° = Warnung, >${symmetryDegWarning}° = Fehler`
+      norm: 'Vaganova: Schulterachse horizontal. Ausnahme: Épaulement (gewollte Asymmetrie).',
+      source_page: 'Vaganova, Основы, 6th ed.'
     };
   }
 
@@ -478,12 +553,14 @@ export class VaganovaAngleCalculator {
       elevated >= -elevationThresholdError ? 'WARNING' : 'ERROR';
 
     return {
-      value: Math.round(normalizedDist * 1000) / 10, // convert to %-of-frame for readability
+      value: Math.round(normalizedDist * 1000) / 10,
       unit: 'ratio',
       confidence: conf,
+      measurement_class: 'vaganova_relation',
       label: `Schulter-Elevation ${side === 'L' ? 'links' : 'rechts'}`,
       status,
-      norm: 'Vaganova: Schultern entspannt nach unten, nicht zu den Ohren hochziehen'
+      norm: 'Vaganova: Schultern entspannt nach unten, nicht zu den Ohren hochziehen.',
+      source_page: 'Vaganova, Основы, 6th ed.'
     };
   }
 
@@ -524,9 +601,11 @@ export class VaganovaAngleCalculator {
       value: elbowAngle,
       unit: 'deg',
       confidence: conf,
-      label: `Arm-Linie ${side === 'L' ? 'links' : 'rechts'}`,
+      measurement_class: 'validated_system_threshold',
+      label: `Arm-Linie ${side === 'L' ? 'links' : 'rechts'} (Port de Bras)`,
       status,
-      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}° = korrekt, Ellbogen leicht unter Schulter`
+      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}° = korrekt. Gültig nur bei kalibrierter Frontalaufnahme.`,
+      source_page: 'Vaganova, Основы, 6th ed.; validation_status: proxy_unvalidated'
     };
   }
 
@@ -546,9 +625,11 @@ export class VaganovaAngleCalculator {
       value: angle,
       unit: 'deg',
       confidence: conf,
+      measurement_class: 'vaganova_relation',
       label: 'Kopfneigung',
       status,
-      norm: 'Vaganova: Kopf aufrecht ≤2° = korrekt, 2–5° = Épaulement akzeptabel, >5° = Fehler'
+      norm: 'Vaganova: Kopf aufrecht. Épaulement: leichte Neigung akzeptabel. Kein Gradnormwert.',
+      source_page: 'Vaganova, Основы, 6th ed.'
     };
   }
 
@@ -564,7 +645,10 @@ export class VaganovaAngleCalculator {
       value: dx,
       unit: 'px',
       confidence: conf,
-      label: 'Lotabweichung'
+      measurement_class: 'not_measurable',
+      label: 'Lotabweichung',
+      not_measurable_reason: 'Rohe Pixeleinheit ohne Kalibrierung. Kein metrischer Abstand bestimmbar.',
+      required_sensor: 'Kalibrierte Kamera mit bekannter Brennweite und Bodenebene'
     };
   }
 

@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://balletos.io/schemas/vaganova-metrics/v1.0.0",
+  "title": "BalletOS Vaganova Metrics Schema",
+  "description": "Machine-readable rule model for Vaganova-based ballet skeleton analysis. Each metric entry specifies the epistemological class, measurement validity, and source provenance. NO research_observation or pedagogical_nominal_angle values may be used as health or error thresholds without system validation.",
+  "version": "1.0.0",
+  "schema_date": "2026-08-10",
+  "authors": ["BalletOS Team", "Nicole Schönewolf (pedagogy)"],
+  "references": {
+    "vaganova_primary": "Vaganova, А.Я. Основы классического танца, 6th ed., 2000. ISBN 978-5-8114-0397-8",
+    "mediapipe_limits": "BlazePose GHUM Model Card, Google 2022 — monocular depth 'out of scope'",
+    "valgus_error": "Asaeda M. et al. 2024, PMC11399566 — MediaPipe vs Vicon: ~19° systematic error for absolute knee valgus",
+    "turnout_limits": "IADMS Turnout Resource Paper, Revision 2025 — 180° anatomically unrealistic for many individuals",
+    "multi_segment_turnout": "Gorwa J. et al. 2020, PLoS ONE 10.1371/journal.pone.0230654 — foot angle ≠ hip rotation",
+    "isb_coordinates": "Wu G. et al. 2002, J Biomech PMID 11934426 — ISB Joint Coordinate System"
+  },
+  "measurement_classes": {
+    "vaganova_relation": "Relational technique rule from Vaganova pedagogy — often directional or boolean, not a precise degree target",
+    "pedagogical_nominal_angle": "Vaganova spatial height convention (e.g. 90° = leg at hip height) — NOT an anatomical joint angle",
+    "research_observation": "Group mean from biomechanical study — context only, NEVER use as individual threshold",
+    "individual_baseline": "Personal session-1 value — only relative deltas are meaningful, not absolute",
+    "validated_system_threshold": "Threshold established after comparison against calibrated Mocap/Vicon reference",
+    "not_measurable": "Cannot be reliably measured with current sensor; output must say so explicitly"
+  },
+  "capture_modes": {
+    "home_screening": {
+      "description": "Single iPad/smartphone camera, uncalibrated",
+      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle", "individual_baseline"],
+      "forbidden_outputs": ["absolute valgus degree", "anatomical hip rotation", "ground reaction force"]
+    },
+    "studio_biomechanics": {
+      "description": "Two synchronized calibrated cameras + Ballet landmark set",
+      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle", "individual_baseline", "validated_system_threshold"]
+    },
+    "studio_kinetics": {
+      "description": "Calibrated cameras + pressure plate/insoles",
+      "allowed_classes": "all"
+    }
+  },
+  "metrics": [
+    {
+      "metric_id": "heel_contact_demi_plie",
+      "movement_id": "demi_plie_1st_position",
+      "label_de": "Fersen Bodenkontakt",
+      "phase": "descent_and_hold",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "sagittal_side_view",
+      "target_type": "boolean",
+      "target": { "operator": "==", "value": true },
+      "anatomical_joint_angle": false,
+      "source": { "work": "Vaganova, Основы", "edition": "6th, 2000", "page": 47 },
+      "mediapipe_landmarks_used": [27, 28, 31, 32],
+      "mediapipe_validity": "requires_calibrated_side_view",
+      "known_failure_modes": ["frontal_view", "partial_occlusion"],
+      "validation_status": "proxy_unvalidated",
+      "not_measurable_output": "Seitenansicht erforderlich"
+    },
+    {
+      "metric_id": "projected_knee_flexion_plie",
+      "movement_id": "plie_any",
+      "label_de": "Projizierte Knieflexion",
+      "phase": "any",
+      "measurement_class": "research_observation",
+      "coordinate_frame": "sagittal_side_view",
+      "target_type": "none",
+      "anatomical_joint_angle": false,
+      "note": "No canonical Vaganova knee-flexion value for plié. NIH group mean ~135° ±4.6° is observational, not a prescription. Do NOT use as error threshold.",
+      "source": { "work": "NIH/PubMed", "study": "Grand Plié kinematics", "doi": "10.1371/journal.pone.0230654" },
+      "mediapipe_landmarks_used": [23, 24, 25, 26, 27, 28],
+      "mediapipe_validity": "requires_side_view",
+      "validation_status": "not_system_validated"
+    },
+    {
+      "metric_id": "knee_drift_relative",
+      "movement_id": "plie_any",
+      "label_de": "Knie-Drift relativ zur Ausgangsposition",
+      "phase": "descent",
+      "measurement_class": "individual_baseline",
+      "coordinate_frame": "frontal_view",
+      "target_type": "delta",
+      "target": { "operator": "<=", "value": 5, "unit": "delta_deg", "reference": "session_baseline_frame_0_to_30" },
+      "anatomical_joint_angle": false,
+      "mediapipe_absolute_error_vs_vicon": "~19 degrees (Asaeda 2024)",
+      "source": { "work": "Asaeda et al. 2024", "pmcid": "PMC11399566" },
+      "mediapipe_landmarks_used": [23, 24, 25, 26, 27, 28],
+      "mediapipe_validity": "frontal_view_relative_change_only",
+      "validation_status": "relative_only_valid",
+      "not_measurable_output": "Absoluter Valgus nicht messbar (Webcam). Nur relative Änderung wird angezeigt."
+    },
+    {
+      "metric_id": "shoulder_horizontal",
+      "movement_id": "any_standing",
+      "label_de": "Schulter-Horizontalität",
+      "phase": "any",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view",
+      "target_type": "angle_deviation_from_horizontal",
+      "target": { "operator": "<=", "value": 2, "unit": "deg" },
+      "exception": "Épaulement positions intentionally use shoulder asymmetry — must not flag as error",
+      "source": { "work": "Vaganova, Основы", "edition": "6th, 2000" },
+      "mediapipe_landmarks_used": [11, 12],
+      "mediapipe_validity": "frontal_view",
+      "validation_status": "proxy_unvalidated"
+    },
+    {
+      "metric_id": "turnout_foot_proxy",
+      "movement_id": "any_standing_or_plie",
+      "label_de": "Turnout Fußwinkel-Proxy",
+      "phase": "any",
+      "measurement_class": "pedagogical_nominal_angle",
+      "note": "Foot opening angle ≠ hip external rotation. IADMS 2025: individual bone structure makes 180° frequently unrealistic. Gorwa 2020: same foot angle can come from 4 different segment combinations.",
+      "target_type": "pedagogical_nominal",
+      "target": { "convention": "line_ideal_not_individual_target", "value": 180, "unit": "total_deg_both_feet" },
+      "anatomical_joint_angle": false,
+      "source": { "work": "IADMS Turnout Resource Paper 2025", "supplementary": "Gorwa et al. 2020 PLoS ONE" },
+      "mediapipe_landmarks_used": [27, 28, 29, 30, 31, 32],
+      "mediapipe_validity": "frontal_view_foot_proxy_only",
+      "validation_status": "proxy_not_anatomical"
+    },
+    {
+      "metric_id": "arm_line_port_de_bras",
+      "movement_id": "port_de_bras_any",
+      "label_de": "Arm-Linie Port de Bras (Ellbogen-Winkel)",
+      "phase": "any",
+      "measurement_class": "validated_system_threshold",
+      "coordinate_frame": "frontal_view_calibrated",
+      "target": { "operator": "between", "min": 145, "max": 175, "unit": "deg" },
+      "anatomical_joint_angle": false,
+      "note": "No universal shoulder angle for 2nd position (Vaganova). This 3-point elbow angle is a valid proxy only in calibrated frontal view.",
+      "source": { "work": "Vaganova, Основы", "edition": "6th, 2000" },
+      "mediapipe_landmarks_used": [11, 12, 13, 14, 15, 16],
+      "mediapipe_validity": "requires_calibrated_frontal_view",
+      "validation_status": "proxy_unvalidated"
+    },
+    {
+      "metric_id": "spine_tilt_aplomb",
+      "movement_id": "any_standing",
+      "label_de": "Aplomb (Rumpfneigung)",
+      "phase": "any",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_or_side_view",
+      "target_type": "deviation_from_vertical",
+      "target": { "operator": "<=", "value": 2, "unit": "deg" },
+      "anatomical_joint_angle": false,
+      "note": "2D image projection, not ISB spinal segmental angle. Indicates gross postural deviation only.",
+      "source": { "work": "Vaganova, Основы", "edition": "6th, 2000", "page": 12 },
+      "mediapipe_landmarks_used": [11, 12, 23, 24],
+      "mediapipe_validity": "frontal_or_side_view",
+      "validation_status": "proxy_unvalidated"
+    }
+  ]
+}
