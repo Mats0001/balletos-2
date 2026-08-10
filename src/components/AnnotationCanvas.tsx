@@ -1,8 +1,8 @@
 // AnnotationCanvas – Drawing overlay for paused video frames
-// Supports: pen (freehand), arrow, text label, eraser
-// Exposed via forwardRef so parent can call clear() and getDataUrl()
+// Architecture: strokesRef = source of truth, setState = render trigger only
+// This avoids all stale-closure / React-batching race conditions.
 
-import React, { useRef, useEffect, useImperativeHandle, forwardRef, useState } from 'react';
+import React, { useRef, useEffect, useImperativeHandle, forwardRef, useState, useCallback } from 'react';
 
 export type DrawingTool = 'pen' | 'arrow' | 'eraser' | 'text';
 
@@ -15,7 +15,7 @@ export interface AnnotationCanvasHandle {
 interface Props {
   width: number;
   height: number;
-  isActive: boolean;       // true = video paused → drawing enabled
+  isActive: boolean;
   tool: DrawingTool;
   color: string;
   lineWidth: number;
@@ -33,27 +33,29 @@ interface Stroke {
 export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
   ({ width, height, isActive, tool, color, lineWidth }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [strokes, setStrokes] = useState<Stroke[]>([]);
-    const strokesRef = useRef<Stroke[]>([]); // Ref mirror to avoid stale closure in imperative handle
-    const currentStroke = useRef<Stroke | null>(null);
+
+    // ── Source of truth lives in refs – no stale closure risk ──────────────
+    const strokesRef = useRef<Stroke[]>([]);
+    const currentPointsRef = useRef<Point[]>([]);
     const isDrawing = useRef(false);
 
-    // Keep ref in sync with state
-    useEffect(() => {
-      strokesRef.current = strokes;
-    }, [strokes]);
+    // Render trigger: incrementing this causes the useEffect to redraw
+    const [tick, setTick] = useState(0);
+    const forceRender = useCallback(() => setTick(t => t + 1), []);
 
-    // Expose handle methods to parent – use ref for hasStrokes to avoid stale closure
+    // ── Expose imperative handle ────────────────────────────────────────────
     useImperativeHandle(ref, () => ({
       clear: () => {
         strokesRef.current = [];
-        setStrokes([]);
+        currentPointsRef.current = [];
+        isDrawing.current = false;
+        forceRender();
       },
       getDataUrl: () => canvasRef.current?.toDataURL('image/png') ?? null,
       hasStrokes: () => strokesRef.current.length > 0,
-    }), []); // Empty deps – safe because we read from ref, not state
+    }), [forceRender]);
 
-    // Re-render canvas whenever strokes change
+    // ── Canvas redraw – reads directly from strokesRef ─────────────────────
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas || !canvas.width || !canvas.height) return;
@@ -62,39 +64,26 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      for (const stroke of strokes) {
-        if (!stroke || !stroke.points || stroke.points.length === 0) continue;
-        ctx.save();
-        ctx.strokeStyle = stroke.color;
-        ctx.fillStyle = stroke.color;
-        ctx.lineWidth = stroke.lineWidth;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalCompositeOperation = stroke.type === 'eraser' ? 'destination-out' : 'source-over';
-
-        if (stroke.type === 'pen' || stroke.type === 'eraser') {
-          ctx.beginPath();
-          ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-          for (let i = 1; i < stroke.points.length; i++) {
-            ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-          }
-          ctx.stroke();
-        } else if (stroke.type === 'arrow' && stroke.points.length >= 2) {
-          const from = stroke.points[0];
-          const to = stroke.points[stroke.points.length - 1];
-          drawArrow(ctx, from, to, stroke.lineWidth);
-        } else if (stroke.type === 'text' && stroke.text && stroke.points.length > 0) {
-          ctx.font = `bold ${Math.max(14, stroke.lineWidth * 6)}px Inter, sans-serif`;
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.shadowColor = 'rgba(0,0,0,0.8)';
-          ctx.shadowBlur = 4;
-          ctx.fillText(stroke.text, stroke.points[0].x, stroke.points[0].y);
-          ctx.shadowBlur = 0;
-        }
-        ctx.restore();
+      // Draw all completed strokes
+      for (const stroke of strokesRef.current) {
+        if (!stroke?.points?.length) continue;
+        renderStroke(ctx, stroke);
       }
-    }, [strokes]);
 
+      // Draw current in-progress stroke (live preview)
+      if (isDrawing.current && currentPointsRef.current.length > 0) {
+        const liveStroke: Stroke = {
+          type: tool,
+          color,
+          lineWidth,
+          points: currentPointsRef.current,
+        };
+        renderStroke(ctx, liveStroke);
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tick, width, height]);
+
+    // ── Pointer helpers ─────────────────────────────────────────────────────
     const getPos = (e: React.MouseEvent | React.TouchEvent): Point | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
@@ -110,53 +99,59 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
     };
 
+    // ── Event handlers ──────────────────────────────────────────────────────
     const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
       if (!isActive) return;
       const pos = getPos(e);
       if (!pos) return;
-      isDrawing.current = true;
 
       if (tool === 'text') {
         const text = window.prompt('Beschriftung eingeben:');
-        if (text && text.trim()) {
-          const newStroke: Stroke = { type: 'text', color, lineWidth, points: [pos], text: text.trim() };
-          strokesRef.current = [...strokesRef.current, newStroke];
-          setStrokes(prev => [...prev, newStroke]);
+        if (text?.trim()) {
+          strokesRef.current = [
+            ...strokesRef.current,
+            { type: 'text', color, lineWidth, points: [pos], text: text.trim() },
+          ];
+          forceRender();
         }
+        return;
+      }
+
+      isDrawing.current = true;
+      currentPointsRef.current = [pos];
+      forceRender();
+    };
+
+    const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
+      if (!isActive || !isDrawing.current) return;
+      const pos = getPos(e);
+      if (!pos) return;
+      currentPointsRef.current.push(pos);
+      forceRender();
+    };
+
+    const handlePointerUp = () => {
+      if (!isDrawing.current || currentPointsRef.current.length === 0) {
         isDrawing.current = false;
         return;
       }
 
-      const newStroke: Stroke = { type: tool, color, lineWidth, points: [pos] };
-      currentStroke.current = newStroke;
-      strokesRef.current = [...strokesRef.current, newStroke];
-      setStrokes(prev => [...prev, newStroke]);
-    };
+      // Commit the finished stroke to the permanent list
+      const finishedStroke: Stroke = {
+        type: tool,
+        color,
+        lineWidth,
+        points: [...currentPointsRef.current], // defensive copy
+      };
+      strokesRef.current = [...strokesRef.current, finishedStroke];
 
-    const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-      if (!isActive || !isDrawing.current || !currentStroke.current) return;
-      const pos = getPos(e);
-      if (!pos) return;
-
-      // Mutate the current stroke's points array directly (avoids unnecessary re-renders during drag)
-      currentStroke.current.points.push(pos);
-
-      // Trigger re-render by replacing last stroke in state
-      setStrokes(prev => {
-        if (prev.length === 0) return prev;
-        const updated = [...prev];
-        updated[updated.length - 1] = { ...currentStroke.current! };
-        return updated;
-      });
-    };
-
-    const handlePointerUp = () => {
+      // Reset live stroke
       isDrawing.current = false;
-      currentStroke.current = null;
+      currentPointsRef.current = [];
+      forceRender();
     };
 
-    // Guard against zero dimensions (prevents blank canvas crash)
-    const safeWidth = width > 0 ? width : 1;
+    const safeWidth  = width  > 0 ? width  : 1;
     const safeHeight = height > 0 ? height : 1;
 
     return (
@@ -178,7 +173,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           zIndex: 20,
           cursor: isActive
             ? tool === 'eraser' ? 'cell'
-            : tool === 'text' ? 'text'
+            : tool === 'text'   ? 'text'
             : 'crosshair'
             : 'default',
           pointerEvents: isActive ? 'auto' : 'none',
@@ -191,16 +186,54 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
 AnnotationCanvas.displayName = 'AnnotationCanvas';
 
-// ── Util: Draw an arrow from→to ──────────────────────────────────────────────
+// ── Render a single stroke onto a canvas context ─────────────────────────────
+function renderStroke(ctx: CanvasRenderingContext2D, stroke: Stroke) {
+  ctx.save();
+  ctx.strokeStyle = stroke.color;
+  ctx.fillStyle   = stroke.color;
+  ctx.lineWidth   = stroke.lineWidth;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.globalCompositeOperation = stroke.type === 'eraser' ? 'destination-out' : 'source-over';
+
+  if (stroke.type === 'pen' || stroke.type === 'eraser') {
+    if (stroke.points.length < 2) {
+      // Single dot
+      ctx.beginPath();
+      ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.lineWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      }
+      ctx.stroke();
+    }
+  } else if (stroke.type === 'arrow' && stroke.points.length >= 2) {
+    const from = stroke.points[0];
+    const to   = stroke.points[stroke.points.length - 1];
+    drawArrow(ctx, from, to, stroke.lineWidth);
+  } else if (stroke.type === 'text' && stroke.text && stroke.points.length > 0) {
+    ctx.font = `bold ${Math.max(14, stroke.lineWidth * 6)}px Inter, sans-serif`;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur  = 5;
+    ctx.fillText(stroke.text, stroke.points[0].x, stroke.points[0].y);
+    ctx.shadowBlur  = 0;
+  }
+
+  ctx.restore();
+}
+
+// ── Arrow helper ──────────────────────────────────────────────────────────────
 function drawArrow(ctx: CanvasRenderingContext2D, from: Point, to: Point, lw: number) {
   const headLen = Math.max(16, lw * 5);
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const angle = Math.atan2(dy, dx);
+  const angle   = Math.atan2(to.y - from.y, to.x - from.x);
 
   ctx.beginPath();
   ctx.moveTo(from.x, from.y);
-  ctx.lineTo(to.x, to.y);
+  ctx.lineTo(to.x,   to.y);
   ctx.stroke();
 
   ctx.beginPath();
