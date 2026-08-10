@@ -1125,7 +1125,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   loop
                   muted
                   playsInline
-                  controls={true}
                   onLoadedData={() => {
                     realMediaPipePose.reset();
                     vaganova3DKinematics.reset();
