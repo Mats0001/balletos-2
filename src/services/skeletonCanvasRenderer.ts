@@ -10,6 +10,7 @@ import { ReconstructedSkeleton, KinematicPoint } from './vaganova3DKinematics';
 import { vaganovaKineticAI } from './vaganovaKineticAI';
 import { vaganovaArmAnalyzer, ArmPositionResult, ElbowAnalysis, EpaulementResult } from './vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer, SickleWingResult, WeightDistributionResult } from './vaganovaFootAnalyzer';
+import { TEACHER_AMPEL_COLORS, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
 
 // ─── ANATOMISCHE FARBPALETTE (Berater 2026-08-10 – Sprint 1) ───
 // Farben kodieren Körperregionen, KEIN Status-Urteil.
@@ -266,10 +267,65 @@ export function renderSkeletonToCanvas(
   const mode = opts.overlayMode ?? 'anatomisch';
 
   // Status → Farbe (nur aktiv in 'lehrer-ampel'-Modus)
-  const statusColor = (s?: string): string => {
+  // WICHTIG: undefined/not_measurable = NEUTRAL (niemals automatisch Grün!)
+  // (Berater PROJECT_DECISION 2026-08-10)
+  const statusColor = (s?: string, measurementClass?: string): string => {
     if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
-    return s === 'CORRECT' ? '#30d158' : s === 'WARNING' ? '#ffd60a' : s === 'ERROR' ? '#ff453a' : '#30d158';
+    // Neutrale Zustände: fehlende Evidenz darf NIEMALS Grün werden
+    if (!s || s === undefined) return TEACHER_AMPEL_COLORS.NEUTRAL;
+    if (measurementClass && NEUTRAL_MEASUREMENT_CLASSES.has(measurementClass as any))
+      return TEACHER_AMPEL_COLORS.NEUTRAL;
+    return s === 'CORRECT' ? TEACHER_AMPEL_COLORS.CORRECT
+         : s === 'WARNING' ? TEACHER_AMPEL_COLORS.WARNING
+         : s === 'ERROR'   ? TEACHER_AMPEL_COLORS.ERROR
+         : TEACHER_AMPEL_COLORS.NEUTRAL;
   };
+
+  /**
+   * Lehrer-Ampel Bein-Heuristik (experimentell).
+   * Ableitung aus Roh-Messwerten ohne die Epistemologie zu verändern.
+   * knieFlexion (research_observation) + valgusDrift (individual_baseline)
+   * werden KOMBINIERT in eine pädagogische Einschätzung.
+   * Kein validiertes Scoring – nur KI-Vorschlag für Nicole.
+   */
+  const teacherLegStatus = (side: 'L' | 'R'): 'CORRECT' | 'WARNING' | 'ERROR' | 'NEUTRAL' => {
+    if (mode !== 'lehrer-ampel') return 'NEUTRAL';
+    const va = opts.vaganovaAnalysis;
+    if (!va) return 'NEUTRAL';
+
+    const knee = side === 'L' ? va.knieFlexionL : va.knieFlexionR;
+    const valgus = side === 'L' ? va.valgusDriftL : va.valgusDriftR;
+
+    // Kein Basiswert vorhanden: neutral
+    if (!knee && !valgus) return 'NEUTRAL';
+
+    let score = 0; // 0=NEUTRAL, 1=CORRECT, 2=WARNING, 3=ERROR
+
+    // Knieflexion-Heuristik:
+    // Vaganova Demi-Plié: 60–90° → CORRECT; Grand-Plié: ~135° → CORRECT
+    // Gerades Standbein: ≥165° → CORRECT; <120° ohne Plié-Kontext → WARNING
+    if (knee && knee.measurement_class === 'research_observation') {
+      const kv = Math.abs(knee.value);
+      if (kv >= 165) score = Math.max(score, 1);        // Gerades Standbein
+      else if (kv >= 60 && kv <= 145) score = Math.max(score, 1); // Plié-Bereich
+      else if (kv < 40 || kv > 165) score = Math.max(score, 2);  // auffällig
+    }
+
+    // Valgus-Drift-Heuristik (Delta zur Baseline):
+    // |delta| < 5° → CORRECT; 5–10° → WARNING; >10° → ERROR
+    if (valgus && valgus.measurement_class === 'individual_baseline') {
+      const dv = Math.abs(valgus.value);
+      if (dv < 5)       score = Math.max(score, 1);
+      else if (dv < 10) score = Math.max(score, 2);
+      else              score = Math.max(score, 3);
+    }
+
+    if (score === 0) return 'NEUTRAL';
+    if (score === 1) return 'CORRECT';
+    if (score === 2) return 'WARNING';
+    return 'ERROR';
+  };
+
 
   // Knochen-Farbe nach Region und Modus
   const boneColor = (regional: string): string =>
@@ -445,14 +501,15 @@ export function renderSkeletonToCanvas(
 
   // ─── BEINE (indigo / status im Lehrer-Ampel-Modus) ───
   // Valgus-Ringe bleiben entfernt (Richtungsfehler abs()). Status zeigt nur Beinfarbe.
-  const legLConf = opts.vaganovaAnalysis?.valgusDriftL?.confidence;
-  const legRConf = opts.vaganovaAnalysis?.valgusDriftR?.confidence;
-  const legLC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.kneeFlexionL?.status ?? opts.vaganovaAnalysis?.valgusDriftL?.status)
-    : boneColor(COLOR_LEG);
-  const legRC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.kneeFlexionR?.status ?? opts.vaganovaAnalysis?.valgusDriftR?.status)
-    : boneColor(COLOR_LEG);
+  const legLS = teacherLegStatus('L');
+  const legRS = teacherLegStatus('R');
+  const legLColor = (legLS === 'NEUTRAL') ? TEACHER_AMPEL_COLORS.NEUTRAL : TEACHER_AMPEL_COLORS[legLS];
+  const legRColor = (legRS === 'NEUTRAL') ? TEACHER_AMPEL_COLORS.NEUTRAL : TEACHER_AMPEL_COLORS[legRS];
+  const legLC = mode === 'lehrer-ampel' ? legLColor : boneColor(COLOR_LEG);
+  const legRC = mode === 'lehrer-ampel' ? legRColor : boneColor(COLOR_LEG);
+  // Confidence für Opacity: bevorzuge knieFlexion, Fallback auf valgusDrift
+  const legLConf = opts.vaganovaAnalysis?.knieFlexionL?.confidence ?? opts.vaganovaAnalysis?.valgusDriftL?.confidence;
+  const legRConf = opts.vaganovaAnalysis?.knieFlexionR?.confidence ?? opts.vaganovaAnalysis?.valgusDriftR?.confidence;
 
   // Linkes Bein
   ctx.globalAlpha = confidenceAlpha(legLConf);

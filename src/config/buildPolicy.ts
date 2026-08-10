@@ -1,37 +1,90 @@
 /**
  * BUILD POLICY – Unveränderliche Sicherheitsschranken für diesen Build.
  *
- * Berater-Empfehlung 2026-08-10: React Context allein ist kein ausreichender
- * Sicherheitsmechanismus. Diese Policy ist 'as const' – zur Laufzeit NICHT
- * überschreibbar. Nicole darf durch einen Schalter NIEMALS aus einem
- * unvalidierten Messwert einen wissenschaftlich validierten Score machen.
+ * Berater-Entscheidung 2026-08-10: React Context allein ist kein ausreichender
+ * Sicherheitsmechanismus. Diese Policy ist Object.freeze() – zur Laufzeit NICHT
+ * überschreibbar.
  *
- * Freigabe: allowThresholdScoring/allowSafetyClaims/allowHomeworkGeneration
- * bleiben false bis DecisionGate + validationArtifactId + Mocap-Protokoll.
+ * PROJECT_DECISION 2026-08-10 (Lehrer-Ampel):
+ *   allowExperimentalTeacherTrafficLight: true
+ *   → Vollständiger Ampelmodus für Nicoles Lehrerbetrieb freigegeben.
+ *   → Ampel ist KI-gestützter pädagogischer Vorschlag, kein validiertes Urteil.
+ *   → Nicole entscheidet über Annahme, Änderung und Kommunikation jedes Vorschlags.
+ *   → Fehlende / nicht-messbare Evidenz bleibt neutral – niemals Grün.
+ *
+ * Gesperrt bleiben (unabhängig vom Ampelmodus):
+ *   allowValidatedThresholdScoring / allowAutomaticSafetyClaims /
+ *   allowAutomaticDiagnosisClaims / allowUnreviewedLearnerOutput /
+ *   allowUnreviewedParentOutput / allowAutomaticHomeworkGeneration
  */
 export const BUILD_POLICY = Object.freeze({
-  /** Automatisches CORRECT/WARNING/ERROR – DEAKTIVIERT */
-  allowThresholdScoring: false,
+  // ── EXPERIMENTELLER LEHRER-AMPELMODUS ─────────────────────────────────────
+  /** Vollständige Rot/Gelb/Grün-Heuristik für Nicole – FREIGEGEBEN (Berater 2026-08-10) */
+  allowExperimentalTeacherTrafficLight: true,
+
+  // ── DAUERHAFT GESPERRTE CLAIMS ────────────────────────────────────────────
+  /** Validiertes wissenschaftliches Threshold-Scoring – DEAKTIVIERT */
+  allowValidatedThresholdScoring: false,
   /** Safety-Claims und Verletzungswarnungen – DEAKTIVIERT */
-  allowSafetyClaims: false,
-  /** KI-Hausaufgaben-Generierung – DEAKTIVIERT */
-  allowHomeworkGeneration: false,
+  allowAutomaticSafetyClaims: false,
+  /** Diagnose-Claims – DEAKTIVIERT */
+  allowAutomaticDiagnosisClaims: false,
+  /** Lernenden-Output ohne Nicole-Bestätigung – DEAKTIVIERT */
+  allowUnreviewedLearnerOutput: false,
+  /** Eltern-Output ohne Nicole-Bestätigung – DEAKTIVIERT */
+  allowUnreviewedParentOutput: false,
+  /** Automatische Hausaufgaben-Generierung ohne Nicole-OK – DEAKTIVIERT */
+  allowAutomaticHomeworkGeneration: false,
+
+  // ── WEITERHIN ERLAUBT ─────────────────────────────────────────────────────
   /** Shadow-Metriken (Rohwerte ohne Urteil) – ERLAUBT */
   allowShadowMetrics: true,
   /** Epistemik-Badges und Display-only-Werte – ERLAUBT */
   allowDisplayOnlyMetrics: true,
   /** Lehrerannotationen und -reviews – ERLAUBT */
   allowTeacherReview: true,
+
   /** Policy-Version für Provenienz-Logging */
-  policyVersion: '0.1.0-sprint0-safety',
+  policyVersion: '0.2.0-teacher-ampel',
+
+  // ── BACKWARD-COMPAT ALIASES (für bestehenden Code) ──────────────────────────────
+  /** @deprecated Verwende allowAutomaticHomeworkGeneration */
+  allowHomeworkGeneration: false,
+  /** @deprecated Verwende allowAutomaticSafetyClaims */
+  allowSafetyClaims: false,
+  /** @deprecated Verwende allowValidatedThresholdScoring */
+  allowThresholdScoring: false,
 } as const);
 
 export type BuildPolicy = typeof BUILD_POLICY;
 
 /**
+ * Neutrale Messzustände – dürfen NIEMALS automatisch Grün werden.
+ * (Berater 2026-08-10: fehlende Daten ≠ gute Ausführung)
+ */
+export const NEUTRAL_MEASUREMENT_CLASSES = new Set([
+  'not_measurable',
+  'blocked',
+  'missing_landmark',
+  'invalid_geometry',
+  'wrong_camera',
+  'occluded',
+  'unassigned_person',
+  'insufficient_temporal_data',
+] as const);
+
+/**
+ * Ampel-Farben für den experimentellen Lehrer-Modus.
+ * Nur gültig wenn BUILD_POLICY.allowExperimentalTeacherTrafficLight === true.
+ */
+export const TEACHER_AMPEL_COLORS = Object.freeze({
+  CORRECT: '#30d158',              // Grün – heuristisch korrekte Ausführung
+  WARNING: '#ffd60a',              // Gelb – Prüf-/Beobachtungsbedarf
+  ERROR:   '#ff453a',              // Rot – deutliche heuristische Abweichung
+  NEUTRAL: 'rgba(255,255,255,0.22)', // Grau – fehlende/blockierte Evidenz (NIE Grün)
+} as const);
+
+/**
  * Lab-Build: Nur wenn VITE_LAB_MODE=true.
- * Muss in der UI als "EXPERIMENTELL – NICHT VALIDIERTE AUSGABE" sichtbar sein.
- * Object.freeze() stellt sicher, dass die Policy auch zur Laufzeit nicht verändert werden kann.
- * (Berater 2026-08-10: 'as const' ist nur typseitig readonly, nicht zur Laufzeit unverländerlich.)
  */
 export const IS_LAB_MODE = (import.meta as any).env?.VITE_LAB_MODE === 'true';

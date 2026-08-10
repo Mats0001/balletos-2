@@ -33,6 +33,31 @@ export interface VaganovaCuePoint {
   dataSource?: 'TEACHER_CREATED' | 'DEMO_FIXTURE' | 'KI_AUTO';
   kiNote?: string;              // KI-generierter Hinweis (nur bei KI_AUTO)
   referenceImageKey?: string;   // Key für Referenz-SVG in /public/reference/
+
+  // ── PROVENANCE & REVIEW (PROJECT_DECISION 2026-08-10) ──────────────────────────
+  // Trennt KI-Vorschlag klar von Nicoles verantworteter Entscheidung.
+  // Unbestätigte KI-Vorschläge gelangen NIEMALS in Lernenden-/Elternausgaben.
+  provenance?: 'ki_suggestion'     // Automatisch generiert (noch nicht bestätigt)
+             | 'nicole_confirmed'  // Nicole hat bestätigt (≠ wissenschaftlich validiert)
+             | 'nicole_edited'     // Nicole hat bearbeitet und übernommen
+             | 'nicole_rejected';  // Abgelehnt (bleibt zur Nachvollziehbarkeit erhalten)
+
+  nicoleAction?: 'strength' | 'correction'; // Nicoles Klassifizierung (nach Bestätigung)
+
+  /** Für Lernenden-Output freigegeben (nur nach Nicoles expliziter Freigabe) */
+  learnerVisible?: boolean;
+  /** Für Eltern-Output freigegeben (nur nach Nicoles expliziter Freigabe) */
+  parentVisible?: boolean;
+
+  /** Originale KI-Daten zur Nachvollziehbarkeit (unveränderlich) */
+  kiSuggestionData?: {
+    originalHeadline: string;
+    originalCueMetaphor: string;
+    metrics: string[];          // z.B. ['spineTilt: ERROR 8.3°', 'pelvicTilt: WARNING 4.1°']
+    ampelStatus: 'CORRECT' | 'WARNING' | 'ERROR';
+    generatedAt: string;        // ISO 8601
+    policyVersion: string;      // BUILD_POLICY.policyVersion zum Zeitpunkt der Generierung
+  };
 }
 
 export interface AutoAnalysisReport {

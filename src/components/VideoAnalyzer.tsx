@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
@@ -37,11 +37,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [showAngleArcs, setShowAngleArcs] = useState<boolean>(true);
   const [showMotionTrails, setShowMotionTrails] = useState<boolean>(true);
   const [showCoG, setShowCoG] = useState<boolean>(true);
-  // Overlay-Modus (Berater-kompatibel + Nicole-freundlich)
+  // Overlay-Modus – wird pro Schülerin in localStorage gespeichert
   // 'anatomisch'   = nur Körperregionen-Farben, kein Urteil (Berater-Sprint0)
-  // 'lehrer-ampel' = Ampelfarben aus Rohwerten (display-only, nicht validiert)
+  // 'lehrer-ampel' = vollständige KI-Ampel für Nicole (PROJECT_DECISION 2026-08-10)
   // 'lehrbuch'     = monochromes weiß, keine Ablenkung
   const [overlayMode, setOverlayMode] = useState<'anatomisch' | 'lehrer-ampel' | 'lehrbuch'>('lehrer-ampel');
+  const setOverlayModeWithSave = (videoUrl: string) => (m: 'anatomisch' | 'lehrer-ampel' | 'lehrbuch') => {
+    setOverlayMode(m);
+    try {
+      const key = `balletos_overlay_mode_${videoUrl.split('/').pop() ?? 'default'}`;
+      localStorage.setItem(key, m);
+    } catch {}
+  };
   const [showOverlayMenu, setShowOverlayMenu] = useState<boolean>(false);
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
@@ -1241,7 +1248,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             Split
           </button>
 
-          {/* Overlay-Modus Selector (3-stufig: Anatomisch / Lehrer-Ampel / Lehrbuch) */}
+          {/* Overlay-Modus Selector – PROJECT_DECISION 2026-08-10: volle Ampel freigegeben */}
           <div style={{ position: 'relative' }}>
             <button
               id="overlay-mode-btn"
@@ -1269,6 +1276,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               {overlayMode === 'anatomisch' && <span style={{ fontSize: '10px' }}>🎨</span>}
               {overlayMode === 'lehrbuch' && <span style={{ fontSize: '10px' }}>📖</span>}
               {overlayMode === 'lehrer-ampel' ? 'Lehrer-Ampel' : overlayMode === 'anatomisch' ? 'Anatomisch' : 'Lehrbuch'}
+              {overlayMode === 'lehrer-ampel' && (
+                <span
+                  aria-label="Experimenteller Lehrer-Modus. Die Ampelfarben sind KI-Vorschläge auf Basis teilweise nicht validierter Vergleichsregeln. Nicole entscheidet über ihre fachliche Verwendung."
+                  title="Experimenteller Lehrer-Modus. Die Ampelfarben sind KI-Vorschläge auf Basis teilweise nicht validierter Vergleichsregeln. Nicole entscheidet über ihre fachliche Verwendung."
+                  role="img"
+                  style={{ display: 'flex', alignItems: 'center', opacity: 0.8, color: '#ffd60a' }}
+                >
+                  <FlaskConical size={11} />
+                </span>
+              )}
               <span style={{ opacity: 0.6 }}>▾</span>
             </button>
             {showOverlayMenu && (
@@ -1281,40 +1298,52 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* Mode 1: Lehrer-Ampel */}
                 <button
                   id="overlay-lehrer-ampel"
-                  onClick={() => { setOverlayMode('lehrer-ampel'); setShowOverlayMenu(false); }}
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrer-ampel'); setShowOverlayMenu(false); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'lehrer-ampel' ? 'rgba(48,209,88,0.15)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
                     cursor: 'pointer', fontSize: '11px', marginBottom: '3px'
                   }}
                 >
-                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>🚦 Lehrer-Ampel</div>
-                  <div style={{ opacity: 0.6, fontSize: '9px' }}>Grün/Rot/Gelb aus Rohwerten. Für Nicole als Unterrichtshilfe. Nicht validiert – kein Scoring.</div>
+                  <div style={{ fontWeight: 800, marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🚦 Lehrer-Ampel
+                    <FlaskConical size={11} color="#ffd60a" />
+                    {overlayMode === 'lehrer-ampel' && <span style={{ fontSize: '8px', color: '#30d158', marginLeft: 'auto' }}>⭐ Gespeichert</span>}
+                  </div>
+                  <div style={{ opacity: 0.65, fontSize: '9px', lineHeight: 1.4 }}>
+                    Vollständige KI-Ampelheuristik. Grün/Gelb/Rot nach Vaganova. Nicole entscheidet über jeden Vorschlag. Fehlende Evidenz → Grau.
+                  </div>
                 </button>
                 {/* Mode 2: Anatomisch */}
                 <button
                   id="overlay-anatomisch"
-                  onClick={() => { setOverlayMode('anatomisch'); setShowOverlayMenu(false); }}
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('anatomisch'); setShowOverlayMenu(false); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'anatomisch' ? 'rgba(100,130,255,0.15)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
                     cursor: 'pointer', fontSize: '11px', marginBottom: '3px'
                   }}
                 >
-                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>🎨 Anatomisch</div>
+                  <div style={{ fontWeight: 800, marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    🎨 Anatomisch
+                    {overlayMode === 'anatomisch' && <span style={{ fontSize: '8px', color: '#30d158', marginLeft: 'auto' }}>⭐ Gespeichert</span>}
+                  </div>
                   <div style={{ opacity: 0.6, fontSize: '9px' }}>Körperregionen-Farben. Cyan=Wirbel, Violett=Arm, Indigo=Bein. Kein Urteil.</div>
                 </button>
                 {/* Mode 3: Lehrbuch */}
                 <button
                   id="overlay-lehrbuch"
-                  onClick={() => { setOverlayMode('lehrbuch'); setShowOverlayMenu(false); }}
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrbuch'); setShowOverlayMenu(false); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'lehrbuch' ? 'rgba(255,255,255,0.08)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
                     cursor: 'pointer', fontSize: '11px'
                   }}
                 >
-                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>📖 Lehrbuch</div>
+                  <div style={{ fontWeight: 800, marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    📖 Lehrbuch
+                    {overlayMode === 'lehrbuch' && <span style={{ fontSize: '8px', color: '#30d158', marginLeft: 'auto' }}>⭐ Gespeichert</span>}
+                  </div>
                   <div style={{ opacity: 0.6, fontSize: '9px' }}>Monochromes Skelett ohne Farbe. Maximale Klarheit für Erklärungen.</div>
                 </button>
               </div>
@@ -2138,6 +2167,60 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.45 }}>
                         {cue.kiNote}
                       </div>
+                    </div>
+                  )}
+
+                  {/* ── PROVENANCE: KI-Vorschlag Review-Buttons (PROJECT_DECISION 2026-08-10) ── */}
+                  {cue.provenance === 'ki_suggestion' && (
+                    <div style={{
+                      background: 'rgba(255,214,10,0.06)',
+                      border: '1px solid rgba(255,214,10,0.25)',
+                      borderRadius: '8px', padding: '8px 10px', marginTop: '4px'
+                    }}>
+                      <div style={{ fontSize: '8px', fontWeight: 800, color: '#ffd60a', letterSpacing: '0.5px', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <FlaskConical size={10} />
+                        KI-VORSCHLAG – Nicoles Entscheidung ausstehend
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const } : c)); }}
+                          style={{ background: 'rgba(48,209,88,0.2)', border: '1px solid rgba(48,209,88,0.5)', color: '#30d158', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
+                        >✓ Übernehmen</button>
+                        <button onClick={(e) => { e.stopPropagation(); handleStartEdit(cue, e); }}
+                          style={{ background: 'rgba(192,132,252,0.15)', border: '1px solid rgba(192,132,252,0.4)', color: '#c084fc', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
+                        >✏ Bearbeiten</button>
+                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_rejected' as const } : c)); }}
+                          style={{ background: 'rgba(255,69,58,0.1)', border: '1px solid rgba(255,69,58,0.3)', color: '#ff453a', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
+                        >✕ Ablehnen</button>
+                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const, nicoleAction: 'strength' as const, status: 'GOOD' } : c)); }}
+                          style={{ background: 'rgba(48,209,88,0.1)', border: '1px solid rgba(48,209,88,0.3)', color: 'rgba(255,255,255,0.7)', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', cursor: 'pointer' }}
+                        >⭐ Als Stärke</button>
+                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const, nicoleAction: 'correction' as const, status: 'CORRECTION' } : c)); }}
+                          style={{ background: 'rgba(255,69,58,0.1)', border: '1px solid rgba(255,69,58,0.3)', color: 'rgba(255,255,255,0.7)', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', cursor: 'pointer' }}
+                        >⚠ Als Korrektur</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Freigabe nach Nicole-Bestätigung */}
+                  {(cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Bestätigt</span>
+                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, learnerVisible: !c.learnerVisible } : c)); }}
+                        style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
+                      >{cue.learnerVisible ? '👁 Lernende: an' : '👁 Für Lernende'}</button>
+                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, parentVisible: !c.parentVisible } : c)); }}
+                        style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
+                      >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : '👨‍👩‍👧 Für Eltern'}</button>
+                    </div>
+                  )}
+
+                  {/* Abgelehnter Vorschlag – kollabiert, grau, zur Nachvollziehbarkeit */}
+                  {cue.provenance === 'nicole_rejected' && (
+                    <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>✕ Von Nicole abgelehnt</span>
+                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'ki_suggestion' as const } : c)); }}
+                        style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: '8px', cursor: 'pointer' }}
+                      >↩ Rückgängig</button>
                     </div>
                   )}
 

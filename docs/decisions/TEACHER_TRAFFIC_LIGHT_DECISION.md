@@ -1,0 +1,122 @@
+# PROJECT_DECISION: Lehrer-Ampel – Vollständiger Funktionsumfang
+
+**Datum:** 2026-08-10  
+**Entscheid durch:** Externer Berater (formelles Schreiben) + Nicole (Ballettpädagogin)  
+**Policy-Version:** `0.2.0-teacher-ampel` (BUILD_POLICY.policyVersion)  
+**Status:** BINDEND – Produktionsimplementierung
+
+---
+
+## Kernentscheid
+
+> BalletOS stellt Nicole im experimentellen Lehrer-Modus die vollständige automatische 
+> Ampelfunktion zur Verfügung. Die Ampel ist ein KI-gestützter fachlicher Vorschlag, 
+> kein validiertes Systemurteil. Nicole entscheidet über Annahme, Änderung und 
+> Kommunikation. Fehlende oder nicht messbare Evidenz bleibt neutral und kann niemals 
+> als positive Ausführung dargestellt werden.
+
+---
+
+## Freigegebener Scope
+
+| Feature | Freigegeben |
+|---------|-------------|
+| `allowExperimentalTeacherTrafficLight` | **true** |
+| Vollständige Rot/Gelb/Grün-Heuristik im Lehrer-Modus | ✅ |
+| Automatische Unterrichtshinweise und Priorisierung | ✅ |
+| KI-Cue-Vorschläge im Cue Point Manager | ✅ |
+| Nicoles persönlicher bevorzugter Modus speicherbar | ✅ |
+| FlaskConical-Icon + Tooltip (keine Dauerwarnung) | ✅ |
+
+## Dauerhaft gesperrt (unabhängig vom Modus)
+
+| Feature | Gesperrt |
+|---------|----------|
+| `allowValidatedThresholdScoring` | **false** |
+| `allowAutomaticSafetyClaims` | **false** |
+| `allowAutomaticDiagnosisClaims` | **false** |
+| `allowUnreviewedLearnerOutput` | **false** |
+| `allowUnreviewedParentOutput` | **false** |
+| `allowAutomaticHomeworkGeneration` | **false** |
+
+---
+
+## Datenfluss-Trennung (Provenienz)
+
+```
+Systembeobachtung
+  └─ MediaPipe → Rohwerte + Qualitätsinformationen
+
+Experimentelle Lehrer-Heuristik
+  └─ BalletOS → Ampel-/Prioritäts-/Cue-Vorschläge
+                CuePoint.provenance = 'ki_suggestion'
+
+Nicoles Entscheidung
+  └─ Übernehmen → provenance = 'nicole_confirmed'
+  └─ Bearbeiten → provenance = 'nicole_edited'
+  └─ Ablehnen   → provenance = 'nicole_rejected' (erhalten)
+
+Freigegebene pädagogische Kommunikation
+  └─ Nach Nicole-Entscheidung: learnerVisible/parentVisible = true
+```
+
+---
+
+## Neutrale Zustände (niemals automatisch Grün)
+
+```
+not_measurable, blocked, missing_landmark, invalid_geometry,
+wrong_camera, occluded, unassigned_person, insufficient_temporal_data
+```
+→ Darstellung: `rgba(255,255,255,0.22)` Grau / gestrichelt
+
+---
+
+## Lehrer-Ampel Bein-Heuristik (experimentell)
+
+Da `knieFlexion` (research_observation) und `valgusDrift` (individual_baseline)
+keine direkten CORRECT/WARNING/ERROR-Status emittieren dürfen (Epistemologie!),
+wird im `skeletonCanvasRenderer.ts` eine separate `teacherLegStatus()` Funktion
+eingesetzt, die eine **heuristische Einschätzung** aus den Rohwerten ableitet:
+
+- `|knieFlexion| ≥ 165°` → CORRECT (gerades Standbein)
+- `|knieFlexion| ∈ [60°, 145°]` → CORRECT (Plié-Bereich)
+- `|knieFlexion| < 40°` → WARNING
+- `|valgusDrift_delta| < 5°` → CORRECT
+- `|valgusDrift_delta| ∈ [5°, 10°]` → WARNING
+- `|valgusDrift_delta| > 10°` → ERROR
+- Dominant: ERROR > WARNING > CORRECT > NEUTRAL
+
+Diese Heuristik ist **nicht validiert** und gilt ausschließlich im Lehrer-Ampelmodus.
+Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverändert.
+
+---
+
+## Implementierung
+
+| Datei | Änderung |
+|-------|----------|
+| `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
+| `src/services/skeletonCanvasRenderer.ts` | `statusColor()` gibt bei undefined → NEUTRAL; `teacherLegStatus()` Heuristik |
+| `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
+| `src/services/vaganovaPreAnalyzer.ts` | VaganovaCuePoint: provenance, nicoleAction, learnerVisible, parentVisible, kiSuggestionData |
+
+---
+
+## Abnahmekriterien (geprüft)
+
+- [x] Alle messbaren Metriken → Rot/Gelb/Grün im Lehrer-Ampelmodus
+- [x] `not_measurable`/`blocked` → niemals Grün (NEUTRAL grau)
+- [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
+- [x] Moduswechsel verändert keine Rohmesswerte
+- [x] KI-Vorschlag und Nicole-Entscheidung: getrennte Provenienz
+- [x] Unbestätigte KI-Vorschläge: `learnerVisible/parentVisible = undefined (false)`
+- [x] Nicole kann: bestätigen, bearbeiten, ablehnen, klassifizieren
+- [x] FlaskConical-Icon + `title`-Tooltip (Maus/Touch) + `aria-label` (Tastatur)
+- [x] Safety/Diagnose/Verletzungsclaims: `false` (unverändert)
+- [x] `npx tsc --noEmit` → 0 Fehler
+
+---
+
+*Nicoles Bestätigung macht die zugrundeliegende Systemmessung nicht wissenschaftlich validiert. 
+Sie macht daraus jedoch eine fachlich von Nicole verantwortete pädagogische Aussage.*
