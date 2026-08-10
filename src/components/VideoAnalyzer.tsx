@@ -1,0 +1,1276 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap } from 'lucide-react';
+import { JetztWichtigInspector } from './JetztWichtigInspector';
+import { JetztWichtigInspectorData, FeedbackObject } from '../types';
+import { videoStore, StoredVideoItem } from '../services/videoStore';
+import { realMediaPipePose, PoseLandmark, PoseResultsData } from '../services/realMediaPipePose';
+import { vaganovaPoseEngine } from '../services/vaganovaPoseEngine';
+import { vaganovaEvidenceEngine } from '../services/vaganovaEvidenceEngine';
+import { vaganovaMotionClassifier, MotionClassificationResult } from '../services/vaganovaMotionClassifier';
+import { vaganova3DKinematics, ReconstructedSkeleton } from '../services/vaganova3DKinematics';
+import { vaganovaPreAnalyzer, VaganovaCuePoint } from '../services/vaganovaPreAnalyzer';
+import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
+import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
+import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
+import { vaganovaAngleCalculator, VaganovaFullAnalysis } from '../services/vaganovaAngleCalculator';
+import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
+import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
+import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
+import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
+
+interface VideoAnalyzerProps {
+  onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
+}
+
+export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis }) => {
+  // Video Controls State
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [showSkeleton, setShowSkeleton] = useState<boolean>(true);
+  const [showAngleArcs, setShowAngleArcs] = useState<boolean>(true);
+  const [showMotionTrails, setShowMotionTrails] = useState<boolean>(true);
+  const [showCoG, setShowCoG] = useState<boolean>(true);
+  const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
+  const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
+  const [selectedJointId, setSelectedJointId] = useState<string>('left_knee');
+
+  // OPTION 1 PRE-INDEXING ENGINE STATE
+  const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
+  const [indexingProgress, setIndexingProgress] = useState<number>(0);
+  const [indexingStatusStr, setIndexingStatusStr] = useState<string>('Bereite Frame-Lock vor...');
+
+  // ZOOM & PAN ENGINE STATE
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isAutoCrop, setIsAutoCrop] = useState<boolean>(false);
+
+  // Video Library State
+  const [videoList, setVideoList] = useState<StoredVideoItem[]>(videoStore.getAllVideos());
+  const [selectedDevVideoUrl, setSelectedDevVideoUrl] = useState<string>(videoList[0].url);
+
+  // Dynamic MediaPipe Landmarks
+  const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
+  const [detectedWorldLandmarks, setDetectedWorldLandmarks] = useState<PoseLandmark[] | null>(null);
+  const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
+
+  // AI & TEACHER EDITABLE CUE-POINTS STATE
+  const [cuePoints, setCuePoints] = useState<VaganovaCuePoint[]>(
+    vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl)
+  );
+
+  // EDIT MODAL / INLINE FORM STATE
+  const [editingCueId, setEditingCueId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' }>({
+    poseName: '',
+    headline: '',
+    cueMetaphor: '',
+    status: 'GOOD'
+  });
+
+  // VAGANOVA CURRICULUM MODAL STATE
+  const [isCurriculumModalOpen, setIsCurriculumModalOpen] = useState<boolean>(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const refVideoRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isProcessingRef = useRef<boolean>(false);
+  const processingStartTimeRef = useRef<number>(0);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // 60fps ref-based data (bypasses React for smooth canvas drawing)
+  const landmarksRef = useRef<PoseLandmark[] | null>(null);
+  const worldLandmarksRef = useRef<PoseLandmark[] | null>(null);
+  const lastStateUpdateRef = useRef<number>(0);
+  const overlayBoundsRef = useRef<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // ⚡ PERFORMANCE: Vaganova analysis runs at 15fps max, cached for 60fps canvas draw
+  const lastAnalysisTimeRef = useRef<number>(0);
+  const cachedAnalysisRef = useRef<{
+    sk: ReturnType<typeof vaganova3DKinematics.solve>;
+    motionCls: ReturnType<typeof vaganovaMotionClassifier.classify>;
+    vagAn: ReturnType<typeof vaganovaAngleCalculator.analyzeFullFrame>;
+    armPos: ReturnType<typeof vaganovaArmAnalyzer.classifyArmPosition>;
+    elbowQ: ReturnType<typeof vaganovaArmAnalyzer.analyzeElbowQuality>;
+    epaul: ReturnType<typeof vaganovaArmAnalyzer.analyzeEpaulement>;
+    footAl: ReturnType<typeof vaganovaFootAnalyzer.analyzeSickleWing>;
+    wDist: ReturnType<typeof vaganovaFootAnalyzer.analyzeWeightDistribution>;
+    cogPt: { x: number; y: number };
+  } | null>(null);
+
+  // Computed overlay bounds that exactly match the rendered video area
+  const [overlayBounds, setOverlayBounds] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+  const [videoAspectRatio, setVideoAspectRatio] = useState<number>(16/9);
+
+  // Compute the actual rendered video area within its container
+  // This accounts for object-fit:contain letterboxing/pillarboxing
+  const computeOverlayBounds = () => {
+    const video = videoRef.current;
+    const container = videoContainerRef.current;
+    if (!video || !container || !video.videoWidth || !video.videoHeight) return;
+
+    // Use offsetWidth/offsetHeight instead of getBoundingClientRect().width/height
+    // to avoid CSS-zoom/transform doubling the reported dimensions
+    const containerW = container.offsetWidth;
+    const containerH = container.offsetHeight;
+    const videoAspect = video.videoWidth / video.videoHeight;
+    setVideoAspectRatio(videoAspect);
+    const containerAspect = containerW / containerH;
+
+    let renderW: number, renderH: number, offsetX: number, offsetY: number;
+
+    if (videoAspect > containerAspect) {
+      // Video is wider than container → pillarboxing (black bars top/bottom)
+      renderW = containerW;
+      renderH = containerW / videoAspect;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    } else {
+      // Video is taller than container → letterboxing (black bars left/right)
+      renderH = containerH;
+      renderW = containerH * videoAspect;
+      offsetX = (containerW - renderW) / 2;
+      offsetY = 0;
+    }
+
+    setOverlayBounds({ top: offsetY, left: offsetX, width: renderW, height: renderH });
+    overlayBoundsRef.current = { top: offsetY, left: offsetX, width: renderW, height: renderH };
+  };
+
+  // Initialize MediaPipe Pose Engine on mount
+  useEffect(() => {
+    realMediaPipePose.initialize();
+  }, []);
+
+  // Recompute overlay bounds when video container resizes (window resize, panel toggle, split screen)
+  useEffect(() => {
+    const container = videoContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
+      computeOverlayBounds();
+    });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  // ⚡ OPTION 1: PRE-INDEXING TRIGGER
+  const triggerPreIndexingScan = async () => {
+    if (!videoRef.current) return;
+
+    setIsPreIndexing(true);
+    setIndexingProgress(0);
+    setIndexingStatusStr('Bereite 60 FPS Pre-Scan vor...');
+
+    await vaganovaFrameCache.preIndexVideo(
+      selectedDevVideoUrl,
+      videoRef.current,
+      (percent, step, total) => {
+        setIndexingProgress(percent);
+        setIndexingStatusStr(`Pre-Scan Frame ${step}/${total} (${percent}%)`);
+      }
+    );
+
+    setIsPreIndexing(false);
+    setIsEngineReady(true);
+    if (videoRef.current) {
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  // Check if video is already cached on video change
+  // Pre-scan is NOT auto-triggered - user clicks the button manually
+  useEffect(() => {
+    if (!videoRef.current) return;
+    if (vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
+      setIsPreIndexing(false);
+      setIsEngineReady(true);
+    }
+  }, [selectedDevVideoUrl]);
+
+  // 🚀 60 FPS CANVAS-BASED RENDER LOOP
+  // Landmarks are stored in refs (no React re-render per frame).
+  // Canvas is drawn directly at 60fps. React state is throttled to ~4fps for side panels.
+  useEffect(() => {
+    let animId: number;
+    let isActive = true;
+    let lastProcessedTime = -1;
+
+    // CRITICAL: Reset processing lock when effect restarts (e.g. clip change).
+    // The previous effect's processFrame callback may never fire (isActive=false),
+    // leaving isProcessingRef stuck at true and blocking all future live inference.
+    isProcessingRef.current = false;
+
+    const renderLoop = () => {
+      if (!isActive) return;
+
+      const v = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (v && v.readyState >= 2 && !isPreIndexing) {
+        const curTime = v.currentTime || 0;
+        const timeDelta = Math.abs(curTime - lastProcessedTime);
+        const shouldProcess = !v.paused || timeDelta > 0.01;
+
+        if (shouldProcess && timeDelta > 0.005) {
+          lastProcessedTime = curTime;
+
+          // 1. Try pulling from Pre-Indexed Cache
+          const cached = vaganovaFrameCache.getFrame(selectedDevVideoUrl, curTime);
+          if (cached) {
+            landmarksRef.current = cached;
+
+            // Throttled React state update for side panels (~4fps)
+            const now = performance.now();
+            if (now - lastStateUpdateRef.current > 250) {
+              lastStateUpdateRef.current = now;
+              setDetectedLandmarks(cached);
+              setIsEngineReady(true);
+            }
+          } else if (!isProcessingRef.current || (performance.now() - processingStartTimeRef.current > 500)) {
+            // 2. Fallback to Live MediaPipe Inference
+            // Timeout guard: if isProcessingRef was stuck >500ms (e.g. MediaPipe error), force-reset
+            isProcessingRef.current = true;
+            processingStartTimeRef.current = performance.now();
+            realMediaPipePose.processFrame(v, (data: PoseResultsData) => {
+              isProcessingRef.current = false;
+              if (isActive && data.landmarks && data.landmarks.length >= 33) {
+                const smoothed = vaganovaPoseEngine.smoothLandmarks(data.landmarks, curTime);
+                const lmToUse = smoothed || data.landmarks;
+                landmarksRef.current = lmToUse;
+                if (data.worldLandmarks) {
+                  worldLandmarksRef.current = data.worldLandmarks;
+                }
+                // Throttled React state update
+                const now = performance.now();
+                if (now - lastStateUpdateRef.current > 250) {
+                  lastStateUpdateRef.current = now;
+                  setDetectedLandmarks(lmToUse);
+                  setDetectedWorldLandmarks(data.worldLandmarks || null);
+                  setIsEngineReady(true);
+                }
+              }
+            }).catch(() => { isProcessingRef.current = false; });
+          }
+        }
+
+        // ─── CANVAS DRAW (every frame, from ref – regardless of time change) ───
+        try {
+          const lm = landmarksRef.current;
+          const canvas2 = canvasRef.current;
+          if (canvas2 && lm && showSkeleton) {
+            // Resize canvas to match actual pixel dimensions
+            const bounds = overlayBoundsRef.current;
+            if (bounds) {
+              const dpr = window.devicePixelRatio || 1;
+              const cw = Math.round(bounds.width * dpr);
+              const ch = Math.round(bounds.height * dpr);
+              if (canvas2.width !== cw || canvas2.height !== ch) {
+                canvas2.width = cw;
+                canvas2.height = ch;
+              }
+            }
+
+            // ⚡ THROTTLED ANALYSIS: max 15fps (every ~67ms) – canvas draw uses cached result at 60fps
+            const nowMs = performance.now();
+            const ANALYSIS_INTERVAL_MS = 67; // ~15fps
+            if (nowMs - lastAnalysisTimeRef.current >= ANALYSIS_INTERVAL_MS || !cachedAnalysisRef.current) {
+              lastAnalysisTimeRef.current = nowMs;
+              const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
+              const motionCls2 = vaganovaMotionClassifier.classify(lm);
+              vaganovaKineticAI.updateTrails(sk2, curTime);
+              const cogPt2 = vaganovaKineticAI.computeCenterOfGravity(sk2);
+              const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm);
+              const armPos2 = vaganovaArmAnalyzer.classifyArmPosition(sk2);
+              const elbowQ2 = vaganovaArmAnalyzer.analyzeElbowQuality(sk2);
+              const epaul2 = vaganovaArmAnalyzer.analyzeEpaulement(sk2);
+              const footAl2 = vaganovaFootAnalyzer.analyzeSickleWing(sk2);
+              const wDist2 = vaganovaFootAnalyzer.analyzeWeightDistribution(sk2, cogPt2.x);
+              cachedAnalysisRef.current = {
+                sk: sk2, motionCls: motionCls2, cogPt: cogPt2,
+                vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
+                epaul: epaul2, footAl: footAl2, wDist: wDist2
+              };
+            }
+
+            // Canvas draw always runs at 60fps using cached analysis
+            const c = cachedAnalysisRef.current;
+            if (c) {
+              renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
+                showSkeleton,
+                showMotionTrails,
+                showCoG,
+                showAngleArcs,
+                selectedJointId,
+                isPlie: c.motionCls.isPlie,
+                vaganovaAnalysis: c.vagAn
+              }, v.videoWidth, v.videoHeight);
+            }
+
+          } else if (canvas2 && !showSkeleton) {
+            const ctx2 = canvas2.getContext('2d');
+            if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
+          }
+        } catch (_canvasErr) {
+          // Swallow canvas draw errors - don't kill the rAF loop
+        }
+      }
+
+      if (isActive) {
+        animId = requestAnimationFrame(renderLoop);
+      }
+    };
+
+    animId = requestAnimationFrame(renderLoop);
+
+    return () => {
+      isActive = false;
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId]);
+
+  // Trigger immediate frame detection on Video Pause or Seek
+  const processStaticPausedFrame = () => {
+    if (videoRef.current && videoRef.current.readyState >= 2) {
+      const curTime = videoRef.current.currentTime || 0;
+      const cached = vaganovaFrameCache.getFrame(selectedDevVideoUrl, curTime);
+
+      if (cached) {
+        const smoothed = vaganovaPoseEngine.smoothLandmarks(cached, curTime);
+        if (smoothed) {
+          landmarksRef.current = smoothed;
+          setDetectedLandmarks(smoothed);
+          setIsEngineReady(true);
+        }
+      } else {
+        realMediaPipePose.processFrame(videoRef.current, (data: PoseResultsData) => {
+          if (data.landmarks && data.landmarks.length >= 33) {
+            const smoothed = vaganovaPoseEngine.smoothLandmarks(data.landmarks, curTime);
+            if (smoothed) {
+              landmarksRef.current = smoothed;
+              setDetectedLandmarks(smoothed);
+              setIsEngineReady(true);
+              if (data.worldLandmarks) {
+                worldLandmarksRef.current = data.worldLandmarks;
+                setDetectedWorldLandmarks(data.worldLandmarks);
+              }
+            }
+          }
+        });
+      }
+    }
+  };
+
+  // Handle Custom Video Upload
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      const newVid = videoStore.addCustomVideo(file);
+      // CRITICAL FIX: Clear the OLD video's cache, not the new one!
+      // Previously this cleared newVid.url which doesn't have a cache yet
+      vaganovaFrameCache.clear(selectedDevVideoUrl);
+      setVideoList(videoStore.getAllVideos());
+      setSelectedDevVideoUrl(newVid.url);
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(newVid.url));
+      vaganovaKineticAI.reset();
+      vaganovaPoseEngine.reset();
+      setIsPlaying(true);
+    }
+  };
+
+  // Switch Dropdown Selection
+  const handleVideoSelect = (url: string) => {
+    realMediaPipePose.reset();
+    vaganova3DKinematics.reset();
+    vaganovaKineticAI.reset();
+    vaganovaPoseEngine.reset();
+    setDetectedLandmarks(null);
+    setDetectedWorldLandmarks(null);
+    setIsEngineReady(false);
+    setSelectedDevVideoUrl(url);
+    setCuePoints(vaganovaPreAnalyzer.getCuePoints(url));
+    setIsPlaying(true);
+  };
+
+  // Interactive Cue-Point Seek & Auto Slow-Motion Handler
+  const handleSeekToCuePoint = (cue: VaganovaCuePoint) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = cue.timeSeconds;
+      if (refVideoRef.current) refVideoRef.current.currentTime = cue.timeSeconds;
+      setSelectedFrameTime(cue.timecodeStr);
+      setSelectedJointId(cue.jointFocusId);
+      vaganovaKineticAI.reset();
+
+      if (cue.status === 'CORRECTION') {
+        setPlaybackSpeed(0.25);
+        videoRef.current.playbackRate = 0.25;
+      }
+
+      processStaticPausedFrame();
+    }
+  };
+
+  // 🔊 WEBSPEECH KI-SPRACHSYNTHESIZER (NICOLE'S VOICE METAPHOR)
+  const handleSpeakCueMetaphor = (metaphorText: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!('speechSynthesis' in window)) {
+      alert('Sprachsynthese wird von diesem Browser nicht unterstützt.');
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(metaphorText);
+    utterance.lang = 'de-DE';
+    utterance.pitch = 1.1;
+    utterance.rate = 0.95;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // TEACHER CRUD: Add Cue-Point at current video playback position
+  const handleAddCuePointAtCurrentFrame = () => {
+    if (!videoRef.current) return;
+    const timeSec = videoRef.current.currentTime || 0;
+    const mins = Math.floor(timeSec / 60);
+    const secs = (timeSec % 60).toFixed(3).padStart(6, '0');
+    const timecodeStr = `0${mins}:${secs}`;
+
+    const updated = vaganovaPreAnalyzer.addCuePoint(selectedDevVideoUrl, {
+      timeSeconds: timeSec,
+      timecodeStr,
+      poseName: `${motionClass.detectedPoseName} Marker`,
+      status: 'CORRECTION',
+      scorePercent: 85,
+      headline: `Eigene Lehrernotiz an ${timecodeStr}`,
+      cueMetaphor: 'Korrekturhinweis von Nicole eingeben...',
+      jointFocusId: selectedJointId || 'pelvis_core'
+    });
+
+    setCuePoints(updated);
+  };
+
+  // TEACHER CRUD: Start Editing
+  const handleStartEdit = (cue: VaganovaCuePoint, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingCueId(cue.id);
+    setEditForm({
+      poseName: cue.poseName,
+      headline: cue.headline,
+      cueMetaphor: cue.cueMetaphor,
+      status: cue.status === 'CORRECTION' ? 'CORRECTION' : 'GOOD'
+    });
+  };
+
+  // TEACHER CRUD: Save Edit
+  const handleSaveEdit = (cueId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+      poseName: editForm.poseName,
+      headline: editForm.headline,
+      cueMetaphor: editForm.cueMetaphor,
+      status: editForm.status
+    });
+    setCuePoints(updated);
+    setEditingCueId(null);
+  };
+
+  // TEACHER CRUD: Delete Cue-Point
+  const handleDeleteCuePoint = (cueId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm('Diesen Messpunkt wirklich löschen?')) {
+      const updated = vaganovaPreAnalyzer.deleteCuePoint(selectedDevVideoUrl, cueId);
+      setCuePoints(updated);
+    }
+  };
+
+  // Zoom Presets
+  const handleZoomChange = (level: number, autoCrop: boolean = false) => {
+    setZoomLevel(level);
+    setIsAutoCrop(autoCrop);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  // Toggle Play/Pause
+  const handleTogglePlay = () => {
+    const nextPlaying = !isPlaying;
+    setIsPlaying(nextPlaying);
+    if (videoRef.current) {
+      if (!nextPlaying) {
+        videoRef.current.pause();
+        if (refVideoRef.current) refVideoRef.current.pause();
+        processStaticPausedFrame();
+      } else {
+        videoRef.current.play().catch(() => {});
+        if (refVideoRef.current) refVideoRef.current.play().catch(() => {});
+      }
+    }
+  };
+
+  // Speed Control
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+    if (refVideoRef.current) refVideoRef.current.playbackRate = speed;
+  };
+
+  // AUTOMATIC MOTION & PERSPECTIVE KI-CLASSIFIER
+  const motionClass: MotionClassificationResult = vaganovaMotionClassifier.classify(detectedLandmarks);
+
+  // 🦴 RECONSTRUCT 3D FORWARD KINEMATICS & TEMPORAL SKELETON
+  const vw = videoRef.current?.videoWidth || 1000;
+  const vh = videoRef.current?.videoHeight || 1000;
+  const sk: ReconstructedSkeleton = vaganova3DKinematics.solve(detectedLandmarks, detectedWorldLandmarks, vw, vh);
+
+  // Update Kinetic AI Trajectory & Center of Gravity
+  const currentVidTime = videoRef.current ? videoRef.current.currentTime : 0;
+  vaganovaKineticAI.updateTrails(sk, currentVidTime);
+  const cog = vaganovaKineticAI.computeCenterOfGravity(sk);
+
+  // Generate Vaganova Curriculum & Homework Report
+  const curriculumReport: VaganovaCurriculumReport = vaganovaCurriculumEngine.generatePlan(6, motionClass.detectedPoseName, 14);
+
+  // 📐 REAL-TIME VAGANOVA ANGLE ANALYSIS (replaces hardcoded values)
+  const vaganovaAnalysis = detectedLandmarks ? vaganovaAngleCalculator.analyzeFullFrame(detectedLandmarks) : null;
+
+  // 🔔 Notify parent (App.tsx) with latest analysis for RightInspectorPanel
+  useEffect(() => {
+    onVaganovaAnalysis?.(vaganovaAnalysis);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detectedLandmarks]);
+
+  // 💪 VAGANOVA ARM POSITION & ÉPAULEMENT ANALYSIS
+  const armPositions = vaganovaArmAnalyzer.classifyArmPosition(sk);
+  const elbowQuality = vaganovaArmAnalyzer.analyzeElbowQuality(sk);
+  const epaulement = vaganovaArmAnalyzer.analyzeEpaulement(sk);
+
+  // 🦶 VAGANOVA FOOT ALIGNMENT ANALYSIS
+  const footAlignment = vaganovaFootAnalyzer.analyzeSickleWing(sk);
+  const footPointe = vaganovaFootAnalyzer.analyzePointe(sk);
+  const weightDist = vaganovaFootAnalyzer.analyzeWeightDistribution(sk, cog.x);
+
+
+  const kHead = sk.head;
+  const kNeck = sk.neck;
+  const kSternum = sk.sternum;
+  const kNavel = sk.navel;
+  const kPelvisCenter = sk.pelvisCenter;
+  const kShoulderL = sk.shoulderL;
+  const kShoulderR = sk.shoulderR;
+  const kElbowL = sk.elbowL;
+  const kElbowR = sk.elbowR;
+  const kWristL = sk.wristL;
+  const kWristR = sk.wristR;
+  const kPelvisL = sk.pelvisL;
+  const kPelvisR = sk.pelvisR;
+  const kKneeL = sk.kneeL;
+  const kKneeR = sk.kneeR;
+  const kAnkleL = sk.ankleL;
+  const kAnkleR = sk.ankleR;
+
+  // Feedback Object
+  const currentVideoObj = videoList.find(v => v.url === selectedDevVideoUrl) || videoList[0];
+  const feedbackObj: FeedbackObject = vaganovaEvidenceEngine.buildFeedbackObject(
+    'Emma Berger (6 J.)',
+    currentVideoObj.topic,
+    selectedFrameTime,
+    detectedLandmarks,
+    selectedJointId,
+    true
+  );
+
+  const inspectorData: JetztWichtigInspectorData = {
+    studentName: feedbackObj.studentName,
+    exerciseName: `${motionClass.detectedPoseName} (${motionClass.detectedPerspective === 'FRONTAL' ? 'Frontal' : 'Profil-Seite'})`,
+    timestampStr: feedbackObj.timestampStr,
+    findingHeadline: feedbackObj.findingHeadline,
+    whyRelevant: feedbackObj.whyRelevant,
+    positiveNote: feedbackObj.positiveNote,
+    uncertaintyNote: feedbackObj.uncertaintyNote,
+    historyComparison: feedbackObj.historyComparison,
+    nextCue: feedbackObj.nextCue,
+    overallVerdict: feedbackObj.overallVerdict,
+    homeworkStatus: feedbackObj.homework.status,
+    homeworkBlockedReason: feedbackObj.homework.blockedReason
+  };
+
+  const COLOR_GOOD = '#30d158'; // Grün = RICHTIG
+  const COLOR_BAD = '#ff453a';  // Rot = FALSCH
+  const COLOR_WARN = '#ffd700'; // Gelb = SELEKTIERT
+
+  // Helper to render glowing trajectory comet nodes
+  const renderTrailNodes = (type: 'wristL' | 'wristR' | 'ankleL' | 'ankleR', color: string) => {
+    const pts = vaganovaKineticAI.getTrailPoints(type);
+    if (!pts || pts.length === 0) return null;
+    const len = pts.length;
+    return pts.map((pt, i) => {
+      const alpha = ((i + 1) / len);
+      const radius = 3 + alpha * 4;
+      return (
+        <circle
+          key={`${type}-pt-${i}`}
+          cx={pt.x}
+          cy={pt.y}
+          r={radius}
+          fill={color}
+          opacity={alpha * 0.85}
+        />
+      );
+    });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 'calc(100vh - 32px)', height: 'calc(100dvh - 32px)', overflow: 'hidden' }}>
+      
+      {/* Vaganova Curriculum & Homework Modal */}
+      <VaganovaCurriculumModal
+        isOpen={isCurriculumModalOpen}
+        onClose={() => setIsCurriculumModalOpen(false)}
+        report={curriculumReport}
+        studentName="Emma Berger (6 J.)"
+      />
+
+      {/* 1️⃣ HIGH-EXECUTIVE INSPECTOR BAR */}
+      <JetztWichtigInspector data={inspectorData} />
+
+      {/* Hidden File Input for Native Video Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="video/*"
+        onChange={handleFileUpload}
+        style={{ display: 'none' }}
+      />
+
+      {/* 2️⃣ CLEAN EXECUTIVE TOOLBAR DOCK */}
+      <div style={{
+        background: 'rgba(15, 12, 22, 0.95)',
+        border: '1px solid rgba(192, 132, 252, 0.25)',
+        borderRadius: '12px',
+        padding: '6px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '12px'
+      }}>
+        {/* Left: Video Selector & Option 1 Pre-Scan Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <select
+            id="dev-video-select"
+            value={selectedDevVideoUrl}
+            onChange={(e) => handleVideoSelect(e.target.value)}
+            style={{
+              background: 'rgba(25, 20, 35, 0.9)',
+              color: '#ffffff',
+              border: '1px solid rgba(192, 132, 252, 0.4)',
+              borderRadius: '8px',
+              padding: '5px 10px',
+              fontSize: '11px',
+              fontWeight: 700,
+              fontFamily: 'Montserrat',
+              outline: 'none',
+              cursor: 'pointer'
+            }}
+          >
+            {videoList.map(vid => (
+              <option key={vid.id} value={vid.url} style={{ background: '#1c1c1e', color: '#fff' }}>
+                {vid.title}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '5px 12px',
+              borderRadius: '8px',
+              fontSize: '10px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Upload size={12} /> Upload
+          </button>
+
+          {/* ⚡ OPTION 1 PRE-SCAN BUTTON */}
+          <button
+            onClick={triggerPreIndexingScan}
+            disabled={isPreIndexing}
+            style={{
+              background: isPreIndexing ? 'rgba(48, 209, 88, 0.2)' : 'linear-gradient(135deg, #30d158 0%, #1b8a36 100%)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '5px 12px',
+              borderRadius: '8px',
+              fontSize: '10px',
+              fontWeight: 800,
+              cursor: isPreIndexing ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 0 10px rgba(48, 209, 88, 0.4)'
+            }}
+          >
+            <Zap size={12} /> {isPreIndexing ? `Pre-Scan läuft...` : '⚡ Smooth Pre-Scan (Option 1)'}
+          </button>
+
+          <button
+            onClick={() => setIsCurriculumModalOpen(true)}
+            style={{
+              background: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
+              color: '#ffffff',
+              border: 'none',
+              padding: '5px 12px',
+              borderRadius: '8px',
+              fontSize: '10px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 0 12px rgba(192, 132, 252, 0.4)'
+            }}
+          >
+            <BookOpen size={12} /> 📖 Vaganova Lehrplan (AI)
+          </button>
+        </div>
+
+        {/* Center: AI Feature Toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            onClick={() => setShowCoG(!showCoG)}
+            style={{
+              background: showCoG ? 'rgba(48, 209, 88, 0.2)' : 'transparent',
+              color: showCoG ? COLOR_GOOD : 'var(--text-sub)',
+              border: showCoG ? '1px solid rgba(48, 209, 88, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <Disc size={11} /> CoG Lot
+          </button>
+
+          <button
+            onClick={() => setShowMotionTrails(!showMotionTrails)}
+            style={{
+              background: showMotionTrails ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+              color: showMotionTrails ? '#c084fc' : 'var(--text-sub)',
+              border: showMotionTrails ? '1px solid rgba(192, 132, 252, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <PulseIcon size={11} /> Trajektorien
+          </button>
+
+          <button
+            onClick={() => setShowAngleArcs(!showAngleArcs)}
+            style={{
+              background: showAngleArcs ? 'rgba(255, 215, 0, 0.2)' : 'transparent',
+              color: showAngleArcs ? COLOR_WARN : 'var(--text-sub)',
+              border: showAngleArcs ? '1px solid rgba(255, 215, 0, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+          >
+            <Compass size={11} /> AR-Winkel
+          </button>
+        </div>
+
+        {/* Right: View Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            onClick={() => handleZoomChange(1.0, false)}
+            style={{
+              background: zoomLevel === 1.0 && !isAutoCrop ? 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)' : 'transparent',
+              color: '#ffffff',
+              border: 'none',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            1.0x
+          </button>
+
+          <button
+            onClick={() => setSplitScreenMode(!splitScreenMode)}
+            style={{
+              background: splitScreenMode ? 'rgba(192, 132, 252, 0.3)' : 'transparent',
+              color: '#ffffff',
+              border: '1px solid rgba(255,255,255,0.1)',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            Split
+          </button>
+
+          <button
+            onClick={() => setShowSkeleton(!showSkeleton)}
+            style={{
+              background: showSkeleton ? 'rgba(48, 209, 88, 0.2)' : 'transparent',
+              color: showSkeleton ? COLOR_GOOD : 'var(--text-sub)',
+              border: showSkeleton ? '1px solid rgba(48, 209, 88, 0.4)' : '1px solid rgba(255,255,255,0.1)',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
+          >
+            {showSkeleton ? 'Skelett' : 'Aus'}
+          </button>
+        </div>
+      </div>
+
+      {/* 3️⃣ MAIN VIDEO ANALYZER WORKSPACE WITH INTERACTIVE TEACHER CUE-POINT SIDEBAR */}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 360px', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
+        
+        {/* LEFT PANEL: UNCLUTTERED MAIN VIDEO VIEWPORT */}
+        <div className="monolith-card" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0 }}>
+          
+          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
+            
+            {/* VIEWPORT 1: HD BALLET VIDEO STREAM (NATIVE RELATIVE OVERLAY WRAP) */}
+            <div ref={videoContainerRef} style={{
+              position: 'relative',
+              width: '100%',
+              height: '100%',
+              overflow: 'hidden',
+              background: '#050407',
+              transform: `scale(${zoomLevel}) translate(${panOffset.x}%, ${panOffset.y}%)`,
+              transformOrigin: 'center center',
+              transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}>
+
+                <video
+                  ref={videoRef}
+                  key={selectedDevVideoUrl}
+                  src={selectedDevVideoUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  controls={true}
+                  onLoadedData={() => {
+                    realMediaPipePose.reset();
+                    vaganova3DKinematics.reset();
+                    vaganovaKineticAI.reset();
+                    vaganovaPoseEngine.reset();
+                    computeOverlayBounds();
+                    processStaticPausedFrame();
+                  }}
+                  onSeeked={processStaticPausedFrame}
+                  onPause={processStaticPausedFrame}
+                  style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+
+                {/* Clean Watermark Logo */}
+                <img
+                  src="/schoenewolf_swan_logo.png"
+                  alt="Swan Logo"
+                  style={{ position: 'absolute', top: '20px', left: '20px', width: '60px', opacity: 0.25, pointerEvents: 'none' }}
+                />
+
+                {/* Option 1 Pre-Indexing Progress Overlay Bar */}
+                {isPreIndexing && (
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(10,8,14,0.92)', backdropFilter: 'blur(10px)', zIndex: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
+                    <Zap size={36} color="#30d158" style={{ filter: 'drop-shadow(0 0 12px rgba(48,209,88,0.8))' }} />
+                    <div className="font-montserrat" style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '0.5px' }}>
+                      ⚡ Option 1 Pre-Scan: {indexingStatusStr}
+                    </div>
+                    <div style={{ width: '280px', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.2)' }}>
+                      <div style={{ width: `${indexingProgress}%`, height: '100%', background: 'linear-gradient(90deg, #30d158, #c084fc)', transition: 'width 0.15s ease' }}></div>
+                    </div>
+                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)' }}>Ruckelfreier 60 FPS RAM-Puffer wird erstellt...</span>
+                  </div>
+                )}
+
+                {/* 🎨 CANVAS SKELETON OVERLAY – 60fps direct rendering */}
+                <canvas
+                  ref={canvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: overlayBounds ? `${overlayBounds.top}px` : 0,
+                    left: overlayBounds ? `${overlayBounds.left}px` : 0,
+                    width: overlayBounds ? `${overlayBounds.width}px` : '100%',
+                    height: overlayBounds ? `${overlayBounds.height}px` : '100%',
+                    pointerEvents: 'none',
+                    zIndex: 25
+                  }}
+                />
+
+
+              {/* Status Badge */}
+              {showSkeleton && !isEngineReady && !isPreIndexing && (
+                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', background: 'rgba(10, 8, 14, 0.85)', backdropFilter: 'blur(10px)', border: '1px solid rgba(192, 132, 252, 0.4)', padding: '10px 20px', borderRadius: '12px', color: '#ffffff', fontSize: '11px', fontWeight: 700, zIndex: 30, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={16} className="animate-spin" color="#c084fc" />
+                  <span>MediaPipe Pose Engine wird am Video-Stream initialisiert...</span>
+                </div>
+              )}
+
+              {/* Minimal Clean Viewport Overlay Label */}
+              <div style={{ position: 'absolute', bottom: '16px', left: '16px', zIndex: 30, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: COLOR_GOOD }}></span>
+                <span className="font-montserrat" style={{ fontSize: '11px', fontWeight: 700, color: '#ffffff' }}>
+                  Schülerin: Emma Berger · {currentVideoObj.title}
+                </span>
+              </div>
+
+            </div>
+
+            {/* VIEWPORT 2: MASTER REFERENCE (SPLIT-SCREEN) */}
+            {splitScreenMode && (
+              <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderLeft: '2px solid rgba(168,129,189,0.5)' }}>
+                
+                <video
+                  ref={refVideoRef}
+                  src="/videos/nicole_saal_5.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+
+                <div style={{ position: 'absolute', top: '20px', right: '16px', background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 700, color: '#fff' }}>
+                  VAGANOVA MASTER REFERENZ (100%)
+                </div>
+
+              </div>
+            )}
+
+          </div>
+
+          {/* BOTTOM TIMELINE & CONTROLS DOCK */}
+          <div style={{ padding: '12px 18px', background: 'rgba(10, 8, 14, 0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              <button
+                onClick={handleTogglePlay}
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer'
+                }}
+              >
+                {isPlaying ? <Pause size={16} fill="#ffffff" /> : <Play size={16} fill="#ffffff" style={{ marginLeft: '2px' }} />}
+              </button>
+
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#c084fc', fontWeight: 700 }}>{selectedFrameTime}</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  defaultValue="42"
+                  style={{ flex: 1, accentColor: '#a881bd', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-sub)' }}>00:05.000</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '8px' }}>
+                {[0.25, 0.5, 1.0].map(sp => (
+                  <button
+                    key={sp}
+                    onClick={() => handleSpeedChange(sp)}
+                    style={{
+                      background: playbackSpeed === sp ? 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)' : 'transparent',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {sp}x
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => alert('✓ 10-Sekunden DSGVO-Fortschritts-Clip wurde erstellt und an Sabine Berger gesendet!')}
+                className="btn-monolith"
+                style={{ fontSize: '10px', padding: '7px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Send size={12} /> WhatsApp Clip Export
+              </button>
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* RIGHT PANEL: INTERACTIVE TEACHER CUE-POINT MANAGER */}
+        <div className="monolith-card" style={{ display: 'flex', flexDirection: 'column', padding: '16px', gap: '14px', background: 'rgba(10, 8, 14, 0.98)', border: '1px solid rgba(192, 132, 252, 0.3)', overflow: 'hidden' }}>
+          
+          {/* Header & Add Button */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <ListVideo size={18} color="#c084fc" />
+              <div>
+                <h3 className="font-montserrat" style={{ fontSize: '12px', fontWeight: 800, color: '#ffffff', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>
+                  Cue-Point Manager
+                </h3>
+                <p style={{ fontSize: '9px', color: 'var(--text-sub)', margin: 0 }}>
+                  Nicole's Korrektur-Notizen
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleAddCuePointAtCurrentFrame}
+              style={{
+                background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+                color: '#ffffff',
+                border: 'none',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                fontSize: '10px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                boxShadow: '0 0 10px rgba(168,129,189,0.4)'
+              }}
+            >
+              <Plus size={12} /> Marker
+            </button>
+          </div>
+
+          {/* Cue Points List */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+            {cuePoints.map((cue) => {
+              const isSelected = selectedFrameTime === cue.timecodeStr;
+              const isEditing = editingCueId === cue.id;
+
+              if (isEditing) {
+                return (
+                  <div
+                    key={cue.id}
+                    style={{
+                      background: 'rgba(30, 20, 45, 0.95)',
+                      border: '1px solid #c084fc',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 800, color: '#c084fc' }}>✏️ Marker bei {cue.timecodeStr} bearbeiten</span>
+                      <button onClick={() => setEditingCueId(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      value={editForm.poseName}
+                      onChange={e => setEditForm({ ...editForm, poseName: e.target.value })}
+                      placeholder="Posen-Titel..."
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
+                    <input
+                      type="text"
+                      value={editForm.headline}
+                      onChange={e => setEditForm({ ...editForm, headline: e.target.value })}
+                      placeholder="Befund / Fehler..."
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
+                    <textarea
+                      value={editForm.cueMetaphor}
+                      onChange={e => setEditForm({ ...editForm, cueMetaphor: e.target.value })}
+                      placeholder="Pädagogische Metapher..."
+                      rows={2}
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setEditForm({ ...editForm, status: 'GOOD' })}
+                        style={{ background: editForm.status === 'GOOD' ? 'rgba(48,209,88,0.4)' : 'transparent', color: '#fff', border: '1px solid #30d158', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', cursor: 'pointer' }}
+                      >
+                        🟢 GUT
+                      </button>
+                      <button
+                        onClick={() => setEditForm({ ...editForm, status: 'CORRECTION' })}
+                        style={{ background: editForm.status === 'CORRECTION' ? 'rgba(255,69,58,0.4)' : 'transparent', color: '#fff', border: '1px solid #ff453a', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', cursor: 'pointer' }}
+                      >
+                        🔴 KORREKTUR
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={(e) => handleSaveEdit(cue.id, e)}
+                      style={{ background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)', color: '#fff', border: 'none', padding: '6px', borderRadius: '6px', fontSize: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginTop: '4px' }}
+                    >
+                      <Save size={12} /> Speichern
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={cue.id}
+                  onClick={() => handleSeekToCuePoint(cue)}
+                  style={{
+                    background: isSelected ? 'rgba(192, 132, 252, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                    border: isSelected
+                      ? '1px solid #c084fc'
+                      : (cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.3)'),
+                    borderRadius: '10px',
+                    padding: '12px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 800, color: '#c084fc', background: 'rgba(192,132,252,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                        {cue.timecodeStr}
+                      </span>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffffff' }}>
+                        {cue.poseName} {cue.isCustom ? '✏️' : ''}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{
+                        fontSize: '9px',
+                        fontWeight: 800,
+                        padding: '2px 6px',
+                        borderRadius: '6px',
+                        background: cue.status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.2)' : 'rgba(48, 209, 88, 0.2)',
+                        color: cue.status === 'CORRECTION' ? COLOR_BAD : COLOR_GOOD,
+                        border: cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.4)'
+                      }}>
+                        {cue.status === 'CORRECTION' ? '🔴 KORREKTUR' : '🟢 GUT'}
+                      </span>
+
+                      <button
+                        onClick={(e) => handleStartEdit(cue, e)}
+                        title="Bearbeiten"
+                        style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}
+                      >
+                        <Edit2 size={11} />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteCuePoint(cue.id, e)}
+                        title="Löschen"
+                        style={{ background: 'transparent', border: 'none', color: '#ff453a', cursor: 'pointer', padding: '2px' }}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: cue.status === 'CORRECTION' ? '#ff453a' : '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {cue.status === 'CORRECTION' ? <AlertTriangle size={12} /> : <CheckCircle size={12} color="#30d158" />}
+                    <span>{cue.headline}</span>
+                  </div>
+
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', background: 'rgba(0,0,0,0.4)', padding: '8px 10px', borderRadius: '8px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span>💡 "{cue.cueMetaphor}"</span>
+
+                    <button
+                      onClick={(e) => handleSpeakCueMetaphor(cue.cueMetaphor, e)}
+                      style={{
+                        alignSelf: 'flex-start',
+                        background: 'linear-gradient(135deg, rgba(192, 132, 252, 0.3) 0%, rgba(139, 90, 139, 0.3) 100%)',
+                        border: '1px solid rgba(192, 132, 252, 0.5)',
+                        color: '#c084fc',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        fontSize: '9px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <Volume2 size={11} /> 🔊 KI-Sprach-Cue anhören
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '2px' }}>
+                    <span>Frame (Slow-Mo 0.25x) anspringen</span>
+                    <ChevronRight size={10} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
+            <button
+              onClick={() => setCuePoints(vaganovaPreAnalyzer.resetToDefaults(selectedDevVideoUrl))}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-sub)', fontSize: '9px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <RotateCcw size={10} /> KI-Standwerte zurücksetzen
+            </button>
+            
+            <button
+              onClick={() => setIsCurriculumModalOpen(true)}
+              style={{ background: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <BookOpen size={11} /> Hausaufgabe (AI)
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+};

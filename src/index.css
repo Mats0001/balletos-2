@@ -1,0 +1,183 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+:root {
+  /* Apple Glass & Aurora Mauve CI Tokens */
+  --mauve-primary: #a881bd;
+  --mauve-light: #c8a2c8;
+  --mauve-dark: #6f4a6f;
+  --mauve-glow: rgba(168, 129, 189, 0.35);
+
+  --glass-bg: rgba(18, 16, 24, 0.75);
+  --glass-bg-elevated: rgba(28, 24, 36, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border-subtle: rgba(168, 129, 189, 0.25);
+
+  --bg-space: #060508;
+  --text-pure: #ffffff;
+  --text-sub: rgba(245, 240, 255, 0.7);
+  --text-muted: rgba(245, 240, 255, 0.4);
+
+  --font-montserrat: 'Montserrat', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--bg-space);
+  color: var(--text-pure);
+  font-family: var(--font-montserrat);
+  letter-spacing: -0.015em;
+}
+
+.font-montserrat {
+  font-family: var(--font-montserrat);
+}
+
+/* Master 100vh Zero-Scroll Layout */
+.app-container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* Vertical Left Side Navigation (240px) */
+.side-nav {
+  width: 240px;
+  height: 100vh;
+  height: 100dvh;
+  background: rgba(14, 12, 18, 0.95);
+  border-right: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 16px;
+  z-index: 100;
+}
+
+/* Vertical Right Inspector Panel (340px) */
+.right-panel {
+  width: 340px;
+  height: 100vh;
+  height: 100dvh;
+  background: rgba(16, 14, 22, 0.95);
+  border-left: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  padding: 20px 16px;
+  gap: 16px;
+  overflow-y: auto;
+  z-index: 90;
+}
+
+/* Pure Apple Glass Monolith Card */
+.monolith-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Floating Apple Glass Docks */
+.floating-dock {
+  background: rgba(20, 18, 26, 0.85);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid var(--glass-border);
+  border-radius: 30px;
+  padding: 6px 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+/* Sleek Refined Action Buttons (Refined Weight: 700/600) */
+.btn-monolith {
+  background: linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%);
+  color: #ffffff;
+  font-family: var(--font-montserrat);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(168, 129, 189, 0.35);
+  transition: all 0.15s ease;
+}
+
+.btn-monolith:hover {
+  background: linear-gradient(135deg, #c8a2c8 0%, #a881bd 100%);
+  transform: translateY(-1px);
+}
+
+.btn-monolith-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  color: #f3effa;
+  font-family: var(--font-montserrat);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--glass-border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-monolith-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Minimalist Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+/* 📱 Responsive Mobile 390x844 Viewport Rules */
+@media (max-width: 768px) {
+  .side-nav {
+    display: none !important;
+  }
+  .right-panel {
+    display: none !important;
+  }
+  .app-container {
+    flex-direction: column;
+  }
+  main {
+    width: 100vw !important;
+    padding: 8px !important;
+  }
+}
+
