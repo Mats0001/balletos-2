@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, BookOpen, Zap, Dumbbell, AlertTriangle, TrendingDown, TrendingUp, CheckCircle } from 'lucide-react';
 import { JointKnowledge } from '../services/skeletonJointKnowledge';
 import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
@@ -98,25 +99,26 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const W = 220;
-  const H_EST = liveMeasurements.length > 0 ? 440 : 390;
+  const W = 234;
 
-  // ── POSITION: fixed, to the LEFT of the video (= left of canvasRect) ────
-  // videoLeft = canvasRect.left in viewport coords
-  const idealLeft = videoLeft - W - 28;
-  const popoverLeft = Math.max(4, idealLeft);
+  // ── POSITION: LINKS-PANE ─────────────────────────────────────────────────
+  // Fest verankert im linken Sidebar-Bereich (x=10, klar links von Video bei 257)
+  const popoverLeft = 10;
 
-  let popoverTop = jointY - H_EST / 2;
-  popoverTop = Math.max(8, Math.min(containerHeight - H_EST - 8, popoverTop));
+  let popoverTop = jointY - 200;
+  popoverTop = Math.max(10, Math.min(containerHeight - 50, popoverTop));
 
   // ── SVG CONNECTOR ─────────────────────────────────────────────────────────
+  // Schwanz startet an der RECHTEN Seite des Popovers (Mitte vertikal)
   const tailX = popoverLeft + W + 2;
-  const tailY = popoverTop + H_EST / 2;
+  const tailY = Math.max(popoverTop + 20, Math.min(popoverTop + 380, jointY));
   const headX = jointX;
   const headY = jointY;
-  const cp1X = tailX + (headX - tailX) * 0.45;
+  // Sanfte Bezier-Kurve: Kontrollpunkte spannen Distanz auf
+  const gap = headX - tailX;
+  const cp1X = tailX + gap * 0.5;
   const cp1Y = tailY;
-  const cp2X = tailX + (headX - tailX) * 0.55;
+  const cp2X = tailX + gap * 0.5;
   const cp2Y = headY;
 
   // Dominant live status for connector colour
@@ -124,7 +126,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   const hasWarning = liveMeasurements.some(({ m }) => m.status === 'WARNING');
   const connectorColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : color;
 
-  return (
+  return createPortal(
     <>
       {/* SVG connector – position:fixed, full viewport */}
       <svg
@@ -161,23 +163,26 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         <circle cx={headX} cy={headY} r="4.5" fill={connectorColor} opacity="0.95" />
       </svg>
 
-      {/* POPOVER CARD – position:fixed so it is never clipped by any overflow:hidden ancestor */}
+      {/* POPOVER CARD – links-pane, position:fixed, nie unter Video */}
       <div
         style={{
           position: 'fixed',
           left: `${popoverLeft}px`,
           top: `${popoverTop}px`,
           width: `${W}px`,
-          zIndex: 1000,
-          background: 'rgba(8,4,16,0.97)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
+          maxHeight: 'calc(100vh - 24px)',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          zIndex: 9999,
+          background: 'rgba(8,4,18,0.97)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
           border: `1px solid ${color}50`,
           borderRight: `3px solid ${connectorColor}`,
           borderRadius: '14px',
-          boxShadow: `0 10px 48px rgba(0,0,0,0.85), 0 0 0 1px ${color}15, inset 0 1px 0 rgba(255,255,255,0.05)`,
-          overflow: 'hidden',
-          animation: 'popoverSlideIn 0.22s cubic-bezier(0.34,1.4,0.64,1)',
+          boxShadow: `0 8px 40px rgba(0,0,0,0.9), 0 0 0 1px ${color}18, inset 0 1px 0 rgba(255,255,255,0.06)`,
+
+          animation: 'popoverSlideInLeft 0.24s cubic-bezier(0.34,1.4,0.64,1)',
           pointerEvents: 'all',
         }}
         onClick={e => e.stopPropagation()}
@@ -248,7 +253,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         )}
 
         {/* BODY – knowledge sections */}
-        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '7px', maxHeight: '240px', overflowY: 'auto', scrollbarWidth: 'thin', scrollbarColor: `${color}40 transparent` }}>
+        <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
 
           <Section icon={<BookOpen size={9} />} label="Was ist hier zu sehen?" color={color}>
             {knowledge.anatomyNote}
@@ -291,14 +296,14 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         </div>
 
         <style>{`
-          @keyframes popoverSlideIn {
-            from { opacity: 0; transform: translateX(-12px) scale(0.95); }
-            to   { opacity: 1; transform: translateX(0) scale(1); }
+          @keyframes popoverSlideInLeft {
+            from { opacity: 0; transform: translateX(-20px) scale(0.96); }
+            to   { opacity: 1; transform: translateX(0)   scale(1); }
           }
         `}</style>
       </div>
     </>
-  );
+  , document.body);
 };
 
 interface SectionProps {
