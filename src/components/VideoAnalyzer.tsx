@@ -263,7 +263,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       setCuePoints(prev => {
         const existingIds = new Set(prev.map(p => p.id));
         const newPoints = autoCuePoints.filter(p => !existingIds.has(p.id));
-        return [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
+        const merged = [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
+        // ⚠️ Sofort in localStorage persistieren, sonst verliert addCuePoint() die KI-Cues
+        vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
+        return merged;
       });
     }
     setAnalysisReport(report);
