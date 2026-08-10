@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, BookOpen, Zap, Dumbbell, AlertTriangle, TrendingDown, TrendingUp, CheckCircle } from 'lucide-react';
+import { X, Zap, Dumbbell, AlertTriangle, TrendingDown, CheckCircle } from 'lucide-react';
 import { JointKnowledge } from '../services/skeletonJointKnowledge';
 import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
 
@@ -259,33 +259,35 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           </div>
         )}
 
-        {/* BODY – knowledge sections */}
+        {/* BODY – knowledge sections: pädagogisch priorisiert */}
         <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
 
-          <Section icon={<BookOpen size={9} />} label="Was ist hier zu sehen?" color={color}>
-            {knowledge.anatomyNote}
-          </Section>
-
-          <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Vaganova-Standard" color={color}>
-            {knowledge.vaganovaRule}
-          </Section>
-
-          <Section icon={<Zap size={9} />} label="Wie & Warum" color={color} highlight>
-            {knowledge.howAndWhy}
-          </Section>
-
-          {/* Typischer Fehler */}
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'flex-start', background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.18)', borderRadius: '7px', padding: '5px 7px' }}>
-            <AlertTriangle size={9} style={{ color: '#ff453a', flexShrink: 0, marginTop: '1px' }} />
-            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.6)', lineHeight: 1.4 }}>
-              <span style={{ fontWeight: 800, color: '#ff6b61', marginRight: '3px' }}>Typischer Fehler:</span>
+          {/* 1️⃣ WAS IST FALSCH – klar, direkt, vorne */}
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'flex-start', background: hasError ? 'rgba(255,69,58,0.1)' : hasWarning ? 'rgba(255,214,10,0.08)' : 'rgba(48,209,88,0.07)', border: `1px solid ${hasError ? 'rgba(255,69,58,0.3)' : hasWarning ? 'rgba(255,214,10,0.25)' : 'rgba(48,209,88,0.2)'}`, borderRadius: '8px', padding: '7px 9px' }}>
+            <AlertTriangle size={11} style={{ color: hasError ? '#ff453a' : hasWarning ? '#ffd60a' : '#30d158', flexShrink: 0, marginTop: '1px' }} />
+            <div style={{ fontSize: '10px', color: '#ffffff', lineHeight: 1.5, fontWeight: 600 }}>
+              <span style={{ fontSize: '8px', fontWeight: 800, color: hasError ? '#ff453a' : hasWarning ? '#ffd60a' : '#30d158', textTransform: 'uppercase', letterSpacing: '0.7px', display: 'block', marginBottom: '2px' }}>
+                {hasError ? '⚠ Typischer Fehler hier' : hasWarning ? '⚠ Achtung' : '✓ Richtig ausgeführt'}
+              </span>
               {knowledge.commonMistake}
             </div>
           </div>
 
+          {/* 2️⃣ WARUM IST DAS FALSCH */}
+          <Section icon={<Zap size={9} />} label="Warum ist das problematisch?" color={color} highlight>
+            {knowledge.howAndWhy}
+          </Section>
+
+          {/* 3️⃣ SO KORRIGIEREN */}
           <Section icon={<Dumbbell size={9} />} label={knowledge.exerciseTitle} color="#30d158">
             {knowledge.exercise}
           </Section>
+
+          {/* 4️⃣ VAGANOVA-STANDARD – als Referenz, nicht als Leadin */}
+          <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Vaganova-Standard" color={color}>
+            {knowledge.vaganovaRule}
+          </Section>
+
         </div>
 
         {/* FOOTER */}
