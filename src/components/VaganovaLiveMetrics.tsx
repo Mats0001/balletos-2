@@ -13,13 +13,17 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 // Class badge config – epistemological transparency
-const CLASS_BADGE: Record<MeasurementClass, { label: string; color: string; bg: string }> = {
+const CLASS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
   vaganova_relation:          { label: 'VR',  color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
   pedagogical_nominal_angle:  { label: 'PED', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   research_observation:       { label: 'OBS', color: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
   individual_baseline:        { label: 'BAS', color: '#34d399', bg: 'rgba(52,211,153,0.12)' },
   validated_system_threshold: { label: 'VAL', color: '#f9a8d4', bg: 'rgba(249,168,212,0.12)' },
+  // P0-c: proxy_unvalidated is the honest label for unvalidated thresholds
+  proxy_unvalidated:          { label: 'PRX', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
   not_measurable:             { label: '—',   color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
+  // Fallback for any future/unknown class – never crash
+  unknown:                    { label: '?',   color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
 };
 
 const MetricRow: React.FC<{ m: VaganovaMeasurement | null; label?: string }> = ({ m, label }) => {
@@ -27,7 +31,8 @@ const MetricRow: React.FC<{ m: VaganovaMeasurement | null; label?: string }> = (
 
   const displayLabel = label ?? m.label;
   const cls = m.measurement_class;
-  const badge = CLASS_BADGE[cls];
+  // Safe lookup with fallback – prevents crash when new measurement_class values are added
+  const badge = CLASS_BADGE[cls] ?? CLASS_BADGE['unknown'];
 
   // not_measurable: special compact display
   if (cls === 'not_measurable') {
@@ -50,8 +55,14 @@ const MetricRow: React.FC<{ m: VaganovaMeasurement | null; label?: string }> = (
     );
   }
 
-  const color = STATUS_COLOR[m.status ?? 'CORRECT'] ?? '#30d158';
-  const icon  = m.status === 'CORRECT' ? '✓' : m.status === 'WARNING' ? '⚠' : m.status === 'ERROR' ? '✗' : '○';
+  // display_only classes (research_observation, pedagogical_nominal_angle, proxy_unvalidated)
+  // have no status – show neutral indicator, NOT green 'CORRECT'
+  const hasVerdict = m.status !== undefined;
+  const color = hasVerdict ? (STATUS_COLOR[m.status!] ?? '#9ca3af') : '#9ca3af';
+  const icon  = !hasVerdict ? '○'
+    : m.status === 'CORRECT' ? '✓'
+    : m.status === 'WARNING' ? '⚠'
+    : m.status === 'ERROR'   ? '✗' : '○';
 
   // Format value
   let displayVal = '';
