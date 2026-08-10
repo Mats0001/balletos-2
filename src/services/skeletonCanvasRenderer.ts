@@ -39,6 +39,12 @@ export interface CanvasRenderOptions {
   selectedJointId: string;
   isPlie: boolean;
   vaganovaAnalysis: any; // From vaganovaAngleCalculator
+  /** Darstellungsmodus:
+   * 'lehrer-ampel' – Grün/Rot/Gelb aus Rohwerten (Nicole-Unterrichtshilfe, nicht validiert)
+   * 'anatomisch'   – Farbe nach Körperregion, kein Urteil
+   * 'lehrbuch'     – monochromes Weiß, maximale Klarheit
+   */
+  overlayMode?: 'lehrer-ampel' | 'anatomisch' | 'lehrbuch';
 }
 
 /**
@@ -252,10 +258,28 @@ export function renderSkeletonToCanvas(
 
   if (!opts.showSkeleton) return;
 
-  // Berater 2026-08-10: statusToColor() ist entfernt.
-  // Knochenfarben basieren ausschließlich auf Confidence, nicht auf VaganovaMeasurement.status.
-  // Ampelfarben dürfen erst aus einer authorisierten MetricDecision (DecisionGate) kommen.
-  // Bis Sprint 1 Step 5 (DecisionGate): monochromes Skelett, Confidence via Alpha.
+  // ─── OVERLAY-MODUS FARB-RESOLVER ───
+  // Berater-konform: Ampelfarben DÜRFEN in 'lehrer-ampel'-Modus erscheinen,
+  // weil Nicole diese explizit eingestellt hat und der Disclaimer-Text klar macht
+  // dass es sich um nicht-validierte Rohdaten handelt.
+  // 'anatomisch' und 'lehrbuch' enthalten KEINE Urteils-Farben.
+  const mode = opts.overlayMode ?? 'anatomisch';
+
+  // Status → Farbe (nur aktiv in 'lehrer-ampel'-Modus)
+  const statusColor = (s?: string): string => {
+    if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
+    return s === 'CORRECT' ? '#30d158' : s === 'WARNING' ? '#ffd60a' : s === 'ERROR' ? '#ff453a' : '#30d158';
+  };
+
+  // Knochen-Farbe nach Region und Modus
+  const boneColor = (regional: string): string =>
+    mode === 'lehrbuch' ? '#e2e8f0' : regional;
+
+  // Selektions-Highlight (immer amber, modusunabhängig)
+  const selColor = COLOR_SELECTED;
+
+
+  // Skeleton body part colors (mode-resolved above)
 
   // Destructure skeleton
   const {
@@ -298,84 +322,102 @@ export function renderSkeletonToCanvas(
 
   // ─── CoG & PLUMB VECTOR ───
   if (opts.showCoG) {
-    drawLine(ctx, cog.x, cog.y, cog.x, 950, COLOR_COG, 2.5, sx, sy, [4, 4]);
-    drawCircle(ctx, cog.x, cog.y, 10, 'rgba(167,139,250,0.25)', sx, sy, COLOR_COG, 3);
+    const cogC = mode === 'lehrer-ampel' ? '#30d158' : COLOR_COG;
+    drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 2.5, sx, sy, [4, 4]);
+    drawCircle(ctx, cog.x, cog.y, 10, mode === 'lehrer-ampel' ? 'rgba(48,209,88,0.25)' : 'rgba(167,139,250,0.25)', sx, sy, cogC, 3);
     drawCircle(ctx, cog.x, cog.y, 3, '#ffffff', sx, sy);
   }
 
-  // ─── ANGLE ARCS ───
+  // ─── WINKEL-BÖGEN (Turnout) ───
   if (opts.showAngleArcs) {
     const avgS = (sx + sy) / 2;
-    // Turnout arcs: neutral (no status color – no DecisionGate yet)
     const turnoutPairs: Array<[KinematicPoint, string]> = [
       [ankleL, 'turnoutL'],
       [ankleR, 'turnoutR'],
     ];
     for (const [anklePoint, turnoutKey] of turnoutPairs) {
-      const turnoutConf = opts.vaganovaAnalysis?.[turnoutKey]?.confidence ?? 0.7;
+      const turnoutVal = opts.vaganovaAnalysis?.[turnoutKey];
+      const turnoutConf = turnoutVal?.confidence ?? 0.7;
+      const tColor = mode === 'lehrer-ampel'
+        ? statusColor(turnoutVal?.status)
+        : boneColor(COLOR_SPINE);
       ctx.beginPath();
       ctx.arc(anklePoint.x * sx, anklePoint.y * sy, 28 * avgS, Math.PI, 0);
-      ctx.strokeStyle = COLOR_SPINE;
+      ctx.strokeStyle = tColor;
       ctx.lineWidth = 3 * avgS;
       ctx.globalAlpha = confidenceAlpha(turnoutConf) * 0.7;
-      ctx.fillStyle = 'rgba(226,232,240,0.08)';
+      ctx.fillStyle = mode === 'lehrer-ampel'
+        ? (turnoutVal?.status === 'CORRECT' ? 'rgba(48,209,88,0.12)' : 'rgba(255,214,10,0.10)')
+        : 'rgba(226,232,240,0.06)';
       ctx.fill();
       ctx.stroke();
       ctx.globalAlpha = 1.0;
     }
   }
 
-  // ─── HEAD & CERVICAL NECK AXIS ───
+  // ─── KOPF & HALS ───
   const headConf = opts.vaganovaAnalysis?.headTilt?.confidence;
+  const headStatusC = statusColor(opts.vaganovaAnalysis?.headTilt?.status);
+  const headC = mode === 'lehrer-ampel' ? headStatusC : boneColor(COLOR_HEAD);
   ctx.globalAlpha = confidenceAlpha(headConf);
-  drawCircle(ctx, head.x, head.y, 18, 'rgba(192,132,252,0.18)', sx, sy,
-    opts.selectedJointId === 'head_epaulement' ? COLOR_SELECTED : COLOR_HEAD, 2.5);
-  drawLine(ctx, head.x, head.y, neck.x, neck.y, COLOR_SPINE, 3.5, sx, sy);
+  drawCircle(ctx, head.x, head.y, 18,
+    mode === 'lehrer-ampel' ? 'rgba(192,132,252,0.15)' : 'rgba(192,132,252,0.18)', sx, sy,
+    opts.selectedJointId === 'head_epaulement' ? selColor : headC, 2.5);
+  drawLine(ctx, head.x, head.y, neck.x, neck.y, boneColor(COLOR_SPINE), 3.5, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── SPINE (cyan) ───
+  // ─── WIRBELSÄULE ───
   const spineConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
+  const spineC = mode === 'lehrer-ampel'
+    ? statusColor(opts.vaganovaAnalysis?.spineTilt?.status)
+    : boneColor(COLOR_SPINE);
   ctx.globalAlpha = confidenceAlpha(spineConf);
-  drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, COLOR_SPINE, 4, sx, sy);
-  drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, COLOR_SPINE, 4, sx, sy);
-  drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, COLOR_SPINE, 4, sx, sy);
+  drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy);
+  drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 4, sx, sy);
+  drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 4, sx, sy);
   drawCircle(ctx, neck.x, neck.y, 5.5, COLOR_JOINT, sx, sy);
   drawCircle(ctx, sternum.x, sternum.y, 5.5, COLOR_JOINT, sx, sy);
-  drawCircle(ctx, navel.x, navel.y, 6.5, COLOR_SELECTED, sx, sy);
+  drawCircle(ctx, navel.x, navel.y, 6.5, selColor, sx, sy);
   drawCircle(ctx, pelvisCenter.x, pelvisCenter.y, 7, COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── ARMS (violett) – keine Status-Farbe (Berater: nur aus DecisionGate) ───
+  // ─── ARME (violett / status im Lehrer-Ampel-Modus) ───
   const armLConf = opts.vaganovaAnalysis?.armLineQualityL?.confidence;
   const armRConf = opts.vaganovaAnalysis?.armLineQualityR?.confidence;
-  const armLColor = opts.selectedJointId === 'port_de_bras_arms' ? COLOR_SELECTED : COLOR_ARM;
-  const armRColor = opts.selectedJointId === 'port_de_bras_arms' ? COLOR_SELECTED : COLOR_ARM;
+  const armLStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityL?.status);
+  const armRStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityR?.status);
+  const armLColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
+    : mode === 'lehrer-ampel' ? armLStatusC : boneColor(COLOR_ARM);
+  const armRColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
+    : mode === 'lehrer-ampel' ? armRStatusC : boneColor(COLOR_ARM);
 
-  // Schulterleiste (violett)
+  // Schulterleiste
   const shConf = opts.vaganovaAnalysis?.shoulderSymmetry?.confidence;
+  const shC = mode === 'lehrer-ampel'
+    ? statusColor(opts.vaganovaAnalysis?.shoulderSymmetry?.status)
+    : boneColor(COLOR_ARM);
   ctx.globalAlpha = confidenceAlpha(shConf);
-  drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, COLOR_ARM, 3.5, sx, sy);
+  drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy);
   drawCircle(ctx, shoulderL.x, shoulderL.y, 7, COLOR_JOINT, sx, sy);
   drawCircle(ctx, shoulderR.x, shoulderR.y, 7, COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // Linker Arm (violett)
+  // Linker Arm
   ctx.globalAlpha = confidenceAlpha(armLConf);
   drawLine(ctx, shoulderL.x, shoulderL.y, elbowL.x, elbowL.y, armLColor, 4.5, sx, sy);
   drawLine(ctx, elbowL.x, elbowL.y, wristL.x, wristL.y, armLColor, 4.5, sx, sy);
-  // Rechter Arm (violett)
+  // Rechter Arm
   ctx.globalAlpha = confidenceAlpha(armRConf);
   drawLine(ctx, shoulderR.x, shoulderR.y, elbowR.x, elbowR.y, armRColor, 4.5, sx, sy);
   drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 4.5, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // Ellenbogen-Ringe (gepunktet, violett)
-  const elbowLConf = armLConf ?? 0.8;
-  const elbowRConf = armRConf ?? 0.8;
-  ctx.globalAlpha = confidenceAlpha(elbowLConf) * 0.85;
-  drawDashedCircle(ctx, elbowL.x, elbowL.y, 18, COLOR_ARM, 2, sx, sy);
-  ctx.globalAlpha = confidenceAlpha(elbowRConf) * 0.85;
-  drawDashedCircle(ctx, elbowR.x, elbowR.y, 18, COLOR_ARM, 2, sx, sy);
+  // Ellenbogen-Ringe
+  const elbowC = boneColor(COLOR_ARM);
+  ctx.globalAlpha = confidenceAlpha(armLConf ?? 0.8) * 0.85;
+  drawDashedCircle(ctx, elbowL.x, elbowL.y, 18, mode === 'lehrer-ampel' ? armLStatusC : elbowC, 2, sx, sy);
+  ctx.globalAlpha = confidenceAlpha(armRConf ?? 0.8) * 0.85;
+  drawDashedCircle(ctx, elbowR.x, elbowR.y, 18, mode === 'lehrer-ampel' ? armRStatusC : elbowC, 2, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Gelenk-Dots
@@ -387,57 +429,72 @@ export function renderSkeletonToCanvas(
   // ─── ÉPAULEMENT: shoulder line only ───
   drawLine(ctx, shoulderL.x - 15, shoulderL.y, shoulderR.x + 15, shoulderR.y, COLOR_EPAULEMENT, 1.5, sx, sy, [6, 3]);
 
-  // ─── TORSO RAHMEN (cyan – Wirbelsäulen-Farbe) ───
+  // ─── TORSO RAHMEN ───
   const torsoConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
   ctx.globalAlpha = confidenceAlpha(torsoConf) * 0.75;
-  drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, COLOR_SPINE, 2.5, sx, sy);
-  drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, COLOR_SPINE, 2.5, sx, sy);
-  // Becken-Leiste (slate)
+  drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, boneColor(COLOR_SPINE), 2.5, sx, sy);
+  drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, boneColor(COLOR_SPINE), 2.5, sx, sy);
+  // Becken-Leiste
   const pelvisConf = opts.vaganovaAnalysis?.pelvicTilt?.confidence;
+  const pelvisC = mode === 'lehrer-ampel'
+    ? statusColor(opts.vaganovaAnalysis?.pelvicTilt?.status)
+    : boneColor(COLOR_PELVIS);
   ctx.globalAlpha = confidenceAlpha(pelvisConf);
-  drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, COLOR_PELVIS, 4, sx, sy);
+  drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── BEINE (indigo) ───
-  // Berater 2026-08-10: Valgus-Ringe entfernt (abs() weg → Richtung fehlt).
-  // Confidence via Alpha. Keine roten/grünen Kniefarben.
+  // ─── BEINE (indigo / status im Lehrer-Ampel-Modus) ───
+  // Valgus-Ringe bleiben entfernt (Richtungsfehler abs()). Status zeigt nur Beinfarbe.
   const legLConf = opts.vaganovaAnalysis?.valgusDriftL?.confidence;
   const legRConf = opts.vaganovaAnalysis?.valgusDriftR?.confidence;
+  const legLC = mode === 'lehrer-ampel'
+    ? statusColor(opts.vaganovaAnalysis?.kneeFlexionL?.status ?? opts.vaganovaAnalysis?.valgusDriftL?.status)
+    : boneColor(COLOR_LEG);
+  const legRC = mode === 'lehrer-ampel'
+    ? statusColor(opts.vaganovaAnalysis?.kneeFlexionR?.status ?? opts.vaganovaAnalysis?.valgusDriftR?.status)
+    : boneColor(COLOR_LEG);
 
-  // Linkes Bein (indigo)
+  // Linkes Bein
   ctx.globalAlpha = confidenceAlpha(legLConf);
-  drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, COLOR_LEG, 4.5, sx, sy);
-  drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, COLOR_LEG, 4.5, sx, sy);
+  drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy);
+  drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy);
   const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
   drawCircle(ctx, kneeL.x, kneeL.y, kneeRSize,
-    opts.selectedJointId === 'right_knee' ? COLOR_SELECTED : COLOR_JOINT, sx, sy);
+    opts.selectedJointId === 'right_knee' ? selColor : (mode === 'lehrer-ampel' ? legLC : COLOR_JOINT), sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // Rechtes Bein (indigo)
+  // Rechtes Bein
   ctx.globalAlpha = confidenceAlpha(legRConf);
-  drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, COLOR_LEG, 4.5, sx, sy);
-  drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, COLOR_LEG, 4.5, sx, sy);
+  drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy);
+  drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy);
   const kneeLSize = opts.selectedJointId === 'left_knee' ? 11 : 8.5;
   drawCircle(ctx, kneeR.x, kneeR.y, kneeLSize,
-    opts.selectedJointId === 'left_knee' ? COLOR_SELECTED : COLOR_JOINT, sx, sy);
+    opts.selectedJointId === 'left_knee' ? selColor : (mode === 'lehrer-ampel' ? legRC : COLOR_JOINT), sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── VALGUS RINGE: ENTFERNT (Berater 2026-08-10) ───
-  // abs() entfernt → Richtung fehlt → kein Valgus-Urteil möglich.
-  // Delta als Shadow-Metrik im Seitenpanel, ohne Alarmfarbe.
-
-  // ─── FUß-DOTS (indigo) ───
+  // ─── FUß-DOTS ───
   if (footL && footAlignment.left && footAlignment.left.type !== 'NEUTRAL') {
-    drawCircle(ctx, ankleL.x, ankleL.y, 8, COLOR_LEG, sx, sy);
+    const fc = mode === 'lehrer-ampel'
+      ? (footAlignment.left.status === 'ERROR' ? '#ff453a' : '#ffd60a')
+      : boneColor(COLOR_LEG);
+    drawCircle(ctx, ankleL.x, ankleL.y, 8, fc, sx, sy);
   }
   if (footR && footAlignment.right && footAlignment.right.type !== 'NEUTRAL') {
-    drawCircle(ctx, ankleR.x, ankleR.y, 8, COLOR_LEG, sx, sy);
+    const fc = mode === 'lehrer-ampel'
+      ? (footAlignment.right.status === 'ERROR' ? '#ff453a' : '#ffd60a')
+      : boneColor(COLOR_LEG);
+    drawCircle(ctx, ankleR.x, ankleR.y, 8, fc, sx, sy);
   }
 
-  // ─── SCHWERPUNKT-DOT (violett) ───
+  // ─── SCHWERPUNKT-DOT ───
   if (weightDist.status !== 'CORRECT') {
+    const wc = mode === 'lehrer-ampel'
+      ? (weightDist.status === 'ERROR' ? '#ff453a' : '#ffd60a')
+      : COLOR_COG;
     ctx.globalAlpha = 0.65;
-    drawCircle(ctx, cog.x, cog.y, 10, 'rgba(167,139,250,0.35)', sx, sy, COLOR_COG, 2.5);
+    drawCircle(ctx, cog.x, cog.y, 10,
+      mode === 'lehrer-ampel' ? 'rgba(255,100,100,0.25)' : 'rgba(167,139,250,0.35)',
+      sx, sy, wc, 2.5);
     ctx.globalAlpha = 1.0;
   }
 }

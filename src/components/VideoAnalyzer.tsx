@@ -31,6 +31,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [showAngleArcs, setShowAngleArcs] = useState<boolean>(true);
   const [showMotionTrails, setShowMotionTrails] = useState<boolean>(true);
   const [showCoG, setShowCoG] = useState<boolean>(true);
+  // Overlay-Modus (Berater-kompatibel + Nicole-freundlich)
+  // 'anatomisch'   = nur Körperregionen-Farben, kein Urteil (Berater-Sprint0)
+  // 'lehrer-ampel' = Ampelfarben aus Rohwerten (display-only, nicht validiert)
+  // 'lehrbuch'     = monochromes weiß, keine Ablenkung
+  const [overlayMode, setOverlayMode] = useState<'anatomisch' | 'lehrer-ampel' | 'lehrbuch'>('lehrer-ampel');
+  const [showOverlayMenu, setShowOverlayMenu] = useState<boolean>(false);
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
   const [selectedJointId, setSelectedJointId] = useState<string>('left_knee');
@@ -422,13 +428,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               const c = cachedAnalysisRef.current;
               if (c) {
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
-                  showSkeleton,
+                  showSkeleton: showSkeleton,
                   showMotionTrails,
                   showCoG,
                   showAngleArcs,
                   selectedJointId,
                   isPlie: c.motionCls.isPlie,
-                  vaganovaAnalysis: c.vagAn
+                  vaganovaAnalysis: c.vagAn,
+                  overlayMode
                 }, v.videoWidth, v.videoHeight);
               }
             } // end !skipDraw
@@ -451,7 +458,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (animId) cancelAnimationFrame(animId);
       videoRef.current?.removeEventListener('seeked', handleSeeked);
     };
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId]);
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, overlayMode]);
 
   // Trigger immediate frame detection on Video Pause or Seek
   const processStaticPausedFrame = () => {
@@ -963,12 +970,92 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             Split
           </button>
 
+          {/* Overlay-Modus Selector (3-stufig: Anatomisch / Lehrer-Ampel / Lehrbuch) */}
+          <div style={{ position: 'relative' }}>
+            <button
+              id="overlay-mode-btn"
+              onClick={() => setShowOverlayMenu(!showOverlayMenu)}
+              style={{
+                background: overlayMode === 'lehrer-ampel'
+                  ? 'linear-gradient(135deg, rgba(48,209,88,0.25) 0%, rgba(255,69,58,0.15) 100%)'
+                  : overlayMode === 'anatomisch'
+                  ? 'rgba(100,130,255,0.2)'
+                  : 'rgba(255,255,255,0.08)',
+                color: '#fff',
+                border: '1px solid rgba(255,255,255,0.2)',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                fontSize: '10px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {overlayMode === 'lehrer-ampel' && <span style={{ fontSize: '10px' }}>🚦</span>}
+              {overlayMode === 'anatomisch' && <span style={{ fontSize: '10px' }}>🎨</span>}
+              {overlayMode === 'lehrbuch' && <span style={{ fontSize: '10px' }}>📖</span>}
+              {overlayMode === 'lehrer-ampel' ? 'Lehrer-Ampel' : overlayMode === 'anatomisch' ? 'Anatomisch' : 'Lehrbuch'}
+              <span style={{ opacity: 0.6 }}>▾</span>
+            </button>
+            {showOverlayMenu && (
+              <div style={{
+                position: 'absolute', top: '110%', right: 0, zIndex: 200,
+                background: '#1e1b2e', border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '10px', padding: '6px', minWidth: '220px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+              }}>
+                {/* Mode 1: Lehrer-Ampel */}
+                <button
+                  id="overlay-lehrer-ampel"
+                  onClick={() => { setOverlayMode('lehrer-ampel'); setShowOverlayMenu(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left', background: overlayMode === 'lehrer-ampel' ? 'rgba(48,209,88,0.15)' : 'transparent',
+                    color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
+                    cursor: 'pointer', fontSize: '11px', marginBottom: '3px'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>🚦 Lehrer-Ampel</div>
+                  <div style={{ opacity: 0.6, fontSize: '9px' }}>Grün/Rot/Gelb aus Rohwerten. Für Nicole als Unterrichtshilfe. Nicht validiert – kein Scoring.</div>
+                </button>
+                {/* Mode 2: Anatomisch */}
+                <button
+                  id="overlay-anatomisch"
+                  onClick={() => { setOverlayMode('anatomisch'); setShowOverlayMenu(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left', background: overlayMode === 'anatomisch' ? 'rgba(100,130,255,0.15)' : 'transparent',
+                    color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
+                    cursor: 'pointer', fontSize: '11px', marginBottom: '3px'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>🎨 Anatomisch</div>
+                  <div style={{ opacity: 0.6, fontSize: '9px' }}>Körperregionen-Farben. Cyan=Wirbel, Violett=Arm, Indigo=Bein. Kein Urteil.</div>
+                </button>
+                {/* Mode 3: Lehrbuch */}
+                <button
+                  id="overlay-lehrbuch"
+                  onClick={() => { setOverlayMode('lehrbuch'); setShowOverlayMenu(false); }}
+                  style={{
+                    width: '100%', textAlign: 'left', background: overlayMode === 'lehrbuch' ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
+                    cursor: 'pointer', fontSize: '11px'
+                  }}
+                >
+                  <div style={{ fontWeight: 800, marginBottom: '2px' }}>📖 Lehrbuch</div>
+                  <div style={{ opacity: 0.6, fontSize: '9px' }}>Monochromes Skelett ohne Farbe. Maximale Klarheit für Erklärungen.</div>
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => setShowSkeleton(!showSkeleton)}
             style={{
-              background: showSkeleton ? 'rgba(48, 209, 88, 0.2)' : 'transparent',
-              color: showSkeleton ? COLOR_GOOD : 'var(--text-sub)',
-              border: showSkeleton ? '1px solid rgba(48, 209, 88, 0.4)' : '1px solid rgba(255,255,255,0.1)',
+              background: showSkeleton ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
+              color: showSkeleton ? '#c084fc' : 'var(--text-sub)',
+              border: showSkeleton ? '1px solid rgba(192, 132, 252, 0.4)' : '1px solid rgba(255,255,255,0.1)',
               padding: '4px 8px',
               borderRadius: '6px',
               fontSize: '10px',
