@@ -76,20 +76,7 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
     }}>
       {/* Left Section: Student & Pose Headline */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
-          color: '#ffffff',
-          fontSize: '10px',
-          fontWeight: 800,
-          padding: '4px 10px',
-          borderRadius: '8px',
-          letterSpacing: '0.5px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px'
-        }}>
-          JETZT WICHTIG
-        </div>
+
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffffff', fontFamily: 'Montserrat' }}>
