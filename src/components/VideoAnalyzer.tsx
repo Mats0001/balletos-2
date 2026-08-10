@@ -2255,28 +2255,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     <span>{cue.headline}</span>
                   </div>
 
-                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', background: 'rgba(0,0,0,0.4)', padding: '8px 10px', borderRadius: '8px', marginTop: '2px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <span>💡 "{cue.cueMetaphor}"</span>
-
-                    <button
-                      onClick={(e) => handleSpeakCueMetaphor(cue.cueMetaphor, e)}
-                      style={{
-                        alignSelf: 'flex-start',
-                        background: 'linear-gradient(135deg, rgba(192, 132, 252, 0.3) 0%, rgba(139, 90, 139, 0.3) 100%)',
-                        border: '1px solid rgba(192, 132, 252, 0.5)',
-                        color: '#c084fc',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        fontSize: '9px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      <Volume2 size={11} /> 🔊 KI-Sprach-Cue anhören
-                    </button>
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', background: 'rgba(0,0,0,0.4)', padding: '8px 10px', borderRadius: '8px', marginTop: '2px' }}>
+                    💡 "{cue.cueMetaphor}"
                   </div>
 
                   {/* KI-Note + Referenzbild (nur bei KI_AUTO Cue-Points) */}
