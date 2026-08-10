@@ -89,7 +89,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
   const toggleCueExpanded = (id: string) =>
     setExpandedCueIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' }>({
+  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' | 'WARNING' }>({
     poseName: '',
     headline: '',
     cueMetaphor: '',
@@ -722,9 +722,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       timeSeconds: timeSec,
       timecodeStr,
       poseName: `${motionClass.detectedPoseName} Marker`,
-      status: 'CORRECTION',
+      status: 'WARNING',  // Neu hinzugefügte Notizen zunächst als "besprechungswürdig"
       scorePercent: 85,
-      headline: `Eigene Lehrernotiz an ${timecodeStr}`,
+      headline: `Lehrernotiz an ${timecodeStr}`,
       cueMetaphor: 'Korrekturhinweis von Nicole eingeben...',
       jointFocusId: selectedJointId || 'pelvis_core'
     });
@@ -740,7 +740,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       poseName: cue.poseName,
       headline: cue.headline,
       cueMetaphor: cue.cueMetaphor,
-      status: cue.status === 'CORRECTION' ? 'CORRECTION' : 'GOOD'
+      status: (cue.status === 'CORRECTION' || cue.status === 'WARNING') ? cue.status : 'GOOD'
     });
   };
 
@@ -1004,8 +1004,32 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   };
 
   const COLOR_GOOD = '#30d158'; // Grün = RICHTIG
-  const COLOR_BAD = '#ff453a';  // Rot = FALSCH
-  const COLOR_WARN = '#ffd700'; // Gelb = SELEKTIERT
+  const COLOR_BAD  = '#ff453a'; // Rot  = WIRKLICH FALSCH
+  const COLOR_WARN = '#ff9f0a'; // Orange = besprechungswürdig
+
+  // Gibt die Semantik-Farbe für einen Cue-Status zurück
+  const cueColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+    status === 'CORRECTION' ? COLOR_BAD
+    : status === 'WARNING'  ? COLOR_WARN
+    : COLOR_GOOD;
+
+  // Border-Farbe (gedimmt) für den Karten-Rand
+  const cueBorderColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+    status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.4)'
+    : status === 'WARNING'  ? 'rgba(255, 159, 10, 0.4)'
+    : 'rgba(48, 209, 88, 0.3)';
+
+  // Hintergrund-Farbe (gedimmt) für Status-Badges
+  const cueBgColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+    status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.15)'
+    : status === 'WARNING'  ? 'rgba(255, 159, 10, 0.12)'
+    : 'rgba(48, 209, 88, 0.15)';
+
+  // Status-Label mit Icon
+  const cueLabel = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+    status === 'CORRECTION' ? '🔴 FEHLER'
+    : status === 'WARNING'  ? '🟠 BEOB.'
+    : '🟢 GUT';
 
   // Helper to render glowing trajectory comet nodes
   const renderTrailNodes = (type: 'wristL' | 'wristR' | 'ankleL' | 'ankleR', color: string) => {
@@ -2038,18 +2062,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
                     />
 
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <button
                         onClick={() => setEditForm({ ...editForm, status: 'GOOD' })}
-                        style={{ background: editForm.status === 'GOOD' ? 'rgba(48,209,88,0.4)' : 'transparent', color: '#fff', border: '1px solid #30d158', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', cursor: 'pointer' }}
+                        style={{ background: editForm.status === 'GOOD' ? 'rgba(48,209,88,0.35)' : 'transparent', color: editForm.status === 'GOOD' ? '#30d158' : 'rgba(255,255,255,0.5)', border: '1px solid #30d158', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
                       >
                         🟢 GUT
                       </button>
                       <button
-                        onClick={() => setEditForm({ ...editForm, status: 'CORRECTION' })}
-                        style={{ background: editForm.status === 'CORRECTION' ? 'rgba(255,69,58,0.4)' : 'transparent', color: '#fff', border: '1px solid #ff453a', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', cursor: 'pointer' }}
+                        onClick={() => setEditForm({ ...editForm, status: 'WARNING' })}
+                        style={{ background: editForm.status === 'WARNING' ? 'rgba(255,159,10,0.35)' : 'transparent', color: editForm.status === 'WARNING' ? '#ff9f0a' : 'rgba(255,255,255,0.5)', border: '1px solid #ff9f0a', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
                       >
-                        🔴 KORREKTUR
+                        🟠 BEOBACHTEN
+                      </button>
+                      <button
+                        onClick={() => setEditForm({ ...editForm, status: 'CORRECTION' })}
+                        style={{ background: editForm.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)' : 'transparent', color: editForm.status === 'CORRECTION' ? '#ff453a' : 'rgba(255,255,255,0.5)', border: '1px solid #ff453a', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        🔴 FEHLER
                       </button>
                     </div>
 
@@ -2072,7 +2102,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     background: isSelected ? 'rgba(192, 132, 252, 0.18)' : 'rgba(255, 255, 255, 0.03)',
                     border: isSelected
                       ? '1px solid #c084fc'
-                      : (cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.3)'),
+                      : `1px solid ${cueBorderColor(cue.status)}`,
                     borderRadius: '10px',
                     overflow: 'hidden',
                     transition: 'border-color 0.2s ease, background 0.2s ease',
@@ -2114,11 +2144,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
                       <span style={{
                         fontSize: '9px', fontWeight: 800, padding: '2px 6px', borderRadius: '6px',
-                        background: cue.status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.2)' : 'rgba(48, 209, 88, 0.2)',
-                        color: cue.status === 'CORRECTION' ? COLOR_BAD : COLOR_GOOD,
-                        border: cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.4)'
+                        background: cueBgColor(cue.status),
+                        color: cueColor(cue.status),
+                        border: `1px solid ${cueBorderColor(cue.status)}`
                       }}>
-                        {cue.status === 'CORRECTION' ? '🔴 KORR.' : '🟢 GUT'}
+                        {cueLabel(cue.status)}
                       </span>
                       <button onClick={(e) => handleStartEdit(cue, e)} title="Bearbeiten"
                         style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}>
@@ -2135,8 +2165,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   {isExpanded && (
                     <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
 
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: cue.status === 'CORRECTION' ? '#ff453a' : '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {cue.status === 'CORRECTION' ? <AlertTriangle size={12} /> : <CheckCircle size={12} color="#30d158" />}
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: cueColor(cue.status), display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {cue.status === 'CORRECTION' ? <AlertTriangle size={12} color={COLOR_BAD} />
+                     : cue.status === 'WARNING' ? <AlertTriangle size={12} color={COLOR_WARN} />
+                     : <CheckCircle size={12} color={COLOR_GOOD} />}
                     <span>{cue.headline}</span>
                   </div>
 
