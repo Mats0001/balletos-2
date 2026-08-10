@@ -120,18 +120,57 @@ export const RightInspectorPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* POSE AVATAR & BIOMECHANIC TOGGLE */}
-      <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--glass-border)', padding: '10px 12px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: '11px', fontWeight: 700, color: '#f3effa', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Cpu size={13} color="#a881bd" /> Pose Avatar Engine
-        </div>
-        <button
-          onClick={() => setAvatarMode(avatarMode === 'SKELETON' ? '3D_AVATAR' : 'SKELETON')}
-          style={{ background: 'rgba(168,129,189,0.2)', border: '1px solid #a881bd', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '4px 10px', borderRadius: '10px', cursor: 'pointer', fontFamily: 'Montserrat' }}
+      {/* POSE AVATAR ENGINE – Akkordion */}
+      <details
+        style={{
+          background: 'rgba(255, 255, 255, 0.03)',
+          border: '1px solid var(--glass-border)',
+          borderRadius: '14px',
+          overflow: 'hidden',
+          flexShrink: 0
+        }}
+      >
+        <summary
+          style={{
+            padding: '10px 12px',
+            cursor: 'pointer',
+            listStyle: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            userSelect: 'none'
+          }}
         >
-          {avatarMode === 'SKELETON' ? 'Vector 2D' : '3D Avatar Mode'}
-        </button>
-      </div>
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#f3effa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Cpu size={13} color="#a881bd" /> Pose Avatar Engine
+          </div>
+          <span style={{
+            fontSize: '9px', fontWeight: 700, letterSpacing: '0.5px',
+            background: 'rgba(168,129,189,0.2)', color: '#c084fc',
+            border: '1px solid rgba(168,129,189,0.3)',
+            padding: '2px 8px', borderRadius: '10px'
+          }}>
+            {avatarMode === 'SKELETON' ? 'Vector 2D' : '3D Avatar'} ▾
+          </span>
+        </summary>
+        <div style={{ padding: '8px 12px 12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <button
+            onClick={() => setAvatarMode(avatarMode === 'SKELETON' ? '3D_AVATAR' : 'SKELETON')}
+            style={{
+              width: '100%',
+              background: 'linear-gradient(135deg, rgba(168,129,189,0.25) 0%, rgba(126,34,206,0.2) 100%)',
+              border: '1px solid rgba(168,129,189,0.4)',
+              color: '#fff', fontSize: '10px', fontWeight: 700,
+              padding: '7px 12px', borderRadius: '10px', cursor: 'pointer',
+              fontFamily: 'Montserrat', display: 'flex', alignItems: 'center', gap: '6px',
+              justifyContent: 'center', transition: 'all 0.2s'
+            }}
+          >
+            <Cpu size={11} />
+            {avatarMode === 'SKELETON' ? 'Zu 3D Avatar wechseln' : 'Zu Vector 2D wechseln'}
+          </button>
+        </div>
+      </details>
 
       {/* LIVE KI-CHAT & DIKTAT-KONSOLE */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(10, 8, 14, 0.8)', border: '1px solid var(--glass-border)', borderRadius: '16px', overflow: 'hidden', minHeight: '180px' }}>

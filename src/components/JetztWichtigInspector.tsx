@@ -101,53 +101,31 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
         </div>
       </div>
 
-      {/* Right Section: Action Controls (Fully Wired STT & Apply) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {/* STT Dictation Button */}
-        <button
-          onClick={handleToggleDictation}
-          style={{
-            background: isListening ? 'rgba(255, 69, 58, 0.3)' : 'rgba(255, 255, 255, 0.05)',
-            border: isListening ? '1px solid #ff453a' : '1px solid rgba(255, 255, 255, 0.15)',
-            color: isListening ? '#ff453a' : '#ffffff',
-            padding: '6px 12px',
-            borderRadius: '8px',
-            fontSize: '10px',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          {isListening ? <MicOff size={12} className="animate-pulse" /> : <Mic size={12} />}
-          <span>{isListening ? 'Zuhören...' : 'Diktieren (STT)'}</span>
-        </button>
-
-        {/* Übernehmen Button */}
-        <button
-          onClick={handleApply}
-          style={{
-            background: isApplied ? 'linear-gradient(135deg, #30d158 0%, #248a3d 100%)' : 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
-            color: '#ffffff',
-            border: 'none',
-            padding: '6px 14px',
-            borderRadius: '8px',
-            fontSize: '10px',
-            fontWeight: 800,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            boxShadow: '0 0 12px rgba(168,129,189,0.4)',
-            transition: 'all 0.2s ease'
-          }}
-        >
-          <CheckCircle2 size={12} />
-          <span>{isApplied ? 'Übernommen ✓' : 'Übernehmen'}</span>
-        </button>
-      </div>
+      {/* Right: clean action pill – STT wird später ergänzt */}
+      <button
+        onClick={handleApply}
+        style={{
+          background: isApplied
+            ? 'linear-gradient(135deg, #30d158 0%, #248a3d 100%)'
+            : 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
+          color: '#ffffff',
+          border: 'none',
+          padding: '6px 16px',
+          borderRadius: '20px',
+          fontSize: '10px',
+          fontWeight: 800,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          boxShadow: isApplied ? '0 0 12px rgba(48,209,88,0.4)' : '0 0 12px rgba(192,132,252,0.4)',
+          transition: 'all 0.25s ease',
+          letterSpacing: '0.5px'
+        }}
+      >
+        <CheckCircle2 size={12} />
+        <span>{isApplied ? 'Gespeichert ✓' : 'Übernehmen'}</span>
+      </button>
     </div>
   );
 };

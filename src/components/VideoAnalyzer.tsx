@@ -791,20 +791,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         {/* Left: Video Selector & Option 1 Pre-Scan Button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <select
-            id="dev-video-select"
             value={selectedDevVideoUrl}
             onChange={(e) => handleVideoSelect(e.target.value)}
             style={{
               background: 'rgba(25, 20, 35, 0.9)',
               color: '#ffffff',
-              border: '1px solid rgba(192, 132, 252, 0.4)',
-              borderRadius: '8px',
+              border: '1px solid rgba(192, 132, 252, 0.3)',
+              borderRadius: '10px',
               padding: '5px 10px',
               fontSize: '11px',
-              fontWeight: 700,
+              fontWeight: 600,
               fontFamily: 'Montserrat',
               outline: 'none',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              maxWidth: '200px'
             }}
           >
             {videoList.map(vid => (
@@ -814,130 +814,121 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             ))}
           </select>
 
+          {/* Upload – Icon-Pill */}
           <button
             onClick={() => fileInputRef.current?.click()}
+            title="Video hochladen"
             style={{
-              background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
-              color: '#ffffff',
-              border: 'none',
-              padding: '5px 12px',
-              borderRadius: '8px',
+              background: 'rgba(168,129,189,0.15)',
+              color: '#c084fc',
+              border: '1px solid rgba(168,129,189,0.35)',
+              padding: '6px 14px',
+              borderRadius: '10px',
               fontSize: '10px',
-              fontWeight: 800,
+              fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '5px',
+              transition: 'all 0.18s ease'
             }}
           >
             <Upload size={12} /> Upload
           </button>
 
-          {/* ⚡ OPTION 1 PRE-SCAN BUTTON */}
+          {/* ⚡ Pre-Scan – Haupt-CTA */}
           <button
             onClick={triggerPreIndexingScan}
             disabled={isPreIndexing}
             style={{
-              background: isPreIndexing ? 'rgba(48, 209, 88, 0.2)' : 'linear-gradient(135deg, #30d158 0%, #1b8a36 100%)',
+              background: isPreIndexing
+                ? 'rgba(48,209,88,0.15)'
+                : 'linear-gradient(135deg, #30d158 0%, #1d7a35 100%)',
               color: '#ffffff',
               border: 'none',
-              padding: '5px 12px',
-              borderRadius: '8px',
+              padding: '6px 16px',
+              borderRadius: '10px',
               fontSize: '10px',
               fontWeight: 800,
               cursor: isPreIndexing ? 'default' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              boxShadow: '0 0 10px rgba(48, 209, 88, 0.4)'
+              boxShadow: isPreIndexing ? 'none' : '0 2px 14px rgba(48,209,88,0.35)',
+              letterSpacing: '0.3px',
+              transition: 'all 0.18s ease'
             }}
           >
-            <Zap size={12} /> {isPreIndexing ? `Pre-Scan läuft...` : '⚡ Smooth Pre-Scan (Option 1)'}
-          </button>
-
-          <button
-            onClick={() => setIsCurriculumModalOpen(true)}
-            style={{
-              background: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)',
-              color: '#ffffff',
-              border: 'none',
-              padding: '5px 12px',
-              borderRadius: '8px',
-              fontSize: '10px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 0 12px rgba(192, 132, 252, 0.4)'
-            }}
-          >
-            <BookOpen size={12} /> 📖 Vaganova Lehrplan (AI)
+            <Zap size={12} />
+            {isPreIndexing ? 'Analysiere…' : 'Smooth Pre-Scan'}
           </button>
         </div>
 
-        {/* Center: AI Feature Toggles */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {/* Mitte: Overlay-Toggles – modernes Chip-Design */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '3px 4px', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {/* CoG Lot */}
           <button
             onClick={() => setShowCoG(!showCoG)}
+            title="Schwerpunkt-Lot ein/aus"
             style={{
-              background: showCoG ? 'rgba(48, 209, 88, 0.2)' : 'transparent',
-              color: showCoG ? COLOR_GOOD : 'var(--text-sub)',
-              border: showCoG ? '1px solid rgba(48, 209, 88, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-              padding: '4px 10px',
-              borderRadius: '6px',
+              background: showCoG ? 'rgba(48,209,88,0.18)' : 'transparent',
+              color: showCoG ? '#30d158' : 'rgba(255,255,255,0.45)',
+              border: 'none',
+              padding: '5px 11px',
+              borderRadius: '9px',
               fontSize: '10px',
               fontWeight: 700,
               cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <Disc size={11} /> CoG Lot
+            <Disc size={11} /> CoG
           </button>
 
+          {/* Trajektorien */}
           <button
             onClick={() => setShowMotionTrails(!showMotionTrails)}
+            title="Bewegungstrajektorien ein/aus"
             style={{
-              background: showMotionTrails ? 'rgba(192, 132, 252, 0.2)' : 'transparent',
-              color: showMotionTrails ? '#c084fc' : 'var(--text-sub)',
-              border: showMotionTrails ? '1px solid rgba(192, 132, 252, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-              padding: '4px 10px',
-              borderRadius: '6px',
+              background: showMotionTrails ? 'rgba(192,132,252,0.18)' : 'transparent',
+              color: showMotionTrails ? '#c084fc' : 'rgba(255,255,255,0.45)',
+              border: 'none',
+              padding: '5px 11px',
+              borderRadius: '9px',
               fontSize: '10px',
               fontWeight: 700,
               cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <PulseIcon size={11} /> Trajektorien
+            <PulseIcon size={11} /> Trajekt.
           </button>
 
+          {/* AR-Winkel */}
           <button
             onClick={() => setShowAngleArcs(!showAngleArcs)}
+            title="Winkelbögen ein/aus"
             style={{
-              background: showAngleArcs ? 'rgba(255, 215, 0, 0.2)' : 'transparent',
-              color: showAngleArcs ? COLOR_WARN : 'var(--text-sub)',
-              border: showAngleArcs ? '1px solid rgba(255, 215, 0, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-              padding: '4px 10px',
-              borderRadius: '6px',
+              background: showAngleArcs ? 'rgba(255,214,10,0.15)' : 'transparent',
+              color: showAngleArcs ? '#ffd60a' : 'rgba(255,255,255,0.45)',
+              border: 'none',
+              padding: '5px 11px',
+              borderRadius: '9px',
               fontSize: '10px',
               fontWeight: 700,
               cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
             }}
           >
-            <Compass size={11} /> AR-Winkel
+            <Compass size={11} /> Winkel
           </button>
         </div>
 
-        {/* Right: View Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {/* Rechts: View Controls – Chip-Gruppe */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '3px 4px', border: '1px solid rgba(255,255,255,0.08)' }}>
           <button
             onClick={() => handleZoomChange(1.0, false)}
             style={{
@@ -956,15 +947,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
           <button
             onClick={() => setSplitScreenMode(!splitScreenMode)}
+            title="Split-Screen"
             style={{
-              background: splitScreenMode ? 'rgba(192, 132, 252, 0.3)' : 'transparent',
-              color: '#ffffff',
-              border: '1px solid rgba(255,255,255,0.1)',
-              padding: '4px 8px',
-              borderRadius: '6px',
+              background: splitScreenMode ? 'rgba(192,132,252,0.18)' : 'transparent',
+              color: splitScreenMode ? '#c084fc' : 'rgba(255,255,255,0.45)',
+              border: 'none',
+              padding: '5px 11px',
+              borderRadius: '9px',
               fontSize: '10px',
               fontWeight: 700,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
             }}
           >
             Split

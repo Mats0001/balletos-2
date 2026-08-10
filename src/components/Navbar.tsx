@@ -137,26 +137,6 @@ export const Navbar: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Bottom Actions */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-        <button
-          onClick={() => onLocationChange(selectedLocation === 'MAINZ' ? 'ALZEY' : 'MAINZ')}
-          className="btn-monolith-secondary"
-          style={{ justifyContent: 'center', width: '100%', fontSize: '10px', padding: '7px' }}
-        >
-          <MapPin size={12} color="#a881bd" />
-          <span>{selectedLocation === 'MAINZ' ? 'Mainz Studio' : 'Alzey Studio'}</span>
-        </button>
-
-        <button
-          onClick={onOpenTVMirror}
-          className="btn-monolith"
-          style={{ justifyContent: 'center', width: '100%', fontSize: '10px', padding: '8px' }}
-        >
-          <Tv size={13} />
-          <span>Studio TV Screen</span>
-        </button>
-      </div>
     </aside>
   );
 };
