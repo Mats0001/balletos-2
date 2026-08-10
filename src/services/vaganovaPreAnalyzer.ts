@@ -274,7 +274,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
       timecodeStr: fmtTime(timeSec),
       poseName: 'Knie-Alignment (KI erkannt)',
       status: 'CORRECTION',
-      headline: `Knie-Einfallen ${worstKnee.value.toFixed(1)}° – stärkster Moment`,
+      headline: `Knie-Einfallen ${worstKnee.value.toFixed(1)}° – maximale Abweichung`,
       cueMetaphor: '"Die Knie zeigen aktiv nach außen – wie zwei Scheinwerfer, die seitlich leuchten."',
       jointFocusId: 'left_knee',
       dataSource: 'KI_AUTO',
