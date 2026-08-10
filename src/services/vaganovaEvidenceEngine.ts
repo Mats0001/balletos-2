@@ -153,7 +153,7 @@ export class VaganovaEvidenceEngineService {
   /**
    * Evaluate Ballet Checkpoints on top of Region Evidence
    */
-  public computeCheckpoints(regionEvidences: RegionEvidence[], selectedJointId: string, landmarks: PoseLandmark[] | null): BalletCheckpoint[] {
+  public computeCheckpoints(regionEvidences: RegionEvidence[], selectedJointId: string, landmarks: PoseLandmark[] | null, vw = 1, vh = 1): BalletCheckpoint[] {
     const getEv = (r: string) => regionEvidences.find(e => e.region === r);
 
     const headEv = getEv('head');
@@ -162,7 +162,8 @@ export class VaganovaEvidenceEngineService {
     const pelvisEv = getEv('pelvis');
     const feetEv = getEv('footLeft');
 
-    const analysis = landmarks ? vaganovaAngleCalculator.analyzeFullFrame(landmarks) : {} as Partial<VaganovaFullAnalysis>;
+    // P0 FIX: Pass video dimensions for aspect-ratio-correct angle calculation
+    const analysis = landmarks ? vaganovaAngleCalculator.analyzeFullFrame(landmarks, vw, vh) : {} as Partial<VaganovaFullAnalysis>;
     // Audit fix: use exercise-specific standards, not always 'default'
     const standards = getStandards(selectedJointId || 'default');
 
@@ -283,7 +284,7 @@ export class VaganovaEvidenceEngineService {
     teacherConfirmed: boolean = false  // Audit fix: false = safe default; teacher must explicitly confirm
   ): FeedbackObject {
     const evidenceLedger = this.computeRegionEvidence(landmarks, exerciseName);
-    const checkpointResults = this.computeCheckpoints(evidenceLedger, selectedJointId, landmarks);
+    const checkpointResults = this.computeCheckpoints(evidenceLedger, selectedJointId, landmarks); // vw/vh not available here – angles are review-only in evidence engine
 
     // Determine overall verdict
     const measurableCount = evidenceLedger.filter(e => e.verdict === 'measurable').length;

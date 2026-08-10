@@ -399,7 +399,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               const motionCls2 = vaganovaMotionClassifier.classify(lm);
               vaganovaKineticAI.updateTrails(sk2, v.currentTime || 0);
               const cogPt2 = vaganovaKineticAI.computeCenterOfGravity(sk2);
-              const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm);
+              const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm, v.videoWidth, v.videoHeight);
               const armPos2 = vaganovaArmAnalyzer.classifyArmPosition(sk2);
               const elbowQ2 = vaganovaArmAnalyzer.analyzeElbowQuality(sk2);
               const epaul2 = vaganovaArmAnalyzer.analyzeEpaulement(sk2);
@@ -649,7 +649,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const curriculumReport: VaganovaCurriculumReport = vaganovaCurriculumEngine.generatePlan(6, motionClass.detectedPoseName, 14);
 
   // 📐 REAL-TIME VAGANOVA ANGLE ANALYSIS (replaces hardcoded values)
-  const vaganovaAnalysis = detectedLandmarks ? vaganovaAngleCalculator.analyzeFullFrame(detectedLandmarks) : null;
+  // P0 FIX: Pass video dimensions for aspect-ratio-correct angle calculation
+  const videoEl = videoRef.current;
+  const vaganovaAnalysis = detectedLandmarks && videoEl
+    ? vaganovaAngleCalculator.analyzeFullFrame(detectedLandmarks, videoEl.videoWidth || 1, videoEl.videoHeight || 1)
+    : null;
 
   // 🔔 Notify parent (App.tsx) with latest analysis for RightInspectorPanel
   useEffect(() => {

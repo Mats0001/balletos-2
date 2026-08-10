@@ -227,22 +227,55 @@ export class VaganovaAngleCalculator {
   }
 
   // Base Math Functions (private)
-  private angle3P(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): number {
-    let angle = Math.abs((Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x)) * (180 / Math.PI));
-    if (angle > 180) {
-      angle = 360 - angle;
-    }
+  // ─────────────────────────────────────────────────────────────────────────
+  // IMPORTANT: All methods below require vw (videoWidth) and vh (videoHeight).
+  // Normalized landmark coords (x: 0..1, y: 0..1) MUST be multiplied by vw/vh
+  // before any angle or distance calculation.
+  // For 960x1280: without scaling, a true 45° can appear as 36.9° or 53.1°.
+  // Audit finding P0 (external advisor + internal audit, 2026-08-10)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private angle3P(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number },
+    vw: number,
+    vh: number
+  ): number {
+    // Convert to pixel space before computing angle
+    const ax = a.x * vw, ay = a.y * vh;
+    const bx = b.x * vw, by = b.y * vh;
+    const cx = c.x * vw, cy = c.y * vh;
+    let angle = Math.abs(
+      (Math.atan2(cy - by, cx - bx) - Math.atan2(ay - by, ax - bx)) * (180 / Math.PI)
+    );
+    if (angle > 180) angle = 360 - angle;
     return angle; // normalized to 0-180
   }
 
-  private angleTilt(top: { x: number; y: number }, bottom: { x: number; y: number }): number {
-    // Measures deviation from vertical (0° = perfectly vertical, 90° = horizontal)
-    // atan2(dx, dy) gives angle from Y-axis (vertical)
-    return Math.abs(Math.atan2(bottom.x - top.x, bottom.y - top.y) * (180 / Math.PI));
+  private angleTilt(
+    top: { x: number; y: number },
+    bottom: { x: number; y: number },
+    vw: number,
+    vh: number
+  ): number {
+    // Measures deviation from vertical (0° = perfectly vertical)
+    // Convert to pixel space before atan2
+    const tx = top.x * vw,    ty = top.y * vh;
+    const bx = bottom.x * vw, by = bottom.y * vh;
+    return Math.abs(Math.atan2(bx - tx, by - ty) * (180 / Math.PI));
   }
 
-  private distance2D(a: { x: number; y: number }, b: { x: number; y: number }): number {
-    return Math.sqrt(Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2));
+  private distance2D(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    vw: number,
+    vh: number
+  ): number {
+    // Returns distance in pixels (isotropic)
+    const dx = (b.x - a.x) * vw;
+    const dy = (b.y - a.y) * vh;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
   private midpoint(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
@@ -259,15 +292,12 @@ export class VaganovaAngleCalculator {
     return minVis;
   }
 
-  public calcKneeFlexion(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
+  public calcKneeFlexion(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
     const [hipIdx, kneeIdx, ankleIdx] = side === 'L' ? [23, 25, 27] : [24, 26, 28];
     const conf = this.getConfidence(landmarks, [hipIdx, kneeIdx, ankleIdx]);
     if (conf < 0.3) return null;
 
-    const angle = this.angle3P(landmarks[hipIdx], landmarks[kneeIdx], landmarks[ankleIdx]);
-    // NOTE: No canonical Vaganova knee-flexion target for plié.
-    // Shown as research_observation only – never trigger ERROR for a specific value.
-    // Ref: Vaganova, Основы, 6th ed. – no degree value specified for plié depth.
+    const angle = this.angle3P(landmarks[hipIdx], landmarks[kneeIdx], landmarks[ankleIdx], vw, vh);
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
       angle >= VAGANOVA_NORMS.plie.standingLegMin ? 'CORRECT' :
       angle >= VAGANOVA_NORMS.plie.grand.kneeFlexionMin ? 'WARNING' : 'ERROR';
@@ -281,7 +311,7 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcValgusDrift(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
+  public calcValgusDrift(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
     const [hipIdx, kneeIdx, ankleIdx] = side === 'L' ? [23, 25, 27] : [24, 26, 28];
     const conf = this.getConfidence(landmarks, [hipIdx, kneeIdx, ankleIdx]);
     if (conf < 0.3) return null;
@@ -290,15 +320,13 @@ export class VaganovaAngleCalculator {
     const knee = landmarks[kneeIdx];
     const ankle = landmarks[ankleIdx];
 
-    // TRUE Frontal Plane Projection Angle (FPPA) – MediaPipe 2D proxy.
-    // IMPORTANT: Asaeda et al. 2024 found ~19° systematic error vs Vicon
-    // for ABSOLUTE valgus values. We therefore:
-    //   1. Track a session baseline (first ~30 frames)
-    //   2. Report only the RELATIVE DELTA from that baseline
-    //   3. Flag as 'not_measurable' if no baseline established yet
-    const hx = hip.x, hy = hip.y;
-    const ax = ankle.x, ay = ankle.y;
-    const kx = knee.x, ky = knee.y;
+    // TRUE Frontal Plane Projection Angle (FPPA) – pixel-space calculation.
+    // IMPORTANT: Asaeda et al. 2024 found ~19° systematic error vs Vicon.
+    // P0 FIX (2026-08-10): Scale to pixel space before vector math to correct
+    // aspect-ratio distortion (was: computing on normalized 0..1 coords).
+    const hx = hip.x * vw,   hy = hip.y * vh;
+    const ax = ankle.x * vw, ay = ankle.y * vh;
+    const kx = knee.x * vw,  ky = knee.y * vh;
 
     const haX = ax - hx, haY = ay - hy;
     const haLen = Math.sqrt(haX * haX + haY * haY);
@@ -358,15 +386,11 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcTurnout(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
+  public calcTurnout(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
     const [heelIdx, toeIdx, ankleIdx] = side === 'L' ? [29, 31, 27] : [30, 32, 28];
 
     const classify = (footAngle: number, conf: number): VaganovaMeasurement => {
-      // Turnout is a PEDAGOGICAL NOMINAL ANGLE – "180°" is a line ideal, not
-      // an individual anatomical target. IADMS 2025: individual bone structure
-      // frequently makes 180° anatomically unrealistic.
-      // We report foot opening angle (visible proxy only), not hip external rotation.
-      const reached90 = footAngle >= 40; // ≥40° per foot ≈ ≥80° total = functional
+      const reached90 = footAngle >= 40;
       return {
         value: footAngle, unit: 'deg', confidence: conf,
         measurement_class: 'pedagogical_nominal_angle',
@@ -381,7 +405,11 @@ export class VaganovaAngleCalculator {
     if (heelConf >= 0.3) {
       const heel = landmarks[heelIdx];
       const toe = landmarks[toeIdx];
-      const footAngle = Math.abs(Math.atan2(toe.x - heel.x, toe.y - heel.y) * (180 / Math.PI));
+      // P0 FIX: pixel-space atan2
+      const footAngle = Math.abs(Math.atan2(
+        (toe.x - heel.x) * vw,
+        (toe.y - heel.y) * vh
+      ) * (180 / Math.PI));
       return classify(footAngle, heelConf);
     }
 
@@ -389,20 +417,24 @@ export class VaganovaAngleCalculator {
     if (ankleConf >= 0.3) {
       const ankle = landmarks[ankleIdx];
       const toe = landmarks[toeIdx];
-      const footAngle = Math.abs(Math.atan2(toe.x - ankle.x, toe.y - ankle.y) * (180 / Math.PI));
+      // P0 FIX: pixel-space atan2
+      const footAngle = Math.abs(Math.atan2(
+        (toe.x - ankle.x) * vw,
+        (toe.y - ankle.y) * vh
+      ) * (180 / Math.PI));
       return classify(footAngle, ankleConf * 0.8);
     }
 
     return null;
   }
 
-  public calcSpineTilt(landmarks: PoseLandmark[]): VaganovaMeasurement | null {
+  public calcSpineTilt(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaMeasurement | null {
     const conf = this.getConfidence(landmarks, [11, 12, 23, 24]);
     if (conf < 0.3) return null;
 
     const shMid = this.midpoint(landmarks[11], landmarks[12]);
     const hipMid = this.midpoint(landmarks[23], landmarks[24]);
-    const angle = this.angleTilt(shMid, hipMid);
+    const angle = this.angleTilt(shMid, hipMid, vw, vh);
 
     const { correctDeg, warningDeg } = VAGANOVA_NORMS.spine;
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
@@ -418,10 +450,10 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcEpaulement(landmarks: PoseLandmark[]): VaganovaMeasurement | null {
+  public calcEpaulement(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaMeasurement | null {
     // Épaulement = head rotation (yaw) relative to shoulder axis
     // In 2D, head yaw is estimated from the asymmetry of nose-to-ear distances.
-    // When the head turns right, dist(nose, rightEar) decreases while dist(nose, leftEar) increases.
+    // P0 FIX: Use pixel-space distance2D (aspect-ratio-aware)
     const conf = this.getConfidence(landmarks, [0, 7, 8, 11, 12]);
     if (conf < 0.3) return null;
 
@@ -429,16 +461,15 @@ export class VaganovaAngleCalculator {
     const earL = landmarks[7];
     const earR = landmarks[8];
 
-    const distL = this.distance2D(nose, earL);
-    const distR = this.distance2D(nose, earR);
+    const distL = this.distance2D(nose, earL, vw, vh);
+    const distR = this.distance2D(nose, earR, vw, vh);
 
-    // Avoid division by zero
     if (distL + distR < 0.001) return null;
 
-    // ratio > 1 = head turned right, ratio < 1 = head turned left
     const ratio = distL / distR;
-    // Convert to approximate degrees: atan of the normalized asymmetry
-    const epaulementDeg = Math.abs(Math.atan2(ratio - 1, ratio + 1)) * (180 / Math.PI) * 4; // scaling factor ~4 maps ratio to degrees
+    // ratio > 1 = head turned right, ratio < 1 = head turned left
+    // atan2-based approximation maps asymmetry ratio → approximate degrees
+    const epaulementDeg = Math.abs(Math.atan2(ratio - 1, ratio + 1)) * (180 / Math.PI) * 4;
 
     return {
       value: epaulementDeg,
@@ -451,12 +482,12 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcPortDeBras(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
+  public calcPortDeBras(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
     const [shIdx, elIdx, wrIdx] = side === 'L' ? [11, 13, 15] : [12, 14, 16];
     const conf = this.getConfidence(landmarks, [shIdx, elIdx, wrIdx]);
     if (conf < 0.3) return null;
 
-    const angle = this.angle3P(landmarks[shIdx], landmarks[elIdx], landmarks[wrIdx]);
+    const angle = this.angle3P(landmarks[shIdx], landmarks[elIdx], landmarks[wrIdx], vw, vh);
     return {
       value: angle,
       unit: 'deg',
@@ -467,16 +498,16 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcPelvicTilt(landmarks: PoseLandmark[]): VaganovaMeasurement | null {
+  public calcPelvicTilt(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaMeasurement | null {
     const conf = this.getConfidence(landmarks, [23, 24]);
     if (conf < 0.3) return null;
 
-    const dx = landmarks[24].x - landmarks[23].x;
-    const dy = landmarks[24].y - landmarks[23].y;
+    // P0 FIX: pixel-space dx/dy before atan2
+    const dx = (landmarks[24].x - landmarks[23].x) * vw;
+    const dy = (landmarks[24].y - landmarks[23].y) * vh;
     let angle = Math.abs(Math.atan2(dy, dx)) * (180 / Math.PI);
     if (angle > 90) angle = 180 - angle;
 
-    // Vaganova: Becken neutral = CORRECT (source: vaganova_norms.json pelvis)
     const { neutralTiltMax, warningTiltMax } = VAGANOVA_NORMS.pelvis;
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
       angle <= neutralTiltMax ? 'CORRECT' : angle <= warningTiltMax ? 'WARNING' : 'ERROR';
@@ -496,18 +527,17 @@ export class VaganovaAngleCalculator {
    * CORRECT: ≤2°, WARNING: 2–5°, ERROR: >5°
    * Ausnahme: Bei Épaulement ist Asymmetrie gewollt (wird extern berücksichtigt).
    */
-  public calcShoulderSymmetry(landmarks: PoseLandmark[]): VaganovaMeasurement | null {
+  public calcShoulderSymmetry(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaMeasurement | null {
     const conf = this.getConfidence(landmarks, [11, 12]);
     if (conf < 0.3) return null;
 
     const shL = landmarks[11];
     const shR = landmarks[12];
 
-    // Shoulder line tilt: angle from horizontal (0° = perfectly level)
-    const dx = shR.x - shL.x;
-    const dy = shR.y - shL.y;
+    // P0 FIX: pixel-space dx/dy before atan2
+    const dx = (shR.x - shL.x) * vw;
+    const dy = (shR.y - shL.y) * vh;
     const angleDeg = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
-    // angleDeg near 0° = level shoulders, near 90° = extreme tilt
 
     const { symmetryDegCorrect, symmetryDegWarning } = VAGANOVA_NORMS.shoulder;
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
@@ -570,7 +600,7 @@ export class VaganovaAngleCalculator {
    * Zusätzlich: Prüft ob Ellbogen unter Schulterhöhe liegt.
    * CORRECT: 145–170°, WARNING: 130–145° / 170–175°, ERROR: außerhalb
    */
-  public calcArmLineQuality(landmarks: PoseLandmark[], side: 'L' | 'R'): VaganovaMeasurement | null {
+  public calcArmLineQuality(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
     const [shIdx, elIdx, wrIdx] = side === 'L' ? [11, 13, 15] : [12, 14, 16];
     const conf = this.getConfidence(landmarks, [shIdx, elIdx, wrIdx]);
     if (conf < 0.3) return null;
@@ -579,12 +609,10 @@ export class VaganovaAngleCalculator {
     const elbow = landmarks[elIdx];
     const wrist = landmarks[wrIdx];
 
-    // Elbow arc angle
-    const elbowAngle = this.angle3P(shoulder, elbow, wrist);
+    const elbowAngle = this.angle3P(shoulder, elbow, wrist, vw, vh);
 
-    // Check elbow height relative to shoulder
-    // In image coords: elbow.y > shoulder.y means elbow is BELOW shoulder (correct)
-    const elbowBelowShoulder = elbow.y - shoulder.y; // positive = below = OK
+    // Elbow height relative to shoulder (normalized y is fine for this comparison)
+    const elbowBelowShoulder = elbow.y - shoulder.y;
 
     const { elbowAngleMin, elbowAngleMax, elbowAngleWarnMin, elbowAngleWarnMax, elbowAboveShoulderWarn } = VAGANOVA_NORMS.arm;
 
@@ -609,15 +637,14 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcHeadTilt(landmarks: PoseLandmark[]): VaganovaMeasurement | null {
+  public calcHeadTilt(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaMeasurement | null {
     const conf = this.getConfidence(landmarks, [7, 8, 11, 12]);
     if (conf < 0.3) return null;
 
     const earMid = this.midpoint(landmarks[7], landmarks[8]);
     const shMid = this.midpoint(landmarks[11], landmarks[12]);
-    const angle = this.angleTilt(earMid, shMid);
+    const angle = this.angleTilt(earMid, shMid, vw, vh);
 
-    // Vaganova: Kopf aufrecht ≤2°, leichte Neigung 2–5° (Épaulement), starke Neigung >5° = Fehler
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
       angle <= 2 ? 'CORRECT' : angle <= 5 ? 'WARNING' : 'ERROR';
 
@@ -652,26 +679,32 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public analyzeFullFrame(landmarks: PoseLandmark[]): VaganovaFullAnalysis {
+  public analyzeFullFrame(landmarks: PoseLandmark[], vw = 1, vh = 1): VaganovaFullAnalysis {
+    // P0 FIX (2026-08-10): vw/vh (videoWidth/videoHeight) MUST be passed.
+    // Default 1/1 is safe but produces non-isotropic angles.
+    // Callers should always pass video.videoWidth and video.videoHeight.
+    if (vw === 1 && vh === 1) {
+      console.warn('[VaganovaAngleCalculator] analyzeFullFrame called without vw/vh – angles will be non-isotropic!');
+    }
     return {
-      knieFlexionL: this.calcKneeFlexion(landmarks, 'L'),
-      knieFlexionR: this.calcKneeFlexion(landmarks, 'R'),
-      valgusDriftL: this.calcValgusDrift(landmarks, 'L'),
-      valgusDriftR: this.calcValgusDrift(landmarks, 'R'),
-      turnoutL: this.calcTurnout(landmarks, 'L'),
-      turnoutR: this.calcTurnout(landmarks, 'R'),
-      spineTilt: this.calcSpineTilt(landmarks),
-      epaulement: this.calcEpaulement(landmarks),
-      portDeBrasL: this.calcPortDeBras(landmarks, 'L'),
-      portDeBrasR: this.calcPortDeBras(landmarks, 'R'),
-      pelvicTilt: this.calcPelvicTilt(landmarks),
-      shoulderSymmetry: this.calcShoulderSymmetry(landmarks),
-      shoulderElevationL: this.calcShoulderElevation(landmarks, 'L'),
-      shoulderElevationR: this.calcShoulderElevation(landmarks, 'R'),
-      armLineQualityL: this.calcArmLineQuality(landmarks, 'L'),
-      armLineQualityR: this.calcArmLineQuality(landmarks, 'R'),
-      headTilt: this.calcHeadTilt(landmarks),
-      plumbDeviation: this.calcPlumbDeviation(landmarks)
+      knieFlexionL: this.calcKneeFlexion(landmarks, 'L', vw, vh),
+      knieFlexionR: this.calcKneeFlexion(landmarks, 'R', vw, vh),
+      valgusDriftL: this.calcValgusDrift(landmarks, 'L', vw, vh),
+      valgusDriftR: this.calcValgusDrift(landmarks, 'R', vw, vh),
+      turnoutL: this.calcTurnout(landmarks, 'L', vw, vh),
+      turnoutR: this.calcTurnout(landmarks, 'R', vw, vh),
+      spineTilt: this.calcSpineTilt(landmarks, vw, vh),
+      epaulement: this.calcEpaulement(landmarks, vw, vh),
+      portDeBrasL: this.calcPortDeBras(landmarks, 'L', vw, vh),
+      portDeBrasR: this.calcPortDeBras(landmarks, 'R', vw, vh),
+      pelvicTilt: this.calcPelvicTilt(landmarks, vw, vh),
+      shoulderSymmetry: this.calcShoulderSymmetry(landmarks, vw, vh),
+      shoulderElevationL: this.calcShoulderElevation(landmarks, 'L'),  // ratio-based, no vw/vh needed
+      shoulderElevationR: this.calcShoulderElevation(landmarks, 'R'),  // ratio-based, no vw/vh needed
+      armLineQualityL: this.calcArmLineQuality(landmarks, 'L', vw, vh),
+      armLineQualityR: this.calcArmLineQuality(landmarks, 'R', vw, vh),
+      headTilt: this.calcHeadTilt(landmarks, vw, vh),
+      plumbDeviation: this.calcPlumbDeviation(landmarks)               // not_measurable anyway
     };
   }
 }
