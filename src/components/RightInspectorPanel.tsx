@@ -83,7 +83,7 @@ export const RightInspectorPanel: React.FC<Props> = ({
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '8px' }}>
 
         {/* LIVE VAGANOVA MESSWERTE */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: '80px' }}>
           <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-sub)', textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             📐 VAGANOVA LIVE-MESSWERTE
             <span style={{ fontSize: '9px', background: 'rgba(48,209,88,0.15)', color: '#30d158', border: '1px solid rgba(48,209,88,0.3)', borderRadius: '6px', padding: '1px 6px', fontWeight: 700, animation: 'pulse 2s infinite' }}>LIVE</span>
@@ -131,7 +131,12 @@ export const RightInspectorPanel: React.FC<Props> = ({
               : selectedCue.status === 'WARNING' ? 'rgba(255,159,10,0.35)'
               : 'rgba(48,209,88,0.3)'}`,
             borderRadius: '12px', padding: '10px 12px',
-            flexShrink: 0,
+            flexShrink: 1,
+            minHeight: 0,
+            maxHeight: '170px',
+            overflowY: 'auto',
+            scrollbarWidth: 'thin' as const,
+            scrollbarColor: 'rgba(168,129,189,0.3) transparent',
             display: 'flex', flexDirection: 'column', gap: '8px',
             animation: 'fadeIn 0.2s ease',
           }}>
@@ -236,7 +241,7 @@ export const RightInspectorPanel: React.FC<Props> = ({
       </details>
 
       {/* LIVE KI-CHAT & DIKTAT-KONSOLE */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(10, 8, 14, 0.8)', border: '1px solid var(--glass-border)', borderRadius: '16px', overflow: 'hidden', minHeight: '180px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(10, 8, 14, 0.8)', border: '1px solid var(--glass-border)', borderRadius: '16px', overflow: 'hidden', minHeight: '120px' }}>
         <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.04)', borderBottom: '1px solid rgba(255,255,255,0.08)', fontSize: '10px', fontWeight: 700, color: '#c8a2c8', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <MessageSquare size={12} /> KI-Assistenz & Sprachkonsole
         </div>
