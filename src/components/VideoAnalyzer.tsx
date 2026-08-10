@@ -17,6 +17,7 @@ import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
 import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
+import { BUILD_POLICY } from '../config/buildPolicy';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -1385,11 +1386,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               <RotateCcw size={10} /> KI-Standwerte zurücksetzen
             </button>
             
+            {/* Hausaufgabe: nur wenn BUILD_POLICY erlaubt (Berater: harte Schranke) */}
             <button
-              onClick={() => setIsCurriculumModalOpen(true)}
-              style={{ background: 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)', color: '#fff', border: 'none', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              onClick={BUILD_POLICY.allowHomeworkGeneration ? () => setIsCurriculumModalOpen(true) : undefined}
+              disabled={!BUILD_POLICY.allowHomeworkGeneration}
+              title={!BUILD_POLICY.allowHomeworkGeneration
+                ? 'Hausaufgaben-Generierung deaktiviert – DecisionGate + Mocap-Validierung ausstehend (BUILD_POLICY v' + BUILD_POLICY.policyVersion + ')'
+                : 'Vaganova Lehrplan & Hausaufgaben generieren'}
+              style={{
+                background: BUILD_POLICY.allowHomeworkGeneration
+                  ? 'linear-gradient(135deg, #c084fc 0%, #7e22ce 100%)'
+                  : 'rgba(107,114,128,0.3)',
+                color: BUILD_POLICY.allowHomeworkGeneration ? '#fff' : '#6b7280',
+                border: BUILD_POLICY.allowHomeworkGeneration ? 'none' : '1px solid rgba(107,114,128,0.4)',
+                padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 800,
+                cursor: BUILD_POLICY.allowHomeworkGeneration ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', gap: '4px', opacity: BUILD_POLICY.allowHomeworkGeneration ? 1 : 0.55
+              }}
             >
-              <BookOpen size={11} /> Hausaufgabe (AI)
+              <BookOpen size={11} /> Hausaufgabe {BUILD_POLICY.allowHomeworkGeneration ? '(AI)' : '(deaktiviert)'}
             </button>
           </div>
 

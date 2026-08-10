@@ -167,12 +167,16 @@ export class VaganovaEvidenceEngineService {
     // Audit fix: use exercise-specific standards, not always 'default'
     const standards = getStandards(selectedJointId || 'default');
 
-    const getStatus = (measurement: any, standard: any, evVerdict: any): 'richtig' | 'auffaellig' | 'review' => {
-      if (evVerdict !== 'measurable' || !measurement || !standard) return 'review';
-      const val = measurement.value;
-      const [min, max] = standard.ideal;
-      if (val >= min && val <= max) return 'richtig';
-      return 'auffaellig';
+    // SOFORTPATCH (Berater 2026-08-10, Sprint 1 Step 1):
+    // getStatus() liefert ausnahmslos 'review' (NOT_SCORED).
+    // Begründung: Die EvidenceEngine darf ohne DecisionGate + validationArtifactId
+    // NIEMALS 'richtig' oder 'auffaellig' erzeugen. Fehlender Status darf nicht
+    // grün oder rot dargestellt werden.
+    // TODO Sprint 1 Step 5: Diese Funktion vollständig durch DecisionGate ersetzen.
+    // Der DecisionGate konsumiert MetricDecision, niemals rohe measurement.value.
+    const getStatus = (_measurement: any, _standard: any, _evVerdict: any): 'richtig' | 'auffaellig' | 'review' => {
+      // BUILD_POLICY.allowThresholdScoring === false → immer 'review'
+      return 'review';
     };
 
     const getMeasuredValue = (measurement: any) => {

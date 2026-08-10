@@ -633,14 +633,18 @@ export class VaganovaAngleCalculator {
       value: elbowAngle,
       unit: 'deg',
       confidence: conf,
-      // P0-c FIX (Berater 2026-08-10): measurement_class war 'validated_system_threshold',
-      // aber source_page sagte ausdrücklich 'proxy_unvalidated'. Das ist ein Widerspruch.
-      // Korrekt: 'proxy_unvalidated' – Mocap-Validierung steht aus.
-      measurement_class: 'proxy_unvalidated' as any, // TODO Sprint 1: in MetricEpistemics.validationStatus migrieren
+      // Berater 2026-08-10: proxy_unvalidated ist ein Validierungszustand, keine Wissensklasse.
+      // Der 'as any'-Cast verhindert Compile-time-Sicherheit und wurde entfernt.
+      // Semantische Basis: Vaganova-Relation (Quelle: Основы, 6th ed.)
+      // Validierungsstatus: unvalidiert (kein Mocap-Protokoll abgeschlossen)
+      // TODO Sprint 1 Step 4: In MetricEpistemics.validationStatus migrieren:
+      //   { semanticBasis: 'vaganova_relation', validationStatus: 'unvalidated',
+      //     scorePolicy: 'no_score' } – kein Status bis Mocap-Freigabe
+      measurement_class: 'vaganova_relation',
       label: `Arm-Linie ${side === 'L' ? 'links' : 'rechts'} (Port de Bras)`,
       status,
-      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}° = korrekt. Proxy – Mocap-Validierung ausstehend. Gültig nur bei kalibrierter Frontalaufnahme.`,
-      source_page: 'Vaganova, Основы, 6th ed.; VALIDATION PENDING – candidate_unvalidated_threshold'
+      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}°. Quelle: Vaganova Основы 6th ed. Validierungsstatus: unvalidiert (Mocap-Protokoll ausstehend).`,
+      source_page: 'Vaganova, Основы, 6th ed. | candidate_unvalidated_threshold | Sprint 1: MetricEpistemics.validationStatus pending'
     };
   }
 
