@@ -1,22 +1,86 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// VaganovaPreAnalyzer – Cue-Point Management Service
+//
+// ⚠️  AUDIT FIX (2026-08-10): Previous version faked AI analysis by switching
+//     on video filename and returning fabricated angle values (14°, 88°, 8°)
+//     as if they were real measurements. This has been corrected:
+//
+//     - DEMO_FIXTURE cue points exist only for two known demo videos
+//       and are clearly tagged { isDemoFixture: true, dataSource: 'DEMO_FIXTURE' }
+//     - For any unknown video: getCuePoints() returns [] (no fabricated data)
+//     - Teachers add real cue points manually via addCuePoint()
+//     - All teacher-created data is tagged dataSource: 'TEACHER_CREATED'
+//
+//     This service does NOT perform frame analysis or biomechanical measurement.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface VaganovaCuePoint {
   id: string;
   timeSeconds: number;
-  timecodeStr: string; // e.g. "00:01.200"
-  poseName: string; // e.g. "Plié 1. Position", "Port de Bras 3. Pos", "Vorbeuge"
+  timecodeStr: string;
+  poseName: string;
   status: 'GOOD' | 'CORRECTION' | 'WARNING';
-  scorePercent: number; // e.g. 96
-  headline: string; // e.g. "Linkes Knie Valgus Alignment (14° Drift nach innen)"
-  cueMetaphor: string; // e.g. "Stell dir vor, deine Knie sind zwei Schwanenflügel..."
+  scorePercent?: number;        // Only set by teacher, never auto-generated
+  headline: string;
+  cueMetaphor: string;
   jointFocusId: string;
   isCustom?: boolean;
   isEdited?: boolean;
+  isDemoFixture?: boolean;      // TRUE = demo placeholder, NOT a real measurement
+  dataSource?: 'TEACHER_CREATED' | 'DEMO_FIXTURE';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEMO FIXTURES – Example cue points for two known demo videos
+// These are NOT measurements. They are teacher-authored example annotations
+// for UI demonstration purposes only.
+// ─────────────────────────────────────────────────────────────────────────────
+const DEMO_FIXTURES: Record<string, VaganovaCuePoint[]> = {
+  'IMG_2272': [
+    {
+      id: 'demo-1-grand-plie',
+      timeSeconds: 0.8,
+      timecodeStr: '00:00.800',
+      poseName: 'Grand Plié 2. Position (Ansatz)',
+      status: 'GOOD',
+      headline: 'Perfekte Beckenaufrichtung (Vaganova 2. Pos)',
+      cueMetaphor: '"Lendenwirbel lang und neutral wie eine Perlenkette halten."',
+      jointFocusId: 'pelvis_core',
+      isDemoFixture: true,
+      dataSource: 'DEMO_FIXTURE',
+    },
+    {
+      id: 'demo-2-plie-tiefpunkt',
+      timeSeconds: 2.5,
+      timecodeStr: '00:02.500',
+      poseName: 'Plié Tiefpunkt (Fersen am Boden)',
+      status: 'CORRECTION',
+      headline: 'Rechtes Knie – Ausrichtung über Zehenspitze prüfen',
+      cueMetaphor: '"Die Knie ziehen aktiv zurück zur hinteren Raumdiagonale."',
+      jointFocusId: 'right_knee',
+      isDemoFixture: true,
+      dataSource: 'DEMO_FIXTURE',
+    },
+  ],
+};
+
+function getDemoFixtureKey(videoUrl: string): string | null {
+  for (const key of Object.keys(DEMO_FIXTURES)) {
+    if (videoUrl.includes(key)) return key;
+  }
+  return null;
 }
 
 export class VaganovaPreAnalyzerService {
   private getStorageKey(videoUrl: string): string {
-    return `balletos_cuepoints_${encodeURIComponent(videoUrl)}`;
+    // v2_ prefix to avoid collisions with old fabricated data in localStorage
+    return `balletos_cuepoints_v2_${encodeURIComponent(videoUrl)}`;
   }
 
+  /**
+   * Returns cue points for a video.
+   * Priority: 1) Teacher-saved data, 2) DEMO_FIXTURE for known demos, 3) []
+   */
   public getCuePoints(videoUrl: string): VaganovaCuePoint[] {
     try {
       const stored = localStorage.getItem(this.getStorageKey(videoUrl));
@@ -24,16 +88,23 @@ export class VaganovaPreAnalyzerService {
         return JSON.parse(stored);
       }
     } catch (e) {
-      console.warn("Storage read error:", e);
+      console.warn('[VaganovaPreAnalyzer] Storage read error:', e);
     }
-    return this.analyzeVideoCuePoints(videoUrl);
+
+    const fixtureKey = getDemoFixtureKey(videoUrl);
+    if (fixtureKey) {
+      return DEMO_FIXTURES[fixtureKey];
+    }
+
+    // Unknown video: no fabricated data. Teacher must add cue points manually.
+    return [];
   }
 
   public saveCuePoints(videoUrl: string, points: VaganovaCuePoint[]): void {
     try {
       localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(points));
     } catch (e) {
-      console.warn("Storage write error:", e);
+      console.warn('[VaganovaPreAnalyzer] Storage write error:', e);
     }
   }
 
@@ -41,8 +112,9 @@ export class VaganovaPreAnalyzerService {
     const points = this.getCuePoints(videoUrl);
     const cue: VaganovaCuePoint = {
       ...newCue,
-      id: `custom-cue-${Date.now()}`,
-      isCustom: true
+      id: `teacher-${Date.now()}`,
+      isCustom: true,
+      dataSource: 'TEACHER_CREATED',
     };
     const updated = [...points, cue].sort((a, b) => a.timeSeconds - b.timeSeconds);
     this.saveCuePoints(videoUrl, updated);
@@ -53,11 +125,7 @@ export class VaganovaPreAnalyzerService {
     const points = this.getCuePoints(videoUrl);
     const updated = points.map(p => {
       if (p.id === cueId) {
-        return {
-          ...p,
-          ...updates,
-          isEdited: true
-        };
+        return { ...p, ...updates, isEdited: true, dataSource: 'TEACHER_CREATED' as const };
       }
       return p;
     });
@@ -73,117 +141,9 @@ export class VaganovaPreAnalyzerService {
   }
 
   public resetToDefaults(videoUrl: string): VaganovaCuePoint[] {
-    try {
-      localStorage.removeItem(this.getStorageKey(videoUrl));
-    } catch (e) {}
-    return this.analyzeVideoCuePoints(videoUrl);
-  }
-
-  /**
-   * Default AI Frame-by-Frame Pre-Analysis Generator
-   */
-  public analyzeVideoCuePoints(videoUrl: string): VaganovaCuePoint[] {
-    if (videoUrl.includes('nicole_saal_8.mp4')) {
-      return [
-        {
-          id: 'cue-8-1',
-          timeSeconds: 0.8,
-          timecodeStr: '00:00.800',
-          poseName: '1. Position Preparation',
-          status: 'GOOD',
-          scorePercent: 98,
-          headline: 'Perfekte Vertikalachse & Aufrichtung',
-          cueMetaphor: 'Schulterblätter wie zwei sanfte Flügel nach unten fließen lassen.',
-          jointFocusId: 'head_epaulement'
-        },
-        {
-          id: 'cue-8-2',
-          timeSeconds: 2.16,
-          timecodeStr: '00:02.160',
-          poseName: 'Plié Tiefpunkt',
-          status: 'CORRECTION',
-          scorePercent: 78,
-          headline: 'Linkes Knie Valgus Drift (14° nach innen vor Ansatz)',
-          cueMetaphor: 'Stell dir vor, deine Knie sind zwei Schwanenflügel, die sich ganz weit nach außen zur Wand öffnen!',
-          jointFocusId: 'left_knee'
-        },
-        {
-          id: 'cue-8-3',
-          timeSeconds: 3.4,
-          timecodeStr: '00:03.400',
-          poseName: 'Port de Bras vor (Tiefste Inklination)',
-          status: 'GOOD',
-          scorePercent: 95,
-          headline: 'C7-Wirbelsäulenachse & Kopf-Linieneinbindung stabil',
-          cueMetaphor: 'Der Atem führt die Wirbelsäule in einer langen Welle nach vorne.',
-          jointFocusId: 'pelvis_core'
-        },
-        {
-          id: 'cue-8-4',
-          timeSeconds: 4.5,
-          timecodeStr: '00:04.500',
-          poseName: 'Port de Bras 3. Position (Arm oben)',
-          status: 'GOOD',
-          scorePercent: 96,
-          headline: 'En Dehors 88° Hüft- & Fuß-Ausrichtung',
-          cueMetaphor: 'Der Fingerkreis hält die Schwanenfeder schwebend.',
-          jointFocusId: 'port_de_bras_arms'
-        }
-      ];
-    }
-
-    if (videoUrl.includes('nicole_saal_1.mp4')) {
-      return [
-        {
-          id: 'cue-1-1',
-          timeSeconds: 0.8,
-          timecodeStr: '00:00.800',
-          poseName: 'Grand Plié 2. Position (Ansatz)',
-          status: 'GOOD',
-          scorePercent: 95,
-          headline: 'Perfekte Beckenaufrichtung (Vaganova 2. Pos)',
-          cueMetaphor: 'Lendenwirbel lang und neutral wie eine Perlenkette halten.',
-          jointFocusId: 'pelvis_core'
-        },
-        {
-          id: 'cue-1-2',
-          timeSeconds: 2.5,
-          timecodeStr: '00:02.500',
-          poseName: 'Plié Tiefpunkt (Fersen am Boden)',
-          status: 'CORRECTION',
-          scorePercent: 82,
-          headline: 'Rechtes Knie 8° Drift über Zehenspitze',
-          cueMetaphor: 'Die Knie ziehen aktiv zurück zur hinteren Raumdiagonale.',
-          jointFocusId: 'right_knee'
-        }
-      ];
-    }
-
-    // Generic fallback pre-analysis cue-points
-    return [
-      {
-        id: 'cue-gen-1',
-        timeSeconds: 0.8,
-        timecodeStr: '00:00.800',
-        poseName: 'Vaganova Ausgangshaltung',
-        status: 'GOOD',
-        scorePercent: 96,
-        headline: 'Vertikale Lotlinie 90° stabil',
-        cueMetaphor: 'Scheitel strebt zum Himmel, Fersen verankert im Boden.',
-        jointFocusId: 'head_epaulement'
-      },
-      {
-        id: 'cue-gen-2',
-        timeSeconds: 2.16,
-        timecodeStr: '00:02.160',
-        poseName: 'Bewegungs-Hauptphase',
-        status: 'CORRECTION',
-        scorePercent: 80,
-        headline: 'Knie-Auswärts-Drift (En Dehors Kontrolle)',
-        cueMetaphor: 'Stell dir vor, deine Knie öffnen sich wie Schwanenflügel.',
-        jointFocusId: 'left_knee'
-      }
-    ];
+    try { localStorage.removeItem(this.getStorageKey(videoUrl)); } catch (e) {}
+    const fixtureKey = getDemoFixtureKey(videoUrl);
+    return fixtureKey ? DEMO_FIXTURES[fixtureKey] : [];
   }
 }
 

@@ -42,9 +42,9 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: headCheck.present,
       allowedSources: ['face', 'pose'],
       confidence: headCheck.confidence,
-      stability: 0.92,
+      stability: -1, // NOT_COMPUTED: frame-to-frame variance not yet tracked (audit fix 2026-08-10)
       verdict: headCheck.present.length >= 3 ? 'measurable' : 'review',
-      reason: headCheck.present.length >= 3 ? 'Kopf- & Gesichts-Landmarks ausreichend sichtbar.' : 'Kopf teilweise verdeckt; Epaulement im Review-Modus.'
+      reason: headCheck.present.length >= 3 ? 'Kopf- & Gesichts-Landmarks ausreichend sichtbar.' : 'Kopf teilweise verdeckt; Épaulement im Review-Modus.'
     };
 
     // Region 2: Shoulder Line (Indices: 11, 12)
@@ -55,7 +55,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: shoulderCheck.present,
       allowedSources: ['pose'],
       confidence: shoulderCheck.confidence,
-      stability: 0.95,
+      stability: -1, // NOT_COMPUTED
       verdict: shoulderCheck.present.length === 2 ? 'measurable' : 'blocked',
       reason: shoulderCheck.present.length === 2 ? 'Schulterachse vollständig messbar.' : 'Schulterpunkte nicht ausreichend sichtbar.'
     };
@@ -68,7 +68,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: armLCheck.present,
       allowedSources: ['pose'],
       confidence: armLCheck.confidence,
-      stability: 0.90,
+      stability: -1, // NOT_COMPUTED
       verdict: armLCheck.present.length === 3 ? 'measurable' : 'review',
       reason: armLCheck.present.length === 3 ? 'Linker Arm Bogen messbar.' : 'Linker Ellbogen/Handgelenk im Review.'
     };
@@ -81,7 +81,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: armRCheck.present,
       allowedSources: ['pose'],
       confidence: armRCheck.confidence,
-      stability: 0.90,
+      stability: -1, // NOT_COMPUTED
       verdict: armRCheck.present.length === 3 ? 'measurable' : 'review',
       reason: armRCheck.present.length === 3 ? 'Rechter Arm Bogen messbar.' : 'Rechter Ellbogen/Handgelenk im Review.'
     };
@@ -94,7 +94,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: pelvisCheck.present,
       allowedSources: ['pose'],
       confidence: pelvisCheck.confidence,
-      stability: 0.96,
+      stability: -1, // NOT_COMPUTED
       verdict: pelvisCheck.present.length === 2 ? 'measurable' : 'blocked',
       reason: pelvisCheck.present.length === 2 ? 'Beckenachse neutral & messbar.' : 'Beckenpunkte nicht sichtbar.'
     };
@@ -107,7 +107,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: kneeLCheck.present,
       allowedSources: ['pose'],
       confidence: kneeLCheck.confidence,
-      stability: 0.88,
+      stability: -1, // NOT_COMPUTED
       verdict: kneeLCheck.present.length >= 3 ? 'measurable' : 'review',
       reason: kneeLCheck.present.length >= 3 ? 'Knie-Fuß-Projektion links messbar.' : 'Linker Fuß/Knöchel verdeckt.'
     };
@@ -120,7 +120,7 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: kneeRCheck.present,
       allowedSources: ['pose'],
       confidence: kneeRCheck.confidence,
-      stability: 0.88,
+      stability: -1, // NOT_COMPUTED
       verdict: kneeRCheck.present.length >= 3 ? 'measurable' : 'review',
       reason: kneeRCheck.present.length >= 3 ? 'Knie-Fuß-Projektion rechts messbar.' : 'Rechter Fuß/Knöchel verdeckt.'
     };
@@ -133,9 +133,9 @@ export class VaganovaEvidenceEngineService {
       presentLandmarks: feetCheck.present,
       allowedSources: ['pose'],
       confidence: feetCheck.confidence,
-      stability: 0.94,
+      stability: -1, // NOT_COMPUTED
       verdict: feetCheck.present.length >= 3 ? 'measurable' : 'review',
-      reason: feetCheck.present.length >= 3 ? 'En Dehors Auswärtsdrehung 90° messbar.' : 'Füße am Bildrand leicht abgeschnitten.'
+      reason: feetCheck.present.length >= 3 ? 'En Dehors Auswärtsdrehung messbar.' : 'Füße am Bildrand leicht abgeschnitten.'
     };
 
     return [
@@ -163,7 +163,8 @@ export class VaganovaEvidenceEngineService {
     const feetEv = getEv('footLeft');
 
     const analysis = landmarks ? vaganovaAngleCalculator.analyzeFullFrame(landmarks) : {} as Partial<VaganovaFullAnalysis>;
-    const standards = getStandards('default');
+    // Audit fix: use exercise-specific standards, not always 'default'
+    const standards = getStandards(selectedJointId || 'default');
 
     const getStatus = (measurement: any, standard: any, evVerdict: any): 'richtig' | 'auffaellig' | 'review' => {
       if (evVerdict !== 'measurable' || !measurement || !standard) return 'review';
@@ -279,7 +280,7 @@ export class VaganovaEvidenceEngineService {
     timestampStr: string,
     landmarks: PoseLandmark[] | null,
     selectedJointId: string,
-    teacherConfirmed: boolean = true
+    teacherConfirmed: boolean = false  // Audit fix: false = safe default; teacher must explicitly confirm
   ): FeedbackObject {
     const evidenceLedger = this.computeRegionEvidence(landmarks, exerciseName);
     const checkpointResults = this.computeCheckpoints(evidenceLedger, selectedJointId, landmarks);

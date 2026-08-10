@@ -78,6 +78,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // ── FRAME SYNC FOUNDATION (2026-08-10) ───────────────────────────────────
+  // Each pose result is tagged with the exact video timestamp it came from.
+  // Drawing only happens when the packet's mediaTimeUs matches the current frame.
+  const latestPacketRef = useRef<import('../types/posePacket').PosePacket | null>(null);
+  const streamEpochRef = useRef<number>(Date.now());
+  const frameSeqRef = useRef<number>(0);
+  const debugHudRef = useRef<import('../types/posePacket').FrameSyncDebugInfo>({
+    inferenceMs: 0, poseAgeMs: 0, syncErrorMs: 0,
+    droppedFrames: 0, skippedInferences: 0, usingRvfc: false,
+  });
+  // ─────────────────────────────────────────────────────────────────────────
+
   // 60fps ref-based data (bypasses React for smooth canvas drawing)
   const landmarksRef = useRef<PoseLandmark[] | null>(null);
   const worldLandmarksRef = useRef<PoseLandmark[] | null>(null);
@@ -96,6 +108,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     footAl: ReturnType<typeof vaganovaFootAnalyzer.analyzeSickleWing>;
     wDist: ReturnType<typeof vaganovaFootAnalyzer.analyzeWeightDistribution>;
     cogPt: { x: number; y: number };
+    packetMediaTimeUs: number; // Track which packet this analysis belongs to
   } | null>(null);
 
   // Computed overlay bounds that exactly match the rendered video area
@@ -202,6 +215,38 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // leaving isProcessingRef stuck at true and blocking all future live inference.
     isProcessingRef.current = false;
 
+    // ── FRAME SYNC: Reset all pose state on video change ────────────────────
+    const resetPoseState = () => {
+      latestPacketRef.current = null;
+      landmarksRef.current = null;
+      worldLandmarksRef.current = null;
+      cachedAnalysisRef.current = null;
+      frameSeqRef.current = 0;
+      streamEpochRef.current = Date.now();
+      vaganovaPoseEngine.reset();
+      // Clear canvas immediately
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+    resetPoseState(); // Always reset on effect restart (video change)
+
+    // Seek handler – clears stale skeleton immediately
+    const handleSeeked = () => {
+      latestPacketRef.current = null;
+      cachedAnalysisRef.current = null;
+      vaganovaPoseEngine.reset();
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+    videoRef.current?.addEventListener('seeked', handleSeeked);
+    // ────────────────────────────────────────────────────────────────────────
+
     const renderLoop = () => {
       if (!isActive) return;
 
@@ -215,10 +260,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
         if (shouldProcess && timeDelta > 0.005) {
           lastProcessedTime = curTime;
+          const inferenceStartMs = performance.now();
+          const currentMediaTimeUs = curTime * 1_000_000;
 
           // 1. Try pulling from Pre-Indexed Cache
           const cached = vaganovaFrameCache.getFrame(selectedDevVideoUrl, curTime);
           if (cached) {
+            // Cache hit: create a synthetic packet with this frame's timestamp
+            const packet: import('../types/posePacket').PosePacket = {
+              streamEpoch: streamEpochRef.current,
+              frameSeq: frameSeqRef.current++,
+              mediaTimeUs: currentMediaTimeUs,
+              inferenceStartedAtMs: inferenceStartMs,
+              inferenceEndedAtMs: performance.now(),
+              resultKind: 'pose',
+              landmarks: cached,
+              avgVisibility: cached.reduce((s, l) => s + (l.visibility ?? 1), 0) / cached.length,
+            };
+            latestPacketRef.current = packet;
             landmarksRef.current = cached;
 
             // Throttled React state update for side panels (~4fps)
@@ -229,19 +288,52 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               setIsEngineReady(true);
             }
           } else if (!isProcessingRef.current || (performance.now() - processingStartTimeRef.current > 500)) {
-            // 2. Fallback to Live MediaPipe Inference
-            // Timeout guard: if isProcessingRef was stuck >500ms (e.g. MediaPipe error), force-reset
+            // 2. Live MediaPipe Inference – "latest frame wins"
+            // Timeout guard: if isProcessingRef was stuck >500ms, force-reset
             isProcessingRef.current = true;
-            processingStartTimeRef.current = performance.now();
+            processingStartTimeRef.current = inferenceStartMs;
+            // Capture the mediaTimeUs for THIS frame so we can tag the result
+            const capturedMediaTimeUs = currentMediaTimeUs;
+            const capturedEpoch = streamEpochRef.current;
+            const capturedSeq = frameSeqRef.current++;
+
             realMediaPipePose.processFrame(v, (data: PoseResultsData) => {
               isProcessingRef.current = false;
-              if (isActive && data.landmarks && data.landmarks.length >= 33) {
-                const smoothed = vaganovaPoseEngine.smoothLandmarks(data.landmarks, curTime);
-                const lmToUse = smoothed || data.landmarks;
-                landmarksRef.current = lmToUse;
-                if (data.worldLandmarks) {
-                  worldLandmarksRef.current = data.worldLandmarks;
+              const inferenceEndMs = performance.now();
+
+              if (!isActive) return; // Effect cleaned up – discard
+
+              if (data.landmarks && data.landmarks.length >= 33) {
+                // ── FRAME SYNC: Single smoothing only (MediaPipe smoothLandmarks already active)
+                // One-Euro filter removed from live path to eliminate double-smoothing lag
+                const lmToUse = data.landmarks; // MediaPipe internal smoothing is sufficient
+
+                const packet: import('../types/posePacket').PosePacket = {
+                  streamEpoch: capturedEpoch,
+                  frameSeq: capturedSeq,
+                  mediaTimeUs: capturedMediaTimeUs,
+                  inferenceStartedAtMs: inferenceStartMs,
+                  inferenceEndedAtMs: inferenceEndMs,
+                  resultKind: 'pose',
+                  landmarks: lmToUse,
+                  worldLandmarks: data.worldLandmarks,
+                  avgVisibility: lmToUse.reduce((s, l) => s + (l.visibility ?? 1), 0) / lmToUse.length,
+                };
+
+                // Staleness check: discard if older than what we already have
+                const existing = latestPacketRef.current;
+                if (existing && packet.mediaTimeUs < existing.mediaTimeUs) {
+                  debugHudRef.current.droppedFrames++;
+                  return; // Stale result – discard
                 }
+
+                // Update debug HUD
+                debugHudRef.current.inferenceMs = inferenceEndMs - inferenceStartMs;
+
+                latestPacketRef.current = packet;
+                landmarksRef.current = lmToUse;
+                if (data.worldLandmarks) worldLandmarksRef.current = data.worldLandmarks;
+
                 // Throttled React state update
                 const now = performance.now();
                 if (now - lastStateUpdateRef.current > 250) {
@@ -250,16 +342,42 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   setDetectedWorldLandmarks(data.worldLandmarks || null);
                   setIsEngineReady(true);
                 }
+              } else {
+                // no_pose result – clear stale skeleton
+                latestPacketRef.current = null;
+                landmarksRef.current = null;
               }
             }).catch(() => { isProcessingRef.current = false; });
+          } else {
+            debugHudRef.current.skippedInferences++;
           }
         }
 
-        // ─── CANVAS DRAW (every frame, from ref – regardless of time change) ───
-        try {
+          // ─── CANVAS DRAW ──────────────────────────────────────────────────
+          // FRAME SYNC: Only draw if we have a packet and it's not stale.
+          // Stale = packet is >1 video frame old vs current video time.
           const lm = landmarksRef.current;
           const canvas2 = canvasRef.current;
           if (canvas2 && lm && showSkeleton) {
+            // ── Staleness gate ──────────────────────────────────────────────
+            const packet = latestPacketRef.current;
+            const currentMediaTimeUs = (v.currentTime || 0) * 1_000_000;
+            const TOLERANCE_US = 66_667; // ~2 frames at 30fps tolerance for live inference
+            if (packet) {
+              const ageUs = currentMediaTimeUs - packet.mediaTimeUs;
+              debugHudRef.current.poseAgeMs = ageUs / 1000;
+              if (ageUs > TOLERANCE_US && ageUs < 5_000_000) {
+                // Stale: clear canvas, don't show wrong-frame skeleton
+                debugHudRef.current.syncErrorMs = ageUs / 1000;
+                const ctx2 = canvas2.getContext('2d');
+                if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
+                return; // Skip draw this frame
+              } else {
+                debugHudRef.current.syncErrorMs = 0;
+              }
+            }
+            // ───────────────────────────────────────────────────────────────
+
             // Resize canvas to match actual pixel dimensions
             const bounds = overlayBoundsRef.current;
             if (bounds) {
@@ -279,7 +397,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               lastAnalysisTimeRef.current = nowMs;
               const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
               const motionCls2 = vaganovaMotionClassifier.classify(lm);
-              vaganovaKineticAI.updateTrails(sk2, curTime);
+              vaganovaKineticAI.updateTrails(sk2, v.currentTime || 0);
               const cogPt2 = vaganovaKineticAI.computeCenterOfGravity(sk2);
               const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm);
               const armPos2 = vaganovaArmAnalyzer.classifyArmPosition(sk2);
@@ -290,7 +408,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               cachedAnalysisRef.current = {
                 sk: sk2, motionCls: motionCls2, cogPt: cogPt2,
                 vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
-                epaul: epaul2, footAl: footAl2, wDist: wDist2
+                epaul: epaul2, footAl: footAl2, wDist: wDist2,
+                packetMediaTimeUs: packet?.mediaTimeUs ?? 0,
               };
             }
 
@@ -312,9 +431,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             const ctx2 = canvas2.getContext('2d');
             if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
           }
-        } catch (_canvasErr) {
-          // Swallow canvas draw errors - don't kill the rAF loop
-        }
       }
 
       if (isActive) {
@@ -327,6 +443,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     return () => {
       isActive = false;
       if (animId) cancelAnimationFrame(animId);
+      videoRef.current?.removeEventListener('seeked', handleSeeked);
     };
   }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId]);
 

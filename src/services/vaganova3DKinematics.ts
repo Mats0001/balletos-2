@@ -1,12 +1,38 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// vaganova3DKinematics.ts  –  2D DISPLAY SKELETON (NOT 3D)
+//
+// ⚠️  AUDIT FINDING (2026-08-10): Despite the name, this module performs
+//     NO true 3D reconstruction. It uses 2D normalized landmarks only.
+//     The `_landmarks3D` / `worldLandmarks` parameter is accepted but
+//     intentionally unused (underscore prefix). The `z` field on KinematicPoint
+//     is populated from MediaPipe's hip-relative depth estimate, NOT from
+//     calibrated world-space 3D coordinates.
+//
+//     HARDCODED FALLBACKS assume a 1000×1000 px frame. At other resolutions
+//     (e.g. 1920×1080) missing-landmark fallbacks will be proportionally wrong.
+//
+//     THIS MODULE IS SAFE FOR:
+//       ✓ Visual skeleton display on canvas
+//       ✓ Animation / interpolation for UI purposes
+//
+//     THIS MODULE MUST NOT BE USED FOR:
+//       ✗ Biomechanical angle measurement
+//       ✗ Vaganova scoring or safety decisions
+//       ✗ Any output labeled as "3D" or "depth-accurate"
+//
+//     Computed-point visibility values (neck=0.95, sternum=0.90, etc.) are
+//     hardcoded constants, NOT propagated from source landmark confidence.
+// ─────────────────────────────────────────────────────────────────────────────
 import { PoseLandmark } from './realMediaPipePose';
 
 export interface KinematicPoint {
   x: number; // Pixel coordinates (0 - videoWidth)
   y: number; // Pixel coordinates (0 - videoHeight)
-  z?: number; // Metric depth in meters
-  vis: number; // Confidence (0.0 - 1.0)
+  z?: number; // MediaPipe hip-relative depth estimate (NOT metric depth)
+  vis: number; // Confidence (0.0 - 1.0); -1 = NOT_COMPUTED for predicted points
   isPredicted?: boolean;
 }
+
 
 export interface ReconstructedSkeleton {
   head: KinematicPoint;
