@@ -86,6 +86,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
+  const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
+  const toggleCueExpanded = (id: string) =>
+    setExpandedCueIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' }>({
     poseName: '',
     headline: '',
@@ -2060,63 +2063,77 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 );
               }
 
+              const isExpanded = expandedCueIds.has(cue.id);
+
               return (
                 <div
                   key={cue.id}
-                  onClick={() => handleSeekToCuePoint(cue)}
                   style={{
                     background: isSelected ? 'rgba(192, 132, 252, 0.18)' : 'rgba(255, 255, 255, 0.03)',
                     border: isSelected
                       ? '1px solid #c084fc'
                       : (cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.3)'),
                     borderRadius: '10px',
-                    padding: '12px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px'
+                    overflow: 'hidden',
+                    transition: 'border-color 0.2s ease, background 0.2s ease',
+                    opacity: cue.provenance === 'nicole_rejected' ? 0.45 : 1,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 800, color: '#c084fc', background: 'rgba(192,132,252,0.15)', padding: '2px 6px', borderRadius: '4px' }}>
+                  {/* ─── ACCORDION HEADER (immer sichtbar) ─── */}
+                  <div
+                    onClick={() => { toggleCueExpanded(cue.id); handleSeekToCuePoint(cue); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                    }}
+                  >
+                    {/* Links: Timecode + Name */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                      {/* Chevron */}
+                      <span style={{
+                        fontSize: '9px', color: '#c084fc', opacity: 0.7,
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.2s ease',
+                        display: 'inline-block', flexShrink: 0
+                      }}>▶</span>
+                      <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 800, color: '#c084fc', background: 'rgba(192,132,252,0.15)', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>
                         {cue.timecodeStr}
                       </span>
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffffff' }}>
-                        {cue.poseName} {cue.isCustom ? '✏️' : ''}
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cue.poseName}{cue.isCustom ? ' ✏️' : ''}
+                        {cue.provenance === 'ki_suggestion' && <span style={{ marginLeft: '4px', color: '#ffd60a', fontSize: '9px' }}><FlaskConical size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /></span>}
+                        {cue.provenance === 'nicole_confirmed' && <span style={{ marginLeft: '4px', color: '#30d158', fontSize: '8px' }}>✓</span>}
+                        {cue.provenance === 'nicole_rejected' && <span style={{ marginLeft: '4px', color: 'rgba(255,255,255,0.3)', fontSize: '8px' }}>✕</span>}
                       </span>
                     </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {/* Rechts: Status-Badge + Edit/Delete */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
                       <span style={{
-                        fontSize: '9px',
-                        fontWeight: 800,
-                        padding: '2px 6px',
-                        borderRadius: '6px',
+                        fontSize: '9px', fontWeight: 800, padding: '2px 6px', borderRadius: '6px',
                         background: cue.status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.2)' : 'rgba(48, 209, 88, 0.2)',
                         color: cue.status === 'CORRECTION' ? COLOR_BAD : COLOR_GOOD,
                         border: cue.status === 'CORRECTION' ? '1px solid rgba(255, 69, 58, 0.4)' : '1px solid rgba(48, 209, 88, 0.4)'
                       }}>
-                        {cue.status === 'CORRECTION' ? '🔴 KORREKTUR' : '🟢 GUT'}
+                        {cue.status === 'CORRECTION' ? '🔴 KORR.' : '🟢 GUT'}
                       </span>
-
-                      <button
-                        onClick={(e) => handleStartEdit(cue, e)}
-                        title="Bearbeiten"
-                        style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}
-                      >
+                      <button onClick={(e) => handleStartEdit(cue, e)} title="Bearbeiten"
+                        style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}>
                         <Edit2 size={11} />
                       </button>
-                      <button
-                        onClick={(e) => handleDeleteCuePoint(cue.id, e)}
-                        title="Löschen"
-                        style={{ background: 'transparent', border: 'none', color: '#ff453a', cursor: 'pointer', padding: '2px' }}
-                      >
+                      <button onClick={(e) => handleDeleteCuePoint(cue.id, e)} title="Löschen"
+                        style={{ background: 'transparent', border: 'none', color: '#ff453a', cursor: 'pointer', padding: '2px' }}>
                         <Trash2 size={11} />
                       </button>
                     </div>
                   </div>
+
+                  {/* ─── ACCORDION BODY (nur wenn aufgeklappt) ─── */}
+                  {isExpanded && (
+                    <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
 
                   <div style={{ fontSize: '11px', fontWeight: 700, color: cue.status === 'CORRECTION' ? '#ff453a' : '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {cue.status === 'CORRECTION' ? <AlertTriangle size={12} /> : <CheckCircle size={12} color="#30d158" />}
@@ -2224,10 +2241,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '2px' }}>
-                    <span>Frame (Slow-Mo 0.25x) anspringen</span>
-                    <ChevronRight size={10} />
-                  </div>
+                    {/* Frame anspringen */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', fontSize: '9px', fontWeight: 700, color: '#c084fc', marginTop: '4px' }}>
+                      <span>Frame (Slow-Mo 0.25x) anspringen</span>
+                      <ChevronRight size={10} />
+                    </div>
+
+                  </div>)}{/* end isExpanded accordion body */}
+
                 </div>
               );
             })}
