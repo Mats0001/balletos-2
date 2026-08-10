@@ -366,23 +366,25 @@ export class VaganovaAngleCalculator {
       };
     }
 
-    // ── Relative delta from baseline (valid measurement)
+    // ── Relative delta from baseline (shadow metric – display only)
     const baseline = isLeft ? this.valgusBaselineL! : this.valgusBaselineR!;
+    // BERATER FIX (2026-08-10): delta OHNE Math.abs() \u2013 Vorzeichen ist Information.
+    // Math.abs() l\u00f6scht die Richtung (medial vs. lateral) und macht es unm\u00f6glich,
+    // zwischen diesen Driftrichtungen zu unterscheiden. Deshalb kann daraus KEINE
+    // 'Valgus-Warnung' entstehen. Rohwert + Richtung als Shadow-Metrik anzeigen.
     const delta = rawAngle - baseline;
-    // Status based on RELATIVE change from individual baseline, not absolute value
-    // Threshold: >5° increase = WARNING (knee collapsing inward vs. start), >10° = ERROR
-    const status: 'CORRECT' | 'WARNING' | 'ERROR' =
-      Math.abs(delta) <= 5 ? 'CORRECT' :
-      Math.abs(delta) <= 10 ? 'WARNING' : 'ERROR';
 
     return {
       value: Math.round(delta * 10) / 10,
       unit: 'delta_deg',
       confidence: conf,
       measurement_class: 'individual_baseline',
-      label: `Knie-Drift ${isLeft ? 'links' : 'rechts'} (Δ zur Ausgangsposition)`,
-      status,
-      norm: 'Relative Änderung vom persönlichen Ausgangswert. Asaeda 2024: absoluter Valgus aus Webcam nicht vergleichbar.',
+      // P0: Umbenennung gem\u00e4\u00df Berater \u2013 kein Valgus/Verletzungsanspruch
+      label: `Projizierte Knieachsen-\u00c4nderung ${isLeft ? 'links' : 'rechts'} (\u0394 zur Ausgangsposition)`,
+      // status: deliberately omitted \u2013 Richtungsinformation war durch abs() verloren.
+      // Weder medial noch lateral kann ohne Richtungsvektor bewertet werden.
+      // Sprint 1 Step 5 (DecisionGate): erst dann m\u00f6glich wenn Richtungsvektor + Validierung vorliegen.
+      norm: 'Projizierter 2D-Proxy. Richtung (positiv=lateral, negativ=medial) erhalten. Asaeda 2024: absoluter Valgus aus Webcam \u00b119\u00b0 Systemfehler vs. Vicon.',
       source_page: 'Asaeda et al. 2024, PMC11399566'
     };
   }

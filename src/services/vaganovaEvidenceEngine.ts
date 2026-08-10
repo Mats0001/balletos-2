@@ -9,6 +9,7 @@ import {
 import { PoseLandmark } from './realMediaPipePose';
 import { vaganovaAngleCalculator, VaganovaFullAnalysis } from './vaganovaAngleCalculator';
 import { getStandards } from '../config/vaganovaStandards';
+import { BUILD_POLICY } from '../config/buildPolicy';
 
 export class VaganovaEvidenceEngineService {
   /**
@@ -253,6 +254,19 @@ export class VaganovaEvidenceEngineService {
     overallVerdict: EvidenceVerdict,
     teacherConfirmed: boolean
   ): SafetyGate {
+    // DOMAIN ENFORCEMENT (Berater 2026-08-10):
+    // BUILD_POLICY wird hier im Domain-Service selbst erzwungen, nicht nur in der UI.
+    // Ein deaktivierter Hausaufgaben-Button reicht nicht – die Engine kann intern
+    // homework: allowed erzeugen. Das ist hier definitiv gesperrt.
+    // 'as const' ist nur typseitig readonly. Die Domain-Sperre ist die echte Schranke.
+    if (!BUILD_POLICY.allowHomeworkGeneration || !BUILD_POLICY.allowSafetyClaims) {
+      return {
+        status: 'blocked',
+        blockedReason: `BUILD_POLICY v${BUILD_POLICY.policyVersion}: Hausaufgaben und Safety-Claims sind deaktiviert bis DecisionGate + Mocap-Validierung abgeschlossen sind.`,
+        allowedOutputs: { studentNote: false, teacherNote: true, parentDraft: false, homework: false }
+      };
+    }
+
     if (overallVerdict === 'nicht_beurteilbar') {
       return {
         status: 'blocked',

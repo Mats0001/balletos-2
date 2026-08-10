@@ -9,6 +9,7 @@ import { RemotePortal } from './components/RemotePortal';
 import { RightInspectorPanel } from './components/RightInspectorPanel';
 import { AgeGroup, Location } from './types';
 import { VaganovaFullAnalysis } from './services/vaganovaAngleCalculator';
+import { IS_LAB_MODE, BUILD_POLICY } from './config/buildPolicy';
 
 export const App: React.FC = () => {
   const [isTVMode, setIsTVMode] = useState<boolean>(false);
@@ -45,6 +46,22 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
+      {/* LAB-MODE BANNER (Berater 2026-08-10): Nicht wegklickbar, global im App-Root.
+          Erscheint wenn VITE_LAB_MODE=true. Text klar: EXPERIMENTELL, kein validierter Score.
+          Auch in Exporten sichtbar machen (Sprint 1 Step 9). */}
+      {IS_LAB_MODE && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+          background: 'rgba(239,68,68,0.95)', color: '#fff',
+          padding: '6px 16px', fontSize: '11px', fontWeight: 800,
+          textAlign: 'center', letterSpacing: '0.05em',
+          borderBottom: '2px solid rgba(255,255,255,0.3)',
+          userSelect: 'none', pointerEvents: 'none'
+        }}>
+          ⚠️ EXPERIMENTALMODUS – NICHT VALIDIERTE MESSWERTE – KEINE DIAGNOSE ODER SICHERHEITSBEWERTUNG
+          &nbsp;&nbsp;|&nbsp;&nbsp;BUILD_POLICY v{BUILD_POLICY.policyVersion}
+        </div>
+      )}
       {/* Sleek Vertical Left Navigation with Context Tile */}
       <Navbar
         activeTab={activeTab}

@@ -9,7 +9,7 @@
  * Freigabe: allowThresholdScoring/allowSafetyClaims/allowHomeworkGeneration
  * bleiben false bis DecisionGate + validationArtifactId + Mocap-Protokoll.
  */
-export const BUILD_POLICY = {
+export const BUILD_POLICY = Object.freeze({
   /** Automatisches CORRECT/WARNING/ERROR – DEAKTIVIERT */
   allowThresholdScoring: false,
   /** Safety-Claims und Verletzungswarnungen – DEAKTIVIERT */
@@ -24,12 +24,14 @@ export const BUILD_POLICY = {
   allowTeacherReview: true,
   /** Policy-Version für Provenienz-Logging */
   policyVersion: '0.1.0-sprint0-safety',
-} as const;
+} as const);
 
 export type BuildPolicy = typeof BUILD_POLICY;
 
 /**
  * Lab-Build: Nur wenn VITE_LAB_MODE=true.
  * Muss in der UI als "EXPERIMENTELL – NICHT VALIDIERTE AUSGABE" sichtbar sein.
+ * Object.freeze() stellt sicher, dass die Policy auch zur Laufzeit nicht verändert werden kann.
+ * (Berater 2026-08-10: 'as const' ist nur typseitig readonly, nicht zur Laufzeit unverländerlich.)
  */
 export const IS_LAB_MODE = (import.meta as any).env?.VITE_LAB_MODE === 'true';

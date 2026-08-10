@@ -704,7 +704,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     selectedFrameTime,
     detectedLandmarks,
     selectedJointId,
-    true
+    false // P0-FIX (Berater 2026-08-10): teacherConfirmed NIEMALS hart als true – immer false bis explizite Bestätigung
   );
 
   const inspectorData: JetztWichtigInspectorData = {
