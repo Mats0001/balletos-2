@@ -101,24 +101,27 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 
   const W = 234;
 
-  // ── POSITION: LINKS-PANE ─────────────────────────────────────────────────
-  // Fest verankert im linken Sidebar-Bereich (x=10, klar links von Video bei 257)
-  const popoverLeft = 10;
-
+  // ── POSITION: RECHTS-VERANKERT ───────────────────────────────────
+  // right: 348px = rechtes Panel (340px) + 8px Abstand
+  // So liegt das Popover IMMER zwischen Video und rechtem Panel.
+  // Es überdeckt NIE die Live-Messwerte.
+  const popoverRight = 348; // px vom rechten Viewport-Rand
+  // Gleiche vertikale Logik wie vorher:
   let popoverTop = jointY - 200;
   popoverTop = Math.max(10, Math.min(containerHeight - 50, popoverTop));
 
-  // ── SVG CONNECTOR ─────────────────────────────────────────────────────────
-  // Schwanz startet an der RECHTEN Seite des Popovers (Mitte vertikal)
-  const tailX = popoverLeft + W + 2;
+  // ── SVG CONNECTOR ─────────────────────────────────
+  // Schwanz startet an der LINKEN Seite des Popovers (zur Mitte des Videos)
+  const popoverLeft = window.innerWidth - popoverRight - W;
+  const tailX = popoverLeft - 2;  // linke Kante des Popovers
   const tailY = Math.max(popoverTop + 20, Math.min(popoverTop + 380, jointY));
   const headX = jointX;
   const headY = jointY;
-  // Sanfte Bezier-Kurve: Kontrollpunkte spannen Distanz auf
-  const gap = headX - tailX;
-  const cp1X = tailX + gap * 0.5;
+  // Bezier: Kurve von tailX (rechts des Videos) nach headX (Joint im Video)
+  const gap = tailX - headX;  // positiv, da Popover rechts vom Video
+  const cp1X = tailX - gap * 0.4;
   const cp1Y = tailY;
-  const cp2X = tailX + gap * 0.5;
+  const cp2X = tailX - gap * 0.4;
   const cp2Y = headY;
 
   // Dominant live status for connector colour
@@ -163,11 +166,11 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         <circle cx={headX} cy={headY} r="4.5" fill={connectorColor} opacity="0.95" />
       </svg>
 
-      {/* POPOVER CARD – links-pane, position:fixed, nie unter Video */}
+      {/* POPOVER CARD – zwischen Video und rechtem Panel, überdeckt NIE die Live-Messwerte */}
       <div
         style={{
           position: 'fixed',
-          left: `${popoverLeft}px`,
+          right: `${popoverRight}px`,
           top: `${popoverTop}px`,
           width: `${W}px`,
           maxHeight: 'calc(100vh - 24px)',
@@ -178,11 +181,10 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
           border: `1px solid ${color}50`,
-          borderRight: `3px solid ${connectorColor}`,
+          borderLeft: `3px solid ${connectorColor}`,
           borderRadius: '14px',
           boxShadow: `0 8px 40px rgba(0,0,0,0.9), 0 0 0 1px ${color}18, inset 0 1px 0 rgba(255,255,255,0.06)`,
-
-          animation: 'popoverSlideInLeft 0.24s cubic-bezier(0.34,1.4,0.64,1)',
+          animation: 'popoverSlideInRight 0.24s cubic-bezier(0.34,1.4,0.64,1)',
           pointerEvents: 'all',
         }}
         onClick={e => e.stopPropagation()}
@@ -296,8 +298,8 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         </div>
 
         <style>{`
-          @keyframes popoverSlideInLeft {
-            from { opacity: 0; transform: translateX(-20px) scale(0.96); }
+          @keyframes popoverSlideInRight {
+            from { opacity: 0; transform: translateX(20px) scale(0.96); }
             to   { opacity: 1; transform: translateX(0)   scale(1); }
           }
         `}</style>
