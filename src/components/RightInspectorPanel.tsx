@@ -118,65 +118,64 @@ export const RightInspectorPanel: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* 📌 AUSGEWÄHLTER MARKER – unter Messwerte, flexShrink:0 */}
-        {selectedCue && (
-          <div style={{
-            background: selectedCue.status === 'CORRECTION'
-              ? 'rgba(255,69,58,0.08)'
-              : selectedCue.status === 'WARNING'
-              ? 'rgba(255,159,10,0.08)'
-              : 'rgba(48,209,88,0.08)',
-            border: `1px solid ${
-              selectedCue.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)'
-              : selectedCue.status === 'WARNING' ? 'rgba(255,159,10,0.35)'
-              : 'rgba(48,209,88,0.3)'}`,
-            borderRadius: '12px', padding: '10px 12px',
-            flexShrink: 1,
-            minHeight: 0,
-            maxHeight: '170px',
-            overflowY: 'auto',
-            scrollbarWidth: 'thin' as const,
-            scrollbarColor: 'rgba(168,129,189,0.3) transparent',
-            display: 'flex', flexDirection: 'column', gap: '8px',
-            animation: 'fadeIn 0.2s ease',
-          }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{
-                fontSize: '9px', fontWeight: 800,
-                color: selectedCue.status === 'CORRECTION' ? '#ff453a' : selectedCue.status === 'WARNING' ? '#ff9f0a' : '#30d158',
-                textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '4px'
-              }}>
-                {selectedCue.status === 'CORRECTION' ? <AlertTriangle size={10} /> : selectedCue.status === 'WARNING' ? <AlertTriangle size={10} /> : <Check size={10} />}
-                {selectedCue.status === 'CORRECTION' ? 'Fehler' : selectedCue.status === 'WARNING' ? 'Beobachten' : 'Stärke'} · {selectedCue.timecodeStr}
-              </div>
-              <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
-                {selectedCue.dataSource === 'KI_AUTO' ? '🤖 KI' : '👩‍🏫 Nicole'}
-              </span>
-            </div>
-            {/* Pose name */}
-            <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff' }}>{selectedCue.poseName}</div>
-            {/* Headline */}
-            <div style={{ fontSize: '10px', fontWeight: 600,
-              color: selectedCue.status === 'CORRECTION' ? '#ff6b61' : selectedCue.status === 'WARNING' ? '#ffb340' : '#5ae088'
-            }}>{selectedCue.headline}</div>
-            {/* Metapher */}
-            <div style={{ background: 'rgba(168,129,189,0.1)', border: '1px solid rgba(168,129,189,0.2)', borderRadius: '8px', padding: '8px 10px' }}>
-              <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>💡 Bildhafte Erklärung</div>
-              <div style={{ fontSize: '11px', color: '#fff', fontStyle: 'italic', lineHeight: 1.45, fontWeight: 600 }}>{selectedCue.cueMetaphor}</div>
-            </div>
-            {/* KI-Note */}
-            {selectedCue.kiNote && (
-              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '7px', padding: '7px 10px' }}>
-                <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', marginBottom: '4px' }}>🤖 Messwert-Analyse</div>
-                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.45 }}>{selectedCue.kiNote}</div>
-              </div>
-            )}
-            <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', paddingTop: '2px' }}>Klick auf anderen Marker um diesen zu wechseln</div>
-          </div>
-        )}
+      </div>{/* end shared flex column = only metrics now */}
 
-      </div>{/* end shared flex column */}
+      {/* 📌 AUSGEWÄHLTER MARKER – feste Höhe, scrollbar intern, nach Messwerten */}
+      {selectedCue && (
+        <div style={{
+          background: selectedCue.status === 'CORRECTION'
+            ? 'rgba(255,69,58,0.08)'
+            : selectedCue.status === 'WARNING'
+            ? 'rgba(255,159,10,0.08)'
+            : 'rgba(48,209,88,0.08)',
+          border: `1px solid ${
+            selectedCue.status === 'CORRECTION' ? 'rgba(255,69,58,0.35)'
+            : selectedCue.status === 'WARNING' ? 'rgba(255,159,10,0.35)'
+            : 'rgba(48,209,88,0.3)'}`,
+          borderRadius: '12px', padding: '10px 12px',
+          flexShrink: 0,
+          maxHeight: '160px',
+          overflowY: 'auto',
+          scrollbarWidth: 'thin' as const,
+          scrollbarColor: 'rgba(168,129,189,0.3) transparent',
+          display: 'flex', flexDirection: 'column', gap: '6px',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+            <div style={{
+              fontSize: '9px', fontWeight: 800,
+              color: selectedCue.status === 'CORRECTION' ? '#ff453a' : selectedCue.status === 'WARNING' ? '#ff9f0a' : '#30d158',
+              textTransform: 'uppercase', letterSpacing: '0.8px', display: 'flex', alignItems: 'center', gap: '4px'
+            }}>
+              {selectedCue.status === 'CORRECTION' ? <AlertTriangle size={10} /> : selectedCue.status === 'WARNING' ? <AlertTriangle size={10} /> : <Check size={10} />}
+              {selectedCue.status === 'CORRECTION' ? 'Fehler' : selectedCue.status === 'WARNING' ? 'Beobachten' : 'Stärke'} · {selectedCue.timecodeStr}
+            </div>
+            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>
+              {selectedCue.dataSource === 'KI_AUTO' ? '🤖 KI' : '👩‍🏫 Nicole'}
+            </span>
+          </div>
+          {/* Pose name */}
+          <div style={{ fontSize: '11px', fontWeight: 700, color: '#fff', flexShrink: 0 }}>{selectedCue.poseName}</div>
+          {/* Headline */}
+          <div style={{ fontSize: '10px', fontWeight: 600, flexShrink: 0,
+            color: selectedCue.status === 'CORRECTION' ? '#ff6b61' : selectedCue.status === 'WARNING' ? '#ffb340' : '#5ae088'
+          }}>{selectedCue.headline}</div>
+          {/* Metapher */}
+          <div style={{ background: 'rgba(168,129,189,0.1)', border: '1px solid rgba(168,129,189,0.2)', borderRadius: '8px', padding: '7px 10px', flexShrink: 0 }}>
+            <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '3px' }}>💡 Bildhafte Erklärung</div>
+            <div style={{ fontSize: '10px', color: '#fff', fontStyle: 'italic', lineHeight: 1.4, fontWeight: 600 }}>{selectedCue.cueMetaphor}</div>
+          </div>
+          {/* KI-Note */}
+          {selectedCue.kiNote && (
+            <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: '7px', padding: '6px 10px', flexShrink: 0 }}>
+              <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', marginBottom: '3px' }}>🤖 Messwert-Analyse</div>
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>{selectedCue.kiNote}</div>
+            </div>
+          )}
+          <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.3)', textAlign: 'center' }}>Klick auf anderen Marker um diesen zu wechseln</div>
+        </div>
+      )}
 
       {/* KI-METAPHER – compact (nur wenn kein selectedCue) */}
       {!selectedCue && (
