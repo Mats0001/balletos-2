@@ -358,6 +358,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           // Stale = packet is >1 video frame old vs current video time.
           const lm = landmarksRef.current;
           const canvas2 = canvasRef.current;
+          // P0-g FIX (Berater 2026-08-10): Staleness must skip draw, NOT return from rAF callback.
+          // The old 'return' broke the renderLoop and stopped requestAnimationFrame.
+          let skipDraw = false;
           if (canvas2 && lm && showSkeleton) {
             // ── Staleness gate ──────────────────────────────────────────────
             const packet = latestPacketRef.current;
@@ -367,65 +370,67 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               const ageUs = currentMediaTimeUs - packet.mediaTimeUs;
               debugHudRef.current.poseAgeMs = ageUs / 1000;
               if (ageUs > TOLERANCE_US && ageUs < 5_000_000) {
-                // Stale: clear canvas, don't show wrong-frame skeleton
+                // Stale: clear canvas only, continue loop
                 debugHudRef.current.syncErrorMs = ageUs / 1000;
                 const ctx2 = canvas2.getContext('2d');
                 if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
-                return; // Skip draw this frame
+                skipDraw = true; // Skip draw this frame, but DO NOT return
               } else {
                 debugHudRef.current.syncErrorMs = 0;
               }
             }
             // ───────────────────────────────────────────────────────────────
 
-            // Resize canvas to match actual pixel dimensions
-            const bounds = overlayBoundsRef.current;
-            if (bounds) {
-              const dpr = window.devicePixelRatio || 1;
-              const cw = Math.round(bounds.width * dpr);
-              const ch = Math.round(bounds.height * dpr);
-              if (canvas2.width !== cw || canvas2.height !== ch) {
-                canvas2.width = cw;
-                canvas2.height = ch;
+            if (!skipDraw) {
+              // Resize canvas to match actual pixel dimensions
+              const bounds = overlayBoundsRef.current;
+              if (bounds) {
+                const dpr = window.devicePixelRatio || 1;
+                const cw = Math.round(bounds.width * dpr);
+                const ch = Math.round(bounds.height * dpr);
+                if (canvas2.width !== cw || canvas2.height !== ch) {
+                  canvas2.width = cw;
+                  canvas2.height = ch;
+                }
               }
-            }
 
-            // ⚡ THROTTLED ANALYSIS: max 15fps (every ~67ms) – canvas draw uses cached result at 60fps
-            const nowMs = performance.now();
-            const ANALYSIS_INTERVAL_MS = 67; // ~15fps
-            if (nowMs - lastAnalysisTimeRef.current >= ANALYSIS_INTERVAL_MS || !cachedAnalysisRef.current) {
-              lastAnalysisTimeRef.current = nowMs;
-              const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
-              const motionCls2 = vaganovaMotionClassifier.classify(lm);
-              vaganovaKineticAI.updateTrails(sk2, v.currentTime || 0);
-              const cogPt2 = vaganovaKineticAI.computeCenterOfGravity(sk2);
-              const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm, v.videoWidth, v.videoHeight);
-              const armPos2 = vaganovaArmAnalyzer.classifyArmPosition(sk2);
-              const elbowQ2 = vaganovaArmAnalyzer.analyzeElbowQuality(sk2);
-              const epaul2 = vaganovaArmAnalyzer.analyzeEpaulement(sk2);
-              const footAl2 = vaganovaFootAnalyzer.analyzeSickleWing(sk2);
-              const wDist2 = vaganovaFootAnalyzer.analyzeWeightDistribution(sk2, cogPt2.x);
-              cachedAnalysisRef.current = {
-                sk: sk2, motionCls: motionCls2, cogPt: cogPt2,
-                vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
-                epaul: epaul2, footAl: footAl2, wDist: wDist2,
-                packetMediaTimeUs: packet?.mediaTimeUs ?? 0,
-              };
-            }
+              // ⚡ THROTTLED ANALYSIS: max 15fps (every ~67ms) – canvas draw uses cached result at 60fps
+              const nowMs = performance.now();
+              const ANALYSIS_INTERVAL_MS = 67; // ~15fps
+              if (nowMs - lastAnalysisTimeRef.current >= ANALYSIS_INTERVAL_MS || !cachedAnalysisRef.current) {
+                lastAnalysisTimeRef.current = nowMs;
+                const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
+                const motionCls2 = vaganovaMotionClassifier.classify(lm);
+                vaganovaKineticAI.updateTrails(sk2, v.currentTime || 0);
+                const cogPt2 = vaganovaKineticAI.computeCenterOfGravity(sk2);
+                const vagAn2 = vaganovaAngleCalculator.analyzeFullFrame(lm, v.videoWidth, v.videoHeight);
+                const armPos2 = vaganovaArmAnalyzer.classifyArmPosition(sk2);
+                const elbowQ2 = vaganovaArmAnalyzer.analyzeElbowQuality(sk2);
+                const epaul2 = vaganovaArmAnalyzer.analyzeEpaulement(sk2);
+                const footAl2 = vaganovaFootAnalyzer.analyzeSickleWing(sk2);
+                const wDist2 = vaganovaFootAnalyzer.analyzeWeightDistribution(sk2, cogPt2.x);
+                cachedAnalysisRef.current = {
+                  sk: sk2, motionCls: motionCls2, cogPt: cogPt2,
+                  vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
+                  epaul: epaul2, footAl: footAl2, wDist: wDist2,
+                  packetMediaTimeUs: packet?.mediaTimeUs ?? 0,
+                };
+              }
 
-            // Canvas draw always runs at 60fps using cached analysis
-            const c = cachedAnalysisRef.current;
-            if (c) {
-              renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
-                showSkeleton,
-                showMotionTrails,
-                showCoG,
-                showAngleArcs,
-                selectedJointId,
-                isPlie: c.motionCls.isPlie,
-                vaganovaAnalysis: c.vagAn
-              }, v.videoWidth, v.videoHeight);
-            }
+              // Canvas draw always runs at 60fps using cached analysis
+              const c = cachedAnalysisRef.current;
+              if (c) {
+                renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
+                  showSkeleton,
+                  showMotionTrails,
+                  showCoG,
+                  showAngleArcs,
+                  selectedJointId,
+                  isPlie: c.motionCls.isPlie,
+                  vaganovaAnalysis: c.vagAn
+                }, v.videoWidth, v.videoHeight);
+              }
+            } // end !skipDraw
 
           } else if (canvas2 && !showSkeleton) {
             const ctx2 = canvas2.getContext('2d');

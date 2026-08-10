@@ -298,16 +298,17 @@ export class VaganovaAngleCalculator {
     if (conf < 0.3) return null;
 
     const angle = this.angle3P(landmarks[hipIdx], landmarks[kneeIdx], landmarks[ankleIdx], vw, vh);
-    const status: 'CORRECT' | 'WARNING' | 'ERROR' =
-      angle >= VAGANOVA_NORMS.plie.standingLegMin ? 'CORRECT' :
-      angle >= VAGANOVA_NORMS.plie.grand.kneeFlexionMin ? 'WARNING' : 'ERROR';
+    // P0-a FIX (Berater 2026-08-10): research_observation darf KEINE CORRECT/WARNING/ERROR erzeugen.
+    // Ein Studienmittelwert (Fotaki: 134.98° ± 4.62°) ist KEIN Sollwert für Einzelpersonen.
+    // DOI-Fix P0-e: 10.1371/journal.pone.0230654 ist Gorwa (Turnout), NICHT Plié.
+    // Fotaki et al. Grand Plié: DOI 10.3390/sports12020054, PMID 38393275
     return {
       value: angle, unit: 'deg', confidence: conf,
       measurement_class: 'research_observation',
       label: `Knieflexion ${side === 'L' ? 'links' : 'rechts'}`,
-      status,
-      norm: 'Beobachtungswert (Studienmittelwert, kein Vaganova-Sollwert). NIH: Grand Plié ~135° ±4.6°.',
-      source_page: 'Asaeda et al. 2024; NIH/PubMed'
+      // status: deliberately omitted – research_observation must never produce a scoring verdict
+      norm: 'Beobachtungswert (Studienmittelwert). Fotaki et al. 2024: Grand Plié ~134.98° ±4.62°. Kein individueller Sollwert.',
+      source_page: 'Fotaki et al. 2024, DOI: 10.3390/sports12020054, PMID: 38393275'
     };
   }
 
@@ -390,14 +391,17 @@ export class VaganovaAngleCalculator {
     const [heelIdx, toeIdx, ankleIdx] = side === 'L' ? [29, 31, 27] : [30, 32, 28];
 
     const classify = (footAngle: number, conf: number): VaganovaMeasurement => {
-      const reached90 = footAngle >= 40;
+      // P0-b FIX (Berater 2026-08-10): pedagogical_nominal_angle darf KEINE Fehlerfarben erzeugen.
+      // Die 25°/40°-Grenzen sind nicht durch Vaganova oder Studiendaten belegt.
+      // IADMS 2025: 180° ist Linienideal (keine Vorgabe für Individuen).
+      // status: deliberately omitted – scorePolicy muss 'display_only' sein.
       return {
         value: footAngle, unit: 'deg', confidence: conf,
         measurement_class: 'pedagogical_nominal_angle',
         label: `Turnout ${side === 'L' ? 'links' : 'rechts'} (Fußwinkel-Proxy)`,
-        status: reached90 ? 'CORRECT' : footAngle >= 25 ? 'WARNING' : 'ERROR',
-        norm: 'Fußwinkel-Proxy (nicht Hüftaußenrotation!). IADMS 2025: 180° ist Linienideal, kein individuelles Ziel.',
-        source_page: 'IADMS Turnout Resource Paper 2025; Gorwa et al. 2020 PLoS ONE'
+        // status: omitted – pedagogical_nominal_angle = display_only, no threshold scoring
+        norm: 'Fußwinkel-Proxy (nicht Hüftaußenrotation!). Anzeigewert – kein Pass/Fail. IADMS 2025: 180° ist Linienideal.',
+        source_page: 'IADMS Turnout Resource Paper 2025; Gorwa et al. 2020 PLoS ONE DOI 10.1371/journal.pone.0230654'
       };
     };
 
@@ -629,11 +633,14 @@ export class VaganovaAngleCalculator {
       value: elbowAngle,
       unit: 'deg',
       confidence: conf,
-      measurement_class: 'validated_system_threshold',
+      // P0-c FIX (Berater 2026-08-10): measurement_class war 'validated_system_threshold',
+      // aber source_page sagte ausdrücklich 'proxy_unvalidated'. Das ist ein Widerspruch.
+      // Korrekt: 'proxy_unvalidated' – Mocap-Validierung steht aus.
+      measurement_class: 'proxy_unvalidated' as any, // TODO Sprint 1: in MetricEpistemics.validationStatus migrieren
       label: `Arm-Linie ${side === 'L' ? 'links' : 'rechts'} (Port de Bras)`,
       status,
-      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}° = korrekt. Gültig nur bei kalibrierter Frontalaufnahme.`,
-      source_page: 'Vaganova, Основы, 6th ed.; validation_status: proxy_unvalidated'
+      norm: `Vaganova Port de Bras: ${elbowAngleMin}–${elbowAngleMax}° = korrekt. Proxy – Mocap-Validierung ausstehend. Gültig nur bei kalibrierter Frontalaufnahme.`,
+      source_page: 'Vaganova, Основы, 6th ed.; VALIDATION PENDING – candidate_unvalidated_threshold'
     };
   }
 
