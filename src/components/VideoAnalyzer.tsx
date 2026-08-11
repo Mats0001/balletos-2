@@ -433,6 +433,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       framePump.reset(); // Bump generation + stop any running pump
       overlayStabilizer.reset();
       capabilityTierManager.resetSession();
+      // Phase 3: Determine capabilities immediately after reset
+      // Without this, frameClock stays 'unavailable' → all colors blocked → white bones
+      const v = videoRef.current;
+      if (v) {
+        const hasRvfc = typeof (v as any).requestVideoFrameCallback === 'function';
+        capabilityTierManager.determine?.(hasRvfc, false, true);
+      }
       // Clear canvas immediately
       const canvas = canvasRef.current;
       if (canvas) {
