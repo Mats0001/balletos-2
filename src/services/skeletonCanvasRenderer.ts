@@ -148,15 +148,7 @@ function drawGlowRing(
 
   ctx.save();
 
-  // Layer 1: Dark backdrop for contrast on bright backgrounds
-  const bgGrad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, r * 0.85);
-  bgGrad.addColorStop(0,   'rgba(0,0,0,0.25)');
-  bgGrad.addColorStop(0.5, 'rgba(0,0,0,0.12)');
-  bgGrad.addColorStop(1,   'rgba(0,0,0,0)');
-  ctx.beginPath();
-  ctx.arc(pxX, pxY, r * 0.85, 0, Math.PI * 2);
-  ctx.fillStyle = bgGrad;
-  ctx.fill();
+  // Layer 1 (dark backdrop) removed – Focus-Dim vignette provides contrast
 
   // Layer 2: Main colored glow — LARGE and BRIGHT
   const grad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, r);
@@ -667,23 +659,21 @@ export function renderSkeletonToCanvas(
       const pxR = focusR * ((sx + sy) / 2);
       const canvasW = ctx.canvas.width;
       const canvasH = ctx.canvas.height;
+      // Use the longest canvas diagonal to ensure full coverage
+      const maxDist = Math.sqrt(canvasW * canvasW + canvasH * canvasH);
 
       ctx.save();
-      // Dark overlay with circular cutout (even-odd fill rule)
+      // Pure radial gradient vignette – NO hard circle edge
+      // Clear center → gradual darken → dark edges
+      const vigGrad = ctx.createRadialGradient(pxX, pxY, pxR * 0.4, pxX, pxY, maxDist * 0.6);
+      vigGrad.addColorStop(0,    'rgba(0,0,0,0)');       // clear center
+      vigGrad.addColorStop(0.25, 'rgba(0,0,0,0)');       // still clear
+      vigGrad.addColorStop(0.45, 'rgba(0,0,0,0.15)');    // gentle darken
+      vigGrad.addColorStop(0.65, 'rgba(0,0,0,0.35)');    // medium
+      vigGrad.addColorStop(1,    'rgba(0,0,0,0.50)');    // dark edges
       ctx.beginPath();
       ctx.rect(0, 0, canvasW, canvasH);
-      ctx.arc(pxX, pxY, pxR, 0, Math.PI * 2, true);
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-      ctx.fill();
-
-      // Soft edge gradient for smooth transition
-      const edgeGrad = ctx.createRadialGradient(pxX, pxY, pxR * 0.85, pxX, pxY, pxR * 1.3);
-      edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
-      edgeGrad.addColorStop(1, 'rgba(0,0,0,0.25)');
-      ctx.beginPath();
-      ctx.arc(pxX, pxY, pxR * 1.3, 0, Math.PI * 2);
-      ctx.fillStyle = edgeGrad;
+      ctx.fillStyle = vigGrad;
       ctx.fill();
 
       ctx.restore();
@@ -735,17 +725,15 @@ export function renderSkeletonToCanvas(
 
     switch (opts.selectedJointId) {
       case 'left_knee': {
-        drawIdealLine(pelvisL.x, pelvisL.y, pelvisL.x, ankleL.y);
-        const idealKneeLY = pelvisL.y + (ankleL.y - pelvisL.y) * 0.45;
-        drawCircle(ctx, pelvisL.x, idealKneeLY, 13, 'none', sx, sy, IDEAL_COLOR, 3);
-        drawIdealLabel('Ideal', (pelvisL.x + 18) * sx, idealKneeLY * sy + 5);
+        // Korrekte Referenz: Gerade Linie Hüfte → Knöchel
+        // (Knie soll auf dieser Linie liegen = über dem 2./3. Zeh)
+        drawIdealLine(pelvisL.x, pelvisL.y, ankleL.x, ankleL.y);
+        drawIdealLabel('Ideal', (ankleL.x + 18) * sx, ((pelvisL.y + ankleL.y) / 2) * sy);
         break;
       }
       case 'right_knee': {
-        drawIdealLine(pelvisR.x, pelvisR.y, pelvisR.x, ankleR.y);
-        const idealKneeRY = pelvisR.y + (ankleR.y - pelvisR.y) * 0.45;
-        drawCircle(ctx, pelvisR.x, idealKneeRY, 13, 'none', sx, sy, IDEAL_COLOR, 3);
-        drawIdealLabel('Ideal', (pelvisR.x + 18) * sx, idealKneeRY * sy + 5);
+        drawIdealLine(pelvisR.x, pelvisR.y, ankleR.x, ankleR.y);
+        drawIdealLabel('Ideal', (ankleR.x + 18) * sx, ((pelvisR.y + ankleR.y) / 2) * sy);
         break;
       }
       case 'spine_center': {
