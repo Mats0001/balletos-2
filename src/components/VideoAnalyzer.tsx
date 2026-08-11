@@ -2538,10 +2538,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   style={{
                     width: '36px', height: '36px', borderRadius: '8px', border: 'none',
                     cursor: enabled ? 'pointer' : 'not-allowed',
-                    background: 'rgba(255,255,255,0.06)',
-                    color: enabled ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)',
+                    background: enabled ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.06)',
+                    color: enabled ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.35)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    opacity: enabled ? 1 : 0.35,
+                    opacity: enabled ? 1 : 0.6,
                     transition: 'all 0.15s ease',
                   }}
                 >{icon}</button>
