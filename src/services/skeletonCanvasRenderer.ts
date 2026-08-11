@@ -48,6 +48,8 @@ export interface CanvasRenderOptions {
   glowType?: 'GOOD' | 'CORRECTION';
   /** Show ideal position overlay (green dashed guide) for selected joint */
   showIdealOverlay?: boolean;
+  /** Dim everything except the focused joint area (spotlight effect) */
+  showFocusDim?: boolean;
   isPlie: boolean;
   /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -629,6 +631,64 @@ export function renderSkeletonToCanvas(
   // FIX 2026-08-11: WeightDist-Status wird nicht mehr direkt gerendet
   // CoG-Packet (projected_torso_center_proxy) kommt aus overlayPacket.cog (bereits oben gerendert)
   // Dieser separate WeightDist-Dot wurde entfernt – Doppeldarstellung vermieden
+
+  // ─── FOCUS-DIM: Umgebung abdunkeln, Fokus-Bereich klar ───
+  // Legt eine halbtransparente dunkle Schicht über das gesamte Bild
+  // mit einem kreisförmigen "Fenster" um das selektierte Gelenk.
+  if (opts.showFocusDim && opts.selectedJointId && opts.selectedJointId !== '') {
+    let focusX: number | undefined;
+    let focusY: number | undefined;
+    let focusR = 80;
+
+    switch (opts.selectedJointId) {
+      case 'left_knee':   focusX = kneeL.x; focusY = kneeL.y; focusR = 90; break;
+      case 'right_knee':  focusX = kneeR.x; focusY = kneeR.y; focusR = 90; break;
+      case 'left_elbow':  focusX = elbowL.x; focusY = elbowL.y; focusR = 75; break;
+      case 'spine_center': focusX = sternum.x; focusY = sternum.y; focusR = 100; break;
+      case 'pelvis_core':  focusX = pelvisCenter.x; focusY = pelvisCenter.y; focusR = 95; break;
+      case 'shoulder_line': {
+        focusX = (shoulderL.x + shoulderR.x) / 2;
+        focusY = (shoulderL.y + shoulderR.y) / 2;
+        focusR = 120;
+        break;
+      }
+      case 'head_epaulement': focusX = head.x; focusY = head.y; focusR = 70; break;
+      case 'port_de_bras_arms': {
+        focusX = (elbowL.x + elbowR.x) / 2;
+        focusY = (elbowL.y + elbowR.y) / 2;
+        focusR = 160;
+        break;
+      }
+    }
+
+    if (focusX !== undefined && focusY !== undefined) {
+      const pxX = focusX * sx;
+      const pxY = focusY * sy;
+      const pxR = focusR * ((sx + sy) / 2);
+      const canvasW = ctx.canvas.width;
+      const canvasH = ctx.canvas.height;
+
+      ctx.save();
+      // Dark overlay with circular cutout (even-odd fill rule)
+      ctx.beginPath();
+      ctx.rect(0, 0, canvasW, canvasH);
+      ctx.arc(pxX, pxY, pxR, 0, Math.PI * 2, true);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fill();
+
+      // Soft edge gradient for smooth transition
+      const edgeGrad = ctx.createRadialGradient(pxX, pxY, pxR * 0.85, pxX, pxY, pxR * 1.3);
+      edgeGrad.addColorStop(0, 'rgba(0,0,0,0)');
+      edgeGrad.addColorStop(1, 'rgba(0,0,0,0.25)');
+      ctx.beginPath();
+      ctx.arc(pxX, pxY, pxR * 1.3, 0, Math.PI * 2);
+      ctx.fillStyle = edgeGrad;
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
 
   // ─── IDEAL-OVERLAY: Soll-Position als deutliche grüne Hilfslinie ───
   // Zeigt der Lehrerin/Schülerin, WIE die Position korrekt aussehen sollte.

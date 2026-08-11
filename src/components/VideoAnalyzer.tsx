@@ -65,6 +65,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
   const [showIdealOverlay, setShowIdealOverlay] = useState<boolean>(false);
+  /** Toggle: Dim everything except focused joint (spotlight effect) */
+  const [showFocusDim, setShowFocusDim] = useState<boolean>(true);
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -726,6 +728,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: activeCueGlowTypeRef.current,
                   showIdealOverlay,
+                  showFocusDim: !isPlaying && showFocusDim,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
                   overlayMode: currentMode,
@@ -756,7 +759,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // FIX (Berater 2026-08-11): overlayMode removed from deps.
   // Mode is read via overlayModeRef inside the loop → no effect restart on mode switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, showIdealOverlay]);
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, showIdealOverlay, showFocusDim]);
 
   // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
   useEffect(() => {
@@ -866,6 +869,26 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       setSelectedFrameTime(cue.timecodeStr);
       setSelectedJointId(cue.jointFocusId);
       activeCueGlowTypeRef.current = cue.status === 'GOOD' ? 'GOOD' : 'CORRECTION';
+
+      // ── AUTO-ZOOM: Zoom zum relevanten Gelenk ──
+      const jointPositions: Record<string, { y: number }> = {
+        'head_epaulement': { y: 0.15 },
+        'shoulder_line':   { y: 0.25 },
+        'spine_center':    { y: 0.35 },
+        'port_de_bras_arms': { y: 0.30 },
+        'left_elbow':      { y: 0.30 },
+        'pelvis_core':     { y: 0.45 },
+        'left_knee':       { y: 0.65 },
+        'right_knee':      { y: 0.65 },
+      };
+      const jPos = jointPositions[cue.jointFocusId];
+      if (jPos) {
+        const autoZoom = 1.8;
+        const panY = (0.5 - jPos.y) * 100 / autoZoom;
+        setZoomLevel(autoZoom);
+        setPanOffset({ x: 0, y: panY });
+      }
+
       vaganovaKineticAI.reset();
 
       processStaticPausedFrame();
@@ -1857,6 +1880,74 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             <span style={{ fontSize: '13px' }}>◎</span>
             <span>Ideal</span>
           </button>
+
+          {/* Focus-Dim: Umgebung abdunkeln */}
+          <button
+            onClick={() => setShowFocusDim(!showFocusDim)}
+            title="Fokus-Dim: Umgebung abdunkeln, Gelenk hervorheben"
+            style={{
+              background: showFocusDim ? 'rgba(147,130,220,0.15)' : 'transparent',
+              color: showFocusDim ? '#9382dc' : 'rgba(255,255,255,0.45)',
+              border: showFocusDim ? '1px solid rgba(147,130,220,0.3)' : '1px solid transparent',
+              padding: '5px 11px',
+              borderRadius: '9px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span style={{ fontSize: '13px' }}>◐</span>
+            <span>Fokus</span>
+          </button>
+        </div>
+
+        {/* Zoom Slider */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          padding: '4px 12px',
+          background: 'rgba(0,0,0,0.3)',
+          borderRadius: '12px',
+        }}>
+          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>🔍</span>
+          <input
+            type="range"
+            min="1"
+            max="4"
+            step="0.1"
+            value={zoomLevel}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setZoomLevel(val);
+              if (val === 1) setPanOffset({ x: 0, y: 0 });
+            }}
+            style={{
+              width: '90px',
+              height: '4px',
+              accentColor: '#a78bfa',
+              cursor: 'pointer',
+            }}
+          />
+          <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontWeight: 700, minWidth: '30px' }}>
+            {zoomLevel.toFixed(1)}x
+          </span>
+          {zoomLevel > 1 && (
+            <button
+              onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+              style={{
+                background: 'rgba(255,255,255,0.1)',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '2px 8px',
+                fontSize: '9px',
+                color: 'rgba(255,255,255,0.7)',
+                cursor: 'pointer',
+              }}
+            >
+              Reset
+            </button>
+          )}
         </div>
 
         {/* Rechts: View Controls – Chip-Gruppe */}
