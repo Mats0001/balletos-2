@@ -45,6 +45,21 @@ export interface PosePacket {
 
   /** Average landmark visibility (0–1), for quick quality check */
   avgVisibility: number;
+
+  /** Where this packet originated */
+  source: 'live_inference' | 'frame_cache' | 'pause_reprocess';
+
+  /** FramePump generation at capture time */
+  generation: number;
+
+  /** Video URL or camera ID */
+  sourceId: string;
+
+  /** Video width in pixels (must be > 1, fail-closed) */
+  videoWidth: number;
+
+  /** Video height in pixels (must be > 1, fail-closed) */
+  videoHeight: number;
 }
 
 /** Maximum age difference (in µs) between a packet's mediaTimeUs and the current
@@ -56,7 +71,12 @@ export const FRAME_TOLERANCE_US = 33_333;
 export function makeNoPosePacket(
   streamEpoch: number,
   frameSeq: number,
-  mediaTimeUs: number
+  mediaTimeUs: number,
+  source: 'live_inference' | 'frame_cache' | 'pause_reprocess' = 'live_inference',
+  generation: number = 0,
+  sourceId: string = '',
+  videoWidth: number = 0,
+  videoHeight: number = 0,
 ): PosePacket {
   return {
     streamEpoch,
@@ -67,6 +87,11 @@ export function makeNoPosePacket(
     resultKind: 'no_pose',
     landmarks: [],
     avgVisibility: 0,
+    source,
+    generation,
+    sourceId,
+    videoWidth,
+    videoHeight,
   };
 }
 

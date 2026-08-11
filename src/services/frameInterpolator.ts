@@ -13,7 +13,8 @@ export const MAX_INTERPOLATION_GAP_MS = 200;
 
 export interface FrameEntry {
   timeMs: number;
-  landmarks: PoseLandmark[];
+  resultKind?: 'pose' | 'no_pose';
+  landmarks: PoseLandmark[] | null;
   worldLandmarks?: PoseLandmark[];
 }
 
@@ -25,7 +26,8 @@ export interface FrameEntry {
  * @param t Interpolation factor (0 = a, 1 = b)
  * @returns Interpolated landmarks array
  */
-export function interpolateFrame(a: PoseLandmark[], b: PoseLandmark[], t: number): PoseLandmark[] {
+export function interpolateFrame(a: PoseLandmark[] | null, b: PoseLandmark[] | null, t: number): PoseLandmark[] {
+  if (!a || !b) return [];
   const len = Math.max(a.length, b.length);
   const out = new Array<PoseLandmark>(len);
 
@@ -77,12 +79,20 @@ export function findBracketingFrames(
 ): { before: FrameEntry; after: FrameEntry; t: number } | null {
   if (frames.length === 0) return null;
 
-  if (targetTimeMs <= frames[0].timeMs) {
+  if (targetTimeMs < frames[0].timeMs) {
+    return null;
+  }
+  if (targetTimeMs === frames[0].timeMs) {
+    if (frames[0].resultKind === 'no_pose') return null;
     return { before: frames[0], after: frames[0], t: 0 };
   }
 
   const lastIdx = frames.length - 1;
-  if (targetTimeMs >= frames[lastIdx].timeMs) {
+  if (targetTimeMs > frames[lastIdx].timeMs) {
+    return null;
+  }
+  if (targetTimeMs === frames[lastIdx].timeMs) {
+    if (frames[lastIdx].resultKind === 'no_pose') return null;
     return { before: frames[lastIdx], after: frames[lastIdx], t: 0 };
   }
 
@@ -95,6 +105,7 @@ export function findBracketingFrames(
     const midTime = frames[mid].timeMs;
 
     if (midTime === targetTimeMs) {
+      if (frames[mid].resultKind === 'no_pose') return null;
       return { before: frames[mid], after: frames[mid], t: 0 };
     } else if (midTime < targetTimeMs) {
       low = mid + 1;
@@ -107,6 +118,10 @@ export function findBracketingFrames(
   // and low is the index of the smallest time > targetTimeMs
   const before = frames[high];
   const after = frames[low];
+
+  if (before.resultKind === 'no_pose' || after.resultKind === 'no_pose') {
+    return null;
+  }
 
   const timeDiff = after.timeMs - before.timeMs;
 

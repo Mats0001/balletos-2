@@ -127,7 +127,18 @@ export class FramePump {
   bumpGeneration(): void {
     this._generation++;
     this._frameSeq = 0;
-    console.info(`[FramePump] Generation bumped to ${this._generation} (seek)`);
+    console.info(`[FramePump] Generation bumped to ${this._generation} (seek) - pump continues`);
+    if (this._running) {
+      if (this._useRvfc) this._scheduleRvfc();
+      else this._scheduleRaf();
+    }
+  }
+
+  restartAfterSeek(): void {
+    if (this._running) {
+      if (this._useRvfc) this._scheduleRvfc();
+      else this._scheduleRaf();
+    }
   }
 
   /** Full reset: stop + bump generation (for source-change). */
@@ -148,8 +159,13 @@ export class FramePump {
 
     this._rvfcHandle = vRvfc.requestVideoFrameCallback(
       (now: DOMHighResTimeStamp, metadata: VideoFrameMetadata) => {
-        // Generation gate: discard if generation changed (seek/source-change)
-        if (capturedGen !== this._generation || !this._running) return;
+        // Always re-schedule next frame first (keeps pump alive across generations)
+        if (this._running) {
+          this._scheduleRvfc();
+        }
+
+        // Generation gate: discard result if generation changed (seek/source-change)
+        if (capturedGen !== this._generation) return;
 
         const event: FrameTickEvent = {
           generation: this._generation,
@@ -161,11 +177,6 @@ export class FramePump {
         };
 
         this._callback?.(event);
-
-        // Schedule next frame (only if still running and same generation)
-        if (this._running && this._generation === capturedGen) {
-          this._scheduleRvfc();
-        }
       }
     );
   }
@@ -174,8 +185,13 @@ export class FramePump {
     const capturedGen = this._generation;
 
     this._rafHandle = requestAnimationFrame((now) => {
+      // Always re-schedule next frame first (keeps pump alive across generations)
+      if (this._running) {
+        this._scheduleRaf();
+      }
+
       // Generation gate
-      if (capturedGen !== this._generation || !this._running) return;
+      if (capturedGen !== this._generation) return;
 
       const video = this._video;
       if (!video) return;
@@ -190,11 +206,6 @@ export class FramePump {
       };
 
       this._callback?.(event);
-
-      // Schedule next
-      if (this._running && this._generation === capturedGen) {
-        this._scheduleRaf();
-      }
     });
   }
 }

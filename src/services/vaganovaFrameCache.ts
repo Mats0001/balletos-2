@@ -142,6 +142,7 @@ export class VaganovaFrameCacheService {
         const wasmTimeout = setTimeout(() => {
           // FAIL-CLOSED: Timeout = no_pose → Frame überspringen
           // Kein Carry-Forward mit lastValidLandmarks (Berater 2026-08-11)
+          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
           complete();
         }, 500);
 
@@ -157,14 +158,19 @@ export class VaganovaFrameCacheService {
             });
 
             if (isInRange) {
-              frames.push({ timeMs, landmarks: data.landmarks });
+              frames.push({ timeMs, resultKind: 'pose', landmarks: data.landmarks });
+            } else {
+              frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
             }
             // FAIL-CLOSED: Garbage oder kein Pose → Frame überspringen
             // (kein Carry-Forward, kein Entry für diesen Timestamp)
+          } else {
+            frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
           }
           // FAIL-CLOSED: Kein Landmark-Set → Frame überspringen
           complete();
         }).catch(() => {
+          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
           clearTimeout(wasmTimeout);
           complete();
         });
@@ -227,6 +233,66 @@ export class VaganovaFrameCacheService {
 
     // Interpolate between bracketing frames for sub-frame smoothness
     return interpolateFrame(bracket.before.landmarks, bracket.after.landmarks, bracket.t);
+  }
+
+  /**
+   * Returns true if ANY entry (pose or no_pose) exists near that time.
+   */
+  public hasEntry(videoUrl: string, timeSec: number): boolean {
+    const cached = this.cache.get(videoUrl);
+    if (!cached || cached.frames.length === 0) return false;
+    const targetTimeMs = timeSec * 1000;
+    const frames = cached.frames;
+    
+    // Check if within indexed bounds
+    if (targetTimeMs < frames[0].timeMs || targetTimeMs > frames[frames.length - 1].timeMs) {
+      return false;
+    }
+    
+    // We can also check if there's a frame close enough, 
+    // since we index at discrete intervals.
+    // For now, if it's within bounds, we have some entry.
+    return true;
+  }
+
+  /**
+   * Returns true if the entry near that time is explicitly no_pose.
+   */
+  public isNoPose(videoUrl: string, timeSec: number): boolean {
+    const cached = this.cache.get(videoUrl);
+    if (!cached || cached.frames.length === 0) return false;
+    const targetTimeMs = timeSec * 1000;
+    const frames = cached.frames;
+    
+    if (targetTimeMs < frames[0].timeMs || targetTimeMs > frames[frames.length - 1].timeMs) {
+      return false;
+    }
+
+    // Binary search for the closest frame
+    let low = 0;
+    let high = frames.length - 1;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+
+    while (low <= high) {
+      const mid = (low + high) >>> 1;
+      const diff = Math.abs(frames[mid].timeMs - targetTimeMs);
+      
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = mid;
+      }
+      
+      if (frames[mid].timeMs === targetTimeMs) {
+        break;
+      } else if (frames[mid].timeMs < targetTimeMs) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    
+    return frames[closestIdx].resultKind === 'no_pose';
   }
 
   public hasCache(videoUrl: string): boolean {

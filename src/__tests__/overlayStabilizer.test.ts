@@ -57,10 +57,16 @@ describe('OverlayStabilizer', () => {
     expect(result.spine).toBe('blocked');
   });
 
-  it('strong_attention is applied IMMEDIATELY (safety)', () => {
+  it('strong_attention requires 100ms confirmation (noise filter)', () => {
     stabilizer.stabilize(makePacket({ spine: 'heuristic_match' }), 1);
-    const result = stabilizer.stabilize(makePacket({ spine: 'heuristic_strong_attention' }), 1);
-    expect(result.spine).toBe('heuristic_strong_attention');
+    // First strong_attention signal: NOT yet switched (100ms hold)
+    const result1 = stabilizer.stabilize(makePacket({ spine: 'heuristic_strong_attention' }), 1);
+    expect(result1.spine).toBe('heuristic_match');
+
+    // After 100ms: confirmed
+    mockNow = 1100;
+    const result2 = stabilizer.stabilize(makePacket({ spine: 'heuristic_strong_attention' }), 1);
+    expect(result2.spine).toBe('heuristic_strong_attention');
   });
 
   it('match→attention requires 300ms hold (worsening hysteresis)', () => {

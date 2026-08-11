@@ -6,6 +6,7 @@
 //
 // ARCHITEKTUR-VERTRAG (Berater 2026-08-11):
 //   – 'blocked' entfernt Grün SOFORT (kein Delay)
+//   – strong_attention wird nach 100ms bestätigt
 //   – Verschlechterung (match→attention) nach 300ms Bestätigung
 //   – Verbesserung (attention→match) nach 500ms Bestätigung
 //   – Generation-Wechsel → kompletter Reset
@@ -23,6 +24,8 @@ const WORSEN_HOLD_MS = 300;
 
 /** ms before an improvement transition (attention→match) is confirmed */
 const IMPROVE_HOLD_MS = 500;
+
+const STRONG_ATTENTION_CONFIRM_MS = 100;
 
 /** State fields in TeacherOverlayPacket that should be stabilized */
 const STATE_KEYS: ReadonlyArray<keyof TeacherOverlayPacket> = [
@@ -116,8 +119,7 @@ export class OverlayStabilizer {
 
       // ── INSTANT transitions ─────────────────────────────────────────
       // blocked: SOFORT (safety – Grün muss sofort weg)
-      // strong_attention: SOFORT (safety – Rot nicht verzögern)
-      if (rawState === 'blocked' || rawState === 'heuristic_strong_attention') {
+      if (rawState === 'blocked') {
         region.displayedState = rawState;
         region.pendingState = null;
         (result as any)[key] = rawState;
@@ -125,11 +127,13 @@ export class OverlayStabilizer {
       }
 
       // ── DELAYED transitions ─────────────────────────────────────────
-      const holdMs = isWorsening(region.displayedState, rawState)
-        ? WORSEN_HOLD_MS
-        : isImproving(region.displayedState, rawState)
-          ? IMPROVE_HOLD_MS
-          : 0; // Same severity level → instant
+      const holdMs = rawState === 'heuristic_strong_attention'
+        ? STRONG_ATTENTION_CONFIRM_MS  // Brief confirmation to prevent single-frame noise
+        : isWorsening(region.displayedState, rawState)
+          ? WORSEN_HOLD_MS
+          : isImproving(region.displayedState, rawState)
+            ? IMPROVE_HOLD_MS
+            : 0; // Same severity level → instant
 
       if (holdMs === 0) {
         // Same severity → instant

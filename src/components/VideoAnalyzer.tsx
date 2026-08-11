@@ -23,7 +23,7 @@ import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import { TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { framePump, FrameTickEvent } from '../services/framePump';
 import { overlayStabilizer } from '../services/overlayStabilizer';
-import { capabilityTierManager, CapabilityTierManager } from '../services/capabilityTier';
+import { capabilityTierManager } from '../services/capabilityTier';
 import { makeNoPosePacket } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
@@ -238,6 +238,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     packetMediaTimeUs: number; // Track which packet this analysis belongs to
   } | null>(null);
 
+  // Phase 8: Stabilizer result cache (only update when analysis changes, not at 60fps)
+  const stabilizedOverlayRef = useRef<import('../types/teacherHeuristic').TeacherOverlayPacket | null>(null);
+  const lastStabilizedAnalysisTimeRef = useRef<number>(-1);
+
   // Computed overlay bounds that exactly match the rendered video area
   const [overlayBounds, setOverlayBounds] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(16/9);
@@ -438,14 +442,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     };
     resetPoseState(); // Always reset on effect restart (video change)
 
-    // Seek handler – clears stale skeleton immediately + bumps generation
-    // ARCHITEKTUR-VERTRAG (Berater 2026-08-11):
-    //   – Seek löscht alle alten Pakete und erhöht die Generation
-    //   – Pre-seek in-flight inference wird durch Generation-Check verworfen
-    const handleSeeked = () => {
+    // Seek handlers – PRE-invalidation on 'seeking', reset on 'seeked'
+    // ARCHITEKTUR-VERTRAG (Berater v2, 2026-08-11):
+    //   – 'seeking' (BEFORE decode): bump generation, clear all refs, clear canvas
+    //   – 'seeked'  (AFTER decode): log only (pump continues via generation-gated rVFC/rAF)
+    //   – Invalidation MUSS VOR dem neuen Frame passieren, nicht danach
+    const handleSeeking = () => {
       framePump.bumpGeneration(); // Invalidates all in-flight callbacks
       latestPacketRef.current = null;
       cachedAnalysisRef.current = null;
+      stabilizedOverlayRef.current = null; // Phase 8: cached stabilizer result
       landmarksRef.current = null;
       vaganovaPoseEngine.reset();
       const canvas = canvasRef.current;
@@ -454,6 +460,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
     };
+    const handleSeeked = () => {
+      // After seek completes: pump continues automatically (rVFC/rAF re-schedules)
+      // No action needed – the seeking handler already cleared everything
+      console.debug('[VideoAnalyzer] seeked – pump generation:', framePump.generation);
+    };
+    videoRef.current?.addEventListener('seeking', handleSeeking);
     videoRef.current?.addEventListener('seeked', handleSeeked);
     // ────────────────────────────────────────────────────────────────────────
 
@@ -486,6 +498,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               resultKind: 'pose',
               landmarks: cached,
               avgVisibility: cached.reduce((s, l) => s + (l.visibility ?? 1), 0) / cached.length,
+              // Phase 6: Full provenance (Berater v2)
+              source: 'frame_cache',
+              generation: framePump.generation,
+              sourceId: selectedDevVideoUrl,
+              videoWidth: v.videoWidth || 0,
+              videoHeight: v.videoHeight || 0,
             };
             latestPacketRef.current = packet;
             landmarksRef.current = cached;
@@ -535,6 +553,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   landmarks: lmToUse,
                   worldLandmarks: data.worldLandmarks,
                   avgVisibility: lmToUse.reduce((s, l) => s + (l.visibility ?? 1), 0) / lmToUse.length,
+                  // Phase 6: Full provenance (Berater v2)
+                  source: 'live_inference',
+                  generation: capturedGeneration,
+                  sourceId: selectedDevVideoUrl,
+                  videoWidth: v.videoWidth || 0,
+                  videoHeight: v.videoHeight || 0,
                 };
 
                 // Staleness check: discard if older than what we already have
@@ -562,7 +586,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               } else {
                 // no_pose result – proper provenance tracking (Berater 2026-08-11)
                 latestPacketRef.current = makeNoPosePacket(
-                  capturedEpoch, capturedSeq, capturedMediaTimeUs
+                  capturedEpoch, capturedSeq, capturedMediaTimeUs,
+                  'live_inference', capturedGeneration, selectedDevVideoUrl,
+                  v.videoWidth || 0, v.videoHeight || 0
                 );
                 landmarksRef.current = null;
               }
@@ -581,19 +607,26 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           // The old 'return' broke the renderLoop and stopped requestAnimationFrame.
           let skipDraw = false;
           if (canvas2 && lm && showSkeleton) {
-            // ── Staleness gate ──────────────────────────────────────────────
+            // ── Staleness gate (Phase 4 fix, Berater v2) ────────────────────
+            // FIXES:
+            //   - Math.abs catches backward-seek (future landmarks)
+            //   - No 5s upper cap – everything beyond tolerance is stale
+            //   - Generation check as additional safety net
             const packet = latestPacketRef.current;
             const currentMediaTimeUs = (v.currentTime || 0) * 1_000_000;
-            const TOLERANCE_US = 66_667; // ~2 frames at 30fps tolerance for live inference
+            const TOLERANCE_US = 66_667; // ~2 frames at 30fps tolerance
             if (packet) {
               const ageUs = currentMediaTimeUs - packet.mediaTimeUs;
+              const absAgeUs = Math.abs(ageUs);
               debugHudRef.current.poseAgeMs = ageUs / 1000;
-              if (ageUs > TOLERANCE_US && ageUs < 5_000_000) {
-                // Stale: clear canvas only, continue loop
-                debugHudRef.current.syncErrorMs = ageUs / 1000;
+              // Stale if: beyond tolerance OR generation mismatch
+              const isStale = absAgeUs > TOLERANCE_US
+                || ('generation' in packet && (packet as any).generation !== framePump.generation);
+              if (isStale) {
+                debugHudRef.current.syncErrorMs = absAgeUs / 1000;
                 const ctx2 = canvas2.getContext('2d');
                 if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
-                skipDraw = true; // Skip draw this frame, but DO NOT return
+                skipDraw = true;
               } else {
                 debugHudRef.current.syncErrorMs = 0;
               }
@@ -639,26 +672,38 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Canvas draw always runs at 60fps using cached analysis
               const c = cachedAnalysisRef.current;
               if (c) {
-                // Compute TeacherOverlayPacket from fresh analysis
-                // (Engine is stateless — no re-render triggered)
                 // Read mode from ref (not state) to avoid effect restart on mode switch
                 const currentMode = overlayModeRef.current;
-                let overlayPacket: TeacherOverlayPacket | undefined;
+
+                // ── Phase 8: Stabilizer only on NEW analysis frames ──────────
+                // The stabilizer was being called at 60fps but analysis only
+                // updates at ~15fps. Same analysis feeding the hysteresis timer
+                // multiple times caused incorrect timing. Now we only call
+                // stabilize() when the underlying analysis actually changed.
+                let overlayPacket: TeacherOverlayPacket | undefined = stabilizedOverlayRef.current ?? undefined;
                 if (currentMode === 'lehrer-ampel') {
-                  const tier = capabilityTierManager.getTier();
-                  if (CapabilityTierManager.canOutputColors(tier)) {
-                    const rawPacket = teacherHeuristicEngine.compute(
-                      c.vagAn,
-                      c.sk,
-                      v.currentTime,
-                      streamEpochRef.current,
-                    );
-                    // Stabilize: hysteresis + blocked→sofort
-                    overlayPacket = overlayStabilizer.stabilize(
-                      rawPacket, framePump.generation
-                    );
+                  const analysisChanged = c.packetMediaTimeUs !== lastStabilizedAnalysisTimeRef.current;
+                  if (analysisChanged) {
+                    const cap = capabilityTierManager;
+                    const clockCap = cap?.frameClock ?? cap?.getTier?.() ?? 'A';
+                    const canColor = typeof clockCap === 'string' && clockCap !== 'unavailable' && clockCap !== 'C';
+                    if (canColor) {
+                      const rawPacket = teacherHeuristicEngine.compute(
+                        c.vagAn,
+                        c.sk,
+                        v.currentTime,
+                        streamEpochRef.current,
+                      );
+                      overlayPacket = overlayStabilizer.stabilize(
+                        rawPacket, framePump.generation
+                      );
+                    } else {
+                      overlayPacket = undefined;
+                    }
+                    stabilizedOverlayRef.current = overlayPacket ?? null;
+                    lastStabilizedAnalysisTimeRef.current = c.packetMediaTimeUs;
                   }
-                  // Tier C: no colors → overlayPacket stays undefined → renderer uses NEUTRAL
+                  // Between analysis updates: reuse cached stabilized result
                 }
 
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
@@ -691,6 +736,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     return () => {
       isActive = false;
       if (animId) cancelAnimationFrame(animId);
+      videoRef.current?.removeEventListener('seeking', handleSeeking);
       videoRef.current?.removeEventListener('seeked', handleSeeked);
     };
   // FIX (Berater 2026-08-11): overlayMode removed from deps.
@@ -786,6 +832,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Slow-Mo playback is only triggered via the explicit 'Slow-Mo Sequenz' button.
   const handleSeekToCuePoint = (cue: VaganovaCuePoint) => {
     if (videoRef.current) {
+      // Phase 2 (Berater v2): Pre-invalidate BEFORE setting currentTime
+      // This ensures no stale in-flight inference can contaminate the new frame
+      framePump.bumpGeneration();
+      latestPacketRef.current = null;
+      cachedAnalysisRef.current = null;
+      stabilizedOverlayRef.current = null;
+
       videoRef.current.currentTime = cue.timeSeconds;
       if (refVideoRef.current) refVideoRef.current.currentTime = cue.timeSeconds;
 
@@ -1353,10 +1406,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // AUTOMATIC MOTION & PERSPECTIVE KI-CLASSIFIER
   const motionClass: MotionClassificationResult = vaganovaMotionClassifier.classify(detectedLandmarks);
 
+  // Phase 5 (Berater v2): Geometry FAIL-CLOSED
+  // If video dimensions are unavailable or too small, skip all geometry-dependent analysis.
+  // Previously fell back to 1×1 which produced invalid measurements.
+  const videoEl = videoRef.current;
+  const geometryValid = videoEl && videoEl.videoWidth > 1 && videoEl.videoHeight > 1;
+  const vw = geometryValid ? videoEl.videoWidth : 0;
+  const vh = geometryValid ? videoEl.videoHeight : 0;
+
   // 🦴 RECONSTRUCT 3D FORWARD KINEMATICS & TEMPORAL SKELETON
-  const vw = videoRef.current?.videoWidth || 1000;
-  const vh = videoRef.current?.videoHeight || 1000;
-  const sk: ReconstructedSkeleton = vaganova3DKinematics.solve(detectedLandmarks, detectedWorldLandmarks, vw, vh);
+  // Skeleton solver uses 1000 as fallback for display-only purposes (no measurement accuracy needed)
+  const vwSk = geometryValid ? videoEl!.videoWidth : 1000;
+  const vhSk = geometryValid ? videoEl!.videoHeight : 1000;
+  const sk: ReconstructedSkeleton = vaganova3DKinematics.solve(detectedLandmarks, detectedWorldLandmarks, vwSk, vhSk);
 
   // Update Kinetic AI Trajectory & Center of Gravity
   const currentVidTime = videoRef.current ? videoRef.current.currentTime : 0;
@@ -1366,11 +1428,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Generate Vaganova Curriculum & Homework Report
   const curriculumReport: VaganovaCurriculumReport = vaganovaCurriculumEngine.generatePlan(6, motionClass.detectedPoseName, 14);
 
-  // 📐 REAL-TIME VAGANOVA ANGLE ANALYSIS (replaces hardcoded values)
-  // P0 FIX: Pass video dimensions for aspect-ratio-correct angle calculation
-  const videoEl = videoRef.current;
-  const vaganovaAnalysis = detectedLandmarks && videoEl
-    ? vaganovaAngleCalculator.analyzeFullFrame(detectedLandmarks, videoEl.videoWidth || 1, videoEl.videoHeight || 1)
+  // 📐 REAL-TIME VAGANOVA ANGLE ANALYSIS
+  const vaganovaAnalysis = detectedLandmarks && geometryValid
+    ? vaganovaAngleCalculator.analyzeFullFrame(detectedLandmarks, vw, vh)
     : null;
 
   // 🔔 Notify parent (App.tsx) with latest analysis for RightInspectorPanel
@@ -1417,8 +1477,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     detectedLandmarks,
     selectedJointId,
     false, // P0-FIX (Berater 2026-08-10): teacherConfirmed NIEMALS hart als true – immer false bis explizite Bestätigung
-    videoEl?.videoWidth || 1,
-    videoEl?.videoHeight || 1
+    geometryValid ? vw : 1, // Phase 5: geometry guard – evidence engine has its own safety gate
+    geometryValid ? vh : 1
   );
 
   // Derive finding severity from the evidence ledger (Fix D, 2026-08-11)

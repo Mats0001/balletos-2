@@ -1,92 +1,112 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// CapabilityTier Tests
+// CapabilityManager Tests (v2 – Berater 2026-08-11)
 //
-// Berater-Abnahme Kriterien 4 + 5:
-//   – Tier B heißt niemals 'valid'
-//   – Tier C kann niemals Farben durchreichen
-//   – Tier ist session-stabil (kein Frame-Flicker)
+// Separated capabilities:
+//   – FrameClockCapability: timing source accuracy
+//   – PoseCapability: pose data quality
+//
+// Berater-Abnahme Kriterien:
+//   – frameClock='unavailable' → ALL colors blocked (fail-closed)
+//   – frameClock='approximate_media_clock' → colors allowed, show ⚠️
+//   – pose='projected_2d' → angles max 'provisional'
+//   – Capabilities are session-stable (lock once, reset on source change)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CapabilityTierManager } from '../services/capabilityTier';
+import { CapabilityManager } from '../services/capabilityTier';
 
-describe('CapabilityTierManager', () => {
-  let mgr: CapabilityTierManager;
+describe('CapabilityManager', () => {
+  let mgr: CapabilityManager;
 
   beforeEach(() => {
-    mgr = new CapabilityTierManager();
+    mgr = new CapabilityManager();
   });
 
-  it('defaults to Tier A before determination', () => {
-    expect(mgr.getTier()).toBe('A');
-    expect(mgr.isTierLocked()).toBe(false);
+  // ── INITIALIZATION ──────────────────────────────────────────────────────
+
+  it('defaults to unavailable/projected_2d before determination', () => {
+    expect(mgr.frameClock).toBe('unavailable');
+    expect(mgr.pose).toBe('projected_2d');
+    expect(mgr.isLocked).toBe(false);
   });
 
-  it('determines Tier A when no world landmarks', () => {
-    const tier = mgr.determineTier(false, 30);
-    expect(tier).toBe('A');
-    expect(mgr.isTierLocked()).toBe(true);
+  // ── FRAME CLOCK CAPABILITY ─────────────────────────────────────────────
+
+  it('determines presented_frame_pts when rVFC available', () => {
+    mgr.determine(true, false, true);
+    expect(mgr.frameClock).toBe('presented_frame_pts');
+    expect(mgr.isLocked).toBe(true);
   });
 
-  it('determines Tier B when world landmarks + sufficient FPS', () => {
-    const tier = mgr.determineTier(true, 30);
-    expect(tier).toBe('B');
+  it('determines approximate_media_clock when rVFC not available', () => {
+    mgr.determine(false, false, true);
+    expect(mgr.frameClock).toBe('approximate_media_clock');
   });
 
-  it('stays Tier A when world landmarks but insufficient FPS', () => {
-    const tier = mgr.determineTier(true, 15);
-    expect(tier).toBe('A');
+  it('determines unavailable when no video element', () => {
+    mgr.determine(false, false, false);
+    expect(mgr.frameClock).toBe('unavailable');
   });
 
-  it('tier is session-stable – re-determination is ignored', () => {
-    mgr.determineTier(false, 30); // A
-    const tier2 = mgr.determineTier(true, 60); // Would be B, but locked
-    expect(tier2).toBe('A'); // Still A
+  // ── POSE CAPABILITY ────────────────────────────────────────────────────
+
+  it('determines world_proxy when world landmarks available', () => {
+    mgr.determine(true, true, true);
+    expect(mgr.pose).toBe('world_proxy');
+  });
+
+  it('determines projected_2d when no world landmarks', () => {
+    mgr.determine(true, false, true);
+    expect(mgr.pose).toBe('projected_2d');
+  });
+
+  // ── SESSION STABILITY ──────────────────────────────────────────────────
+
+  it('capabilities are session-stable – re-determination is ignored', () => {
+    mgr.determine(false, false, true); // approximate
+    const caps = mgr.determine(true, true, true); // would be presented+world
+    expect(caps.frameClock).toBe('approximate_media_clock'); // Still old
+    expect(caps.pose).toBe('projected_2d'); // Still old
   });
 
   it('resetSession allows re-determination', () => {
-    mgr.determineTier(false, 30); // A
+    mgr.determine(false, false, true);
     mgr.resetSession();
-    const tier2 = mgr.determineTier(true, 30); // Now B
-    expect(tier2).toBe('B');
+    mgr.determine(true, true, true);
+    expect(mgr.frameClock).toBe('presented_frame_pts');
+    expect(mgr.pose).toBe('world_proxy');
   });
 
-  // ── BERATER KRITERIUM 4: Tier B heißt niemals valid ──────────────────
+  // ── GATING: FAIL-CLOSED ────────────────────────────────────────────────
 
-  it('Tier B max status is provisional, never valid', () => {
-    expect(CapabilityTierManager.getMaxStatus('B')).toBe('provisional');
+  it('unavailable frameClock blocks all colors (fail-closed)', () => {
+    expect(CapabilityManager.canOutputColors('unavailable')).toBe(false);
   });
 
-  it('assertTierBNeverValid throws in dev when Tier B outputs valid', () => {
-    mgr.determineTier(true, 30); // Tier B
-    expect(() => mgr.assertTierBNeverValid('valid')).toThrow();
+  it('presented_frame_pts allows colors', () => {
+    expect(CapabilityManager.canOutputColors('presented_frame_pts')).toBe(true);
   });
 
-  it('assertTierBNeverValid does NOT throw for provisional', () => {
-    mgr.determineTier(true, 30); // Tier B
-    expect(() => mgr.assertTierBNeverValid('provisional')).not.toThrow();
+  it('approximate_media_clock allows colors', () => {
+    expect(CapabilityManager.canOutputColors('approximate_media_clock')).toBe(true);
   });
 
-  it('assertTierBNeverValid does NOT throw for Tier A with valid', () => {
-    mgr.determineTier(false, 30); // Tier A
-    expect(() => mgr.assertTierBNeverValid('valid')).not.toThrow();
+  it('approximate_media_clock is flagged as approximate', () => {
+    expect(CapabilityManager.isApproximate('approximate_media_clock')).toBe(true);
+    expect(CapabilityManager.isApproximate('presented_frame_pts')).toBe(false);
   });
 
-  // ── BERATER KRITERIUM 5: Tier C kann keine Farben durchreichen ───────
+  // ── POSE STATUS LIMITS ─────────────────────────────────────────────────
 
-  it('Tier C cannot output colors', () => {
-    expect(CapabilityTierManager.canOutputColors('C')).toBe(false);
+  it('projected_2d maxes at provisional', () => {
+    expect(CapabilityManager.getMaxPoseStatus('projected_2d')).toBe('provisional');
   });
 
-  it('Tier C max status is blocked', () => {
-    expect(CapabilityTierManager.getMaxStatus('C')).toBe('blocked');
+  it('world_proxy maxes at provisional', () => {
+    expect(CapabilityManager.getMaxPoseStatus('world_proxy')).toBe('provisional');
   });
 
-  it('Tier A can output colors', () => {
-    expect(CapabilityTierManager.canOutputColors('A')).toBe(true);
-  });
-
-  it('Tier B can output colors (but only provisional)', () => {
-    expect(CapabilityTierManager.canOutputColors('B')).toBe(true);
+  it('calibrated_multiview_3d can be valid', () => {
+    expect(CapabilityManager.getMaxPoseStatus('calibrated_multiview_3d')).toBe('valid');
   });
 });
