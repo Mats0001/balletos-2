@@ -1046,9 +1046,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         11: 'shoulder_line',
         12: 'shoulder_line',
         13: 'left_elbow',
-        14: 'port_de_bras_arms',  // right elbow → show both arms
-        15: 'left_elbow',         // left wrist → arm context
-        16: 'port_de_bras_arms',  // right wrist → both arms
+        14: 'right_elbow',        // right elbow → right arm ideal
+        15: 'left_elbow',         // left wrist → left arm context
+        16: 'right_elbow',        // right wrist → right arm context
         23: 'pelvis_core',
         24: 'pelvis_core',
         25: 'left_knee',
@@ -1073,6 +1073,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             'left_knee':       'legL',
             'right_knee':      'legR',
             'left_elbow':      'armL',
+            'right_elbow':     'armR',
             'port_de_bras_arms': 'armL',
             'head_epaulement': 'torsoAlignment',
             'spine_center':    'spine',

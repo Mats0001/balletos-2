@@ -816,23 +816,43 @@ export function renderSkeletonToCanvas(
         drawIdealLabel('Schulter-Waage', (shoulderR.x + 30) * sx, shCenterY * sy + 5);
         break;
       }
-      case 'left_elbow':
-      case 'port_de_bras_arms': {
-        // ALLONGÉ-BOGEN: Proportionaler Offset statt hardcodierter 8px
+      case 'left_elbow': {
+        // ALLONGÉ-BOGEN links: Proportionaler Offset
         const armLenL = Math.abs(wristL.y - shoulderL.y);
         const idealElbowLY = shoulderL.y + armLenL * 0.08;
         const idealElbowLX = (shoulderL.x + wristL.x) / 2;
         drawIdealLine(shoulderL.x, shoulderL.y, idealElbowLX, idealElbowLY);
         drawIdealLine(idealElbowLX, idealElbowLY, wristL.x, wristL.y);
         drawCircle(ctx, idealElbowLX, idealElbowLY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
-        if (opts.selectedJointId === 'port_de_bras_arms') {
-          const armLenR = Math.abs(wristR.y - shoulderR.y);
-          const idealElbowRY = shoulderR.y + armLenR * 0.08;
-          const idealElbowRX = (shoulderR.x + wristR.x) / 2;
-          drawIdealLine(shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY);
-          drawIdealLine(idealElbowRX, idealElbowRY, wristR.x, wristR.y);
-          drawCircle(ctx, idealElbowRX, idealElbowRY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
-        }
+        drawIdealLabel('Arm-Bogen L', (idealElbowLX + 18) * sx, idealElbowLY * sy);
+        break;
+      }
+      case 'right_elbow': {
+        // ALLONGÉ-BOGEN rechts: Proportionaler Offset
+        const armLenR = Math.abs(wristR.y - shoulderR.y);
+        const idealElbowRY = shoulderR.y + armLenR * 0.08;
+        const idealElbowRX = (shoulderR.x + wristR.x) / 2;
+        drawIdealLine(shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY);
+        drawIdealLine(idealElbowRX, idealElbowRY, wristR.x, wristR.y);
+        drawCircle(ctx, idealElbowRX, idealElbowRY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
+        drawIdealLabel('Arm-Bogen R', (idealElbowRX + 18) * sx, idealElbowRY * sy);
+        break;
+      }
+      case 'port_de_bras_arms': {
+        // BEIDE ARME: Nur bei explizitem Port de Bras Fokus
+        const armLL = Math.abs(wristL.y - shoulderL.y);
+        const eLY = shoulderL.y + armLL * 0.08;
+        const eLX = (shoulderL.x + wristL.x) / 2;
+        drawIdealLine(shoulderL.x, shoulderL.y, eLX, eLY);
+        drawIdealLine(eLX, eLY, wristL.x, wristL.y);
+        drawCircle(ctx, eLX, eLY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
+        const armRL = Math.abs(wristR.y - shoulderR.y);
+        const eRY = shoulderR.y + armRL * 0.08;
+        const eRX = (shoulderR.x + wristR.x) / 2;
+        drawIdealLine(shoulderR.x, shoulderR.y, eRX, eRY);
+        drawIdealLine(eRX, eRY, wristR.x, wristR.y);
+        drawCircle(ctx, eRX, eRY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
+        drawIdealLabel('Port de Bras', (eRX + 18) * sx, eRY * sy);
         break;
       }
       case 'head_epaulement': {
