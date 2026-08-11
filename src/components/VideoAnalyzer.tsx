@@ -892,6 +892,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setPanOffset({ x: 0, y: panY });
       }
 
+      // Auto-enable visual overlays for full premium experience
+      setShowIdealOverlay(true);
+      if (!showFocusDim) setShowFocusDim(true);
+
       vaganovaKineticAI.reset();
 
       processStaticPausedFrame();
@@ -1024,6 +1028,79 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (videoRef.current && !videoRef.current.paused) {
         videoRef.current.pause();
         setIsPlaying(false);
+      }
+
+      // ── VISUAL ENHANCEMENT: Glow + FocusDim + Ideal + AutoZoom ──
+      // Map landmark index → selectedJointId for renderer effects
+      const LANDMARK_TO_JOINT_ID: Record<number, string> = {
+        0:  'head_epaulement',
+        11: 'shoulder_line',
+        12: 'shoulder_line',
+        13: 'left_elbow',
+        14: 'port_de_bras_arms',  // right elbow → show both arms
+        15: 'left_elbow',         // left wrist → arm context
+        16: 'port_de_bras_arms',  // right wrist → both arms
+        23: 'pelvis_core',
+        24: 'pelvis_core',
+        25: 'left_knee',
+        26: 'right_knee',
+        27: 'left_knee',          // left ankle → leg context
+        28: 'right_knee',         // right ankle → leg context
+        29: 'left_knee',          // left heel → leg context
+        30: 'right_knee',         // right heel → leg context
+        31: 'left_knee',          // left toe → leg context
+        32: 'right_knee',         // right toe → leg context
+      };
+
+      const mappedJointId = LANDMARK_TO_JOINT_ID[nearestIdx];
+      if (mappedJointId) {
+        setSelectedJointId(mappedJointId);
+
+        // Determine glow type from current overlay packet state
+        const pkt = stabilizedOverlayRef.current;
+        if (pkt) {
+          // Map jointId → overlay packet key
+          const JOINT_TO_PKT_KEY: Record<string, keyof import('../types/teacherHeuristic').TeacherOverlayPacket> = {
+            'left_knee':       'legL',
+            'right_knee':      'legR',
+            'left_elbow':      'armL',
+            'port_de_bras_arms': 'armL',
+            'head_epaulement': 'torsoAlignment',
+            'spine_center':    'spine',
+            'pelvis_core':     'pelvis',
+            'shoulder_line':   'shoulder',
+          };
+          const pktKey = JOINT_TO_PKT_KEY[mappedJointId];
+          const state = pktKey ? pkt[pktKey] : undefined;
+          activeCueGlowTypeRef.current =
+            (state === 'heuristic_match') ? 'GOOD' : 'CORRECTION';
+        } else {
+          // No overlay data → neutral correction glow
+          activeCueGlowTypeRef.current = 'CORRECTION';
+        }
+
+        // Auto-zoom to the clicked joint region
+        const JOINT_Y_POSITIONS: Record<string, number> = {
+          'head_epaulement':  0.15,
+          'shoulder_line':    0.25,
+          'spine_center':     0.35,
+          'port_de_bras_arms': 0.30,
+          'left_elbow':       0.30,
+          'pelvis_core':      0.45,
+          'left_knee':        0.65,
+          'right_knee':       0.65,
+        };
+        const jY = JOINT_Y_POSITIONS[mappedJointId];
+        if (jY !== undefined) {
+          const autoZoom = 1.8;
+          const panY = (0.5 - jY) * 100 / autoZoom;
+          setZoomLevel(autoZoom);
+          setPanOffset({ x: 0, y: panY });
+        }
+
+        // Auto-enable visual overlays for full premium experience
+        setShowIdealOverlay(true);
+        if (!showFocusDim) setShowFocusDim(true);
       }
     } else {
       setJointPopover(null);
