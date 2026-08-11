@@ -168,14 +168,18 @@ function computeLeg(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristic
     const kv = Math.abs(knee.value);
     // Gerades Standbein ≥ 165° oder Plié-Bereich 60–145°
     if (kv >= 165 || (kv >= 60 && kv <= 145)) score = Math.max(score, 1) as 0|1|2|3;
-    else if (kv < 40) score = Math.max(score, 2) as 0|1|2|3;
+    // Nur bei extremer Überbeugung (<30°) wird es kritisch
+    else if (kv < 30) score = Math.max(score, 2) as 0|1|2|3;
   }
 
   if (vEligible && valgus) {
     const dv = Math.abs(valgus.value);
-    if (dv < 5)       score = Math.max(score, 1) as 0|1|2|3;
-    else if (dv < 10) score = Math.max(score, 2) as 0|1|2|3;
-    else              score = Math.max(score, 3) as 0|1|2|3;
+    // FIX 2026-08-11: Schwellen erhöht – 2D-Projektion verzerrt Valgus in Plié
+    // Besonders bei seitlicher Kamera kann ein korrekt ausgerichtetes Knie
+    // 10-12° projizierte Drift zeigen → war permanent rot
+    if (dv < 8)       score = Math.max(score, 1) as 0|1|2|3;   // war 5°
+    else if (dv < 15) score = Math.max(score, 2) as 0|1|2|3;   // war 10°
+    else              score = Math.max(score, 3) as 0|1|2|3;    // war 10°
   }
 
   return scoreToState(score);
