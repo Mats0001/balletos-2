@@ -2321,7 +2321,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   {isExpanded && (
                     <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
 
-                  <div style={{ fontSize: '11px', fontWeight: 400, color: cueColor(cue.status), opacity: 0.65, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 400, color: cueColor(cue.status), opacity: 0.88, display: 'flex', alignItems: 'center', gap: '5px' }}>
                     {cue.status === 'CORRECTION' ? <AlertTriangle size={10} color={COLOR_BAD} opacity={0.6} />
                      : cue.status === 'WARNING' ? <AlertTriangle size={10} color={COLOR_WARN} opacity={0.6} />
                      : <CheckCircle size={10} color={COLOR_GOOD} opacity={0.6} />}
