@@ -2192,11 +2192,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transition: isDraggingRef.current ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
               cursor: zoomLevel > 1 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
             }}
-              onClick={!isPlaying ? handleSkeletonClick : undefined}
+              onClick={(e) => {
+                // Suppress click if the user was dragging (moved > 5px)
+                if (zoomLevel > 1) {
+                  const dx = Math.abs(e.clientX - dragStartRef.current.x);
+                  const dy = Math.abs(e.clientY - dragStartRef.current.y);
+                  if (dx > 5 || dy > 5) return;
+                }
+                if (!isPlaying) handleSkeletonClick(e);
+              }}
               onMouseDown={(e) => {
+                // Always record start position (for click-vs-drag detection)
+                dragStartRef.current = { x: e.clientX, y: e.clientY, panX: panOffset.x, panY: panOffset.y };
                 if (zoomLevel <= 1) return;
                 isDraggingRef.current = true;
-                dragStartRef.current = { x: e.clientX, y: e.clientY, panX: panOffset.x, panY: panOffset.y };
                 e.preventDefault();
               }}
               onMouseMove={(e) => {

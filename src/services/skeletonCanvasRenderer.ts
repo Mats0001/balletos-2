@@ -790,9 +790,10 @@ export function renderSkeletonToCanvas(
         break;
       }
       case 'spine_center': {
-        const centerX = (head.x + pelvisCenter.x) / 2;
-        drawIdealLine(centerX, head.y - 15, centerX, pelvisCenter.y + 15);
-        drawIdealLabel('Vertikal', (centerX + 15) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
+        // IDEAL: Perfekt senkrecht vom Becken nach oben
+        // pelvisCenter.x ist der Fixpunkt → Kopf SOLL direkt darüber sein
+        drawIdealLine(pelvisCenter.x, head.y - 15, pelvisCenter.x, pelvisCenter.y + 15);
+        drawIdealLabel('Vertikal', (pelvisCenter.x + 18) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
         break;
       }
       case 'pelvis_core': {
