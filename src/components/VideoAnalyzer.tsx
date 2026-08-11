@@ -979,17 +979,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
     };
 
-    // Bone segments: [fromLandmark, toLandmark, representativeLandmark (for popover), jointFocusOverride?]
-    // representativeLandmark = the joint that is most pedagogically relevant for this bone
+    // Bone segments: [fromLandmark, toLandmark, representativeLandmark, jointFocusOverride?]
+    // representativeLandmark = the joint info shown in popover
     const BONE_SEGMENTS: Array<[number, number, number, string?]> = [
-      [11, 12, 11],  // Schulterleiste → linke Schulter
+      // ── HEAD / NECK ──
+      [0, 11, 0, 'spine_center'],    // Neck-L (head→L-shoulder) → spine
+      [0, 12, 0, 'spine_center'],    // Neck-R (head→R-shoulder) → spine
+      // ── SHOULDERS ──
+      [11, 12, 11],                  // Schulterleiste → linke Schulter
+      // ── ARMS ──
       [11, 13, 13],  // L Oberarm → L Ellbogen
       [13, 15, 15],  // L Unterarm → L Handgelenk
       [12, 14, 14],  // R Oberarm → R Ellbogen
       [14, 16, 16],  // R Unterarm → R Handgelenk
-      [23, 24, 23],  // Beckenleiste → L Hüfte
-      [11, 23, 23, 'spine_center'],  // L Rumpf → L Hüfte
-      [12, 24, 24, 'spine_center'],  // R Rumpf → R Hüfte
+      // ── TORSO / SPINE ──
+      [11, 23, 23, 'spine_center'],  // L Rumpf (Schulter→Hüfte) → Wirbelsäule
+      [12, 24, 24, 'spine_center'],  // R Rumpf (Schulter→Hüfte) → Wirbelsäule
+      // ── PELVIS ──
+      [23, 24, 23],                  // Beckenleiste → L Hüfte
+      // ── LEGS ──
       [23, 25, 25],  // L Oberschenkel → L Knie
       [25, 27, 25],  // L Unterschenkel → L Knie
       [27, 29, 27],  // L Fuß → L Knöchel
@@ -1000,37 +1008,60 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       [30, 32, 32],  // R Zehe → R Zehenspitze
     ];
 
-    // 1️⃣ Joint point hit-test (44px radius)
-    let nearestIdx = -1;
-    let minDist = 44;
+    // ────────────────────────────────────────────────────────────
+    //  HIT-TEST: Joint-Points AND Bone-Segments compete fairly.
+    //  The CLOSEST match wins, regardless of type.
+    //  Joint radius = 22px (visual dot size), Bone tolerance = 16px.
+    // ────────────────────────────────────────────────────────────
+
+    // 1️⃣ Joint point hit-test (22px radius — matches visual dot size)
+    const JOINT_RADIUS = 22;
+    let nearestJointIdx = -1;
+    let jointDist = JOINT_RADIUS;
     lm.forEach((landmark, idx) => {
       if (!CLICKABLE_JOINT_INDICES.has(idx)) return;
       if ((landmark.visibility ?? 1) < 0.3) return;
       const px = landmark.x * bounds.width;
       const py = landmark.y * bounds.height;
       const dist = Math.hypot(px - clickX, py - clickY);
-      if (dist < minDist) { minDist = dist; nearestIdx = idx; }
+      if (dist < jointDist) { jointDist = dist; nearestJointIdx = idx; }
     });
 
+    // 2️⃣ Bone segment hit-test (16px tolerance — matches visual line width)
+    const SEG_TOLERANCE = 16;
+    let nearestBoneIdx = -1;
+    let boneDist = SEG_TOLERANCE;
     let boneJointOverride: string | undefined;
-
-    // 2️⃣ Bone segment hit-test (20px tolerance) – only if no joint was closer
-    if (nearestIdx < 0) {
-      const SEG_TOLERANCE = 20;
-      let bestSegDist = SEG_TOLERANCE;
-      for (const [fromIdx, toIdx, repIdx, overrideId] of BONE_SEGMENTS) {
-        const a = lm[fromIdx]; const b = lm[toIdx];
-        if (!a || !b) continue;
-        if ((a.visibility ?? 1) < 0.3 || (b.visibility ?? 1) < 0.3) continue;
-        const ax = a.x * bounds.width; const ay = a.y * bounds.height;
-        const bx = b.x * bounds.width; const by = b.y * bounds.height;
-        const d = distToSegment(clickX, clickY, ax, ay, bx, by);
-        if (d < bestSegDist && getJointKnowledge(repIdx)) {
-          bestSegDist = d;
-          nearestIdx = repIdx;
-          boneJointOverride = overrideId;
-        }
+    for (const [fromIdx, toIdx, repIdx, overrideId] of BONE_SEGMENTS) {
+      const a = lm[fromIdx]; const b = lm[toIdx];
+      if (!a || !b) continue;
+      if ((a.visibility ?? 1) < 0.3 || (b.visibility ?? 1) < 0.3) continue;
+      const ax = a.x * bounds.width; const ay = a.y * bounds.height;
+      const bx = b.x * bounds.width; const by = b.y * bounds.height;
+      const d = distToSegment(clickX, clickY, ax, ay, bx, by);
+      if (d < boneDist && getJointKnowledge(repIdx)) {
+        boneDist = d;
+        nearestBoneIdx = repIdx;
+        boneJointOverride = overrideId;
       }
+    }
+
+    // 3️⃣ Pick the CLOSEST match (joint or bone)
+    let nearestIdx = -1;
+    if (nearestJointIdx >= 0 && nearestBoneIdx >= 0) {
+      // Both matched — closest wins
+      if (jointDist <= boneDist) {
+        nearestIdx = nearestJointIdx;
+        boneJointOverride = undefined; // joint won → no bone override
+      } else {
+        nearestIdx = nearestBoneIdx;
+        // boneJointOverride already set
+      }
+    } else if (nearestJointIdx >= 0) {
+      nearestIdx = nearestJointIdx;
+      boneJointOverride = undefined;
+    } else if (nearestBoneIdx >= 0) {
+      nearestIdx = nearestBoneIdx;
     }
 
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
