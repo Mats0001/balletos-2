@@ -366,8 +366,24 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
     const startScanIfNeeded = () => {
       if (vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
+        // Cache HIT: Frames sind schon im Speicher → Engine ist sofort bereit
         setIsPreIndexing(false);
         setIsEngineReady(true);
+
+        // ABER: KI-Analyse (Cue-Points + Report) trotzdem generieren,
+        // falls sie noch nicht vorliegen (z.B. nach Page-Reload)
+        const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
+        if (autoCuePoints.length > 0) {
+          setCuePoints(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newPoints = autoCuePoints.filter(p => !existingIds.has(p.id));
+            if (newPoints.length === 0) return prev; // Keine neuen → kein Re-render
+            const merged = [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
+            vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
+            return merged;
+          });
+        }
+        if (report) setAnalysisReport(report);
       } else {
         // Automatisch starten – Nicole muss nichts tun
         triggerPreIndexingScan();
@@ -1585,8 +1601,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
           {/* Re-Scan Button – gleicher Style wie Upload, nur grün */}
           <button
-            onClick={() => !isPreIndexing && triggerPreIndexingScan()}
-            title="Analyse neu starten"
+            onClick={() => {
+              if (isPreIndexing) return;
+              // Force-Rescan: In-Memory-Cache löschen damit der Scan sichtbar neu läuft
+              vaganovaFrameCache.clear(selectedDevVideoUrl);
+              triggerPreIndexingScan();
+            }}
+            title="Analyse neu starten (Force-Rescan)"
             disabled={isPreIndexing}
             style={{
               background: isPreIndexing ? 'rgba(48,209,88,0.06)' : 'rgba(48,209,88,0.12)',
