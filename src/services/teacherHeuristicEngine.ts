@@ -97,9 +97,11 @@ function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.spineTilt;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  // Vaganova: Rücken kerzengerade – > 5° Neigung auffällig, > 12° stark
-  if (deg <= 5)  return 'heuristic_match';
-  if (deg <= 12) return 'heuristic_attention';
+  // 2D-projizierte Wirbelsäulenneigung.
+  // Im dynamischen Plié sind 5-8° normal → match.
+  // Erst ab 8° beginnt pädagogischer Beobachtungsbedarf.
+  if (deg <= 8)  return 'heuristic_match';
+  if (deg <= 15) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
@@ -107,8 +109,10 @@ function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.shoulderSymmetry;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  if (deg <= 3)  return 'heuristic_match';
-  if (deg <= 8)  return 'heuristic_attention';
+  // Schulter-Horizontalität: 2D-Projektion.
+  // Bei Port de bras / Épaulement sind 3-5° Asymmetrie normal.
+  if (deg <= 5)  return 'heuristic_match';
+  if (deg <= 10) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
@@ -116,10 +120,11 @@ function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  // Vaganova pelvis in 2D-Projektion liest HÖHER als klinisch,
-  // besonders im Plié. Schwellenwerte bewusst weiter als Spine/Shoulder.
-  if (deg <= 6)  return 'heuristic_match';
-  if (deg <= 14) return 'heuristic_attention';
+  // 2D-projizierte Hüftlinien-Neigung.
+  // Im Plié sind 6-10° normal (Projektion übertreibt).
+  // Erst ab 10° wirklicher Aufmerksamkeitsbedarf.
+  if (deg <= 10) return 'heuristic_match';
+  if (deg <= 18) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
