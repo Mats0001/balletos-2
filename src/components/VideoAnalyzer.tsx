@@ -2129,7 +2129,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           )}
 
           {/* Cue Points List */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px', minHeight: 0, flex: 1 }}>
 
             {/* Loading-Placeholder während KI-Analyse */}
             {isPreIndexing ? (
@@ -2284,11 +2284,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       <span style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 800, color: '#c084fc', background: 'rgba(192,132,252,0.15)', padding: '2px 6px', borderRadius: '4px', flexShrink: 0 }}>
                         {cue.timecodeStr}
                       </span>
-                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {cue.poseName}{cue.isCustom ? ' ✏️' : ''}
-                        {cue.provenance === 'ki_suggestion' && <span style={{ marginLeft: '4px', color: '#ffd60a', fontSize: '9px' }}><FlaskConical size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /></span>}
-                        {cue.provenance === 'nicole_confirmed' && <span style={{ marginLeft: '4px', color: '#30d158', fontSize: '8px' }}>✓</span>}
-                        {cue.provenance === 'nicole_rejected' && <span style={{ marginLeft: '4px', color: 'rgba(255,255,255,0.3)', fontSize: '8px' }}>✕</span>}
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: '1.2', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {cue.poseName.replace(/\s*\(KI erkannt\)/gi, '').replace(/\s*\(KI\s+\w+\)/gi, '')}{cue.isCustom ? ' ✏️' : ''}
+                        {cue.provenance === 'ki_suggestion' && <span style={{ color: '#ffd60a', fontSize: '9px', flexShrink: 0 }}><FlaskConical size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /></span>}
+                        {cue.provenance === 'nicole_confirmed' && <span style={{ color: '#30d158', fontSize: '8px', flexShrink: 0 }}>✓</span>}
+                        {cue.provenance === 'nicole_rejected' && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '8px', flexShrink: 0 }}>✕</span>}
                       </span>
                     </div>
                     {/* Rechts: Status-Dot + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
