@@ -116,8 +116,10 @@ function drawCircle(
 }
 
 /**
- * Draws a pulsing glow ring around a point – used to highlight the joint
- * that a selected cue point refers to.
+ * Draws a pulsing radial gradient glow around a point – used to highlight
+ * the joint that a selected cue point refers to.
+ * Instead of thin rings, this creates a soft luminous spotlight effect
+ * with a bright center fading to transparent at the edges.
  * @param phase 0..1 pulsation phase (drives radius and alpha oscillation)
  * @param isGood true = green glow (strength), false = warm-red glow (correction)
  */
@@ -130,37 +132,45 @@ function drawGlowRing(
   sx: number, sy: number
 ) {
   const avgScale = (sx + sy) / 2;
-  const pulse = 0.7 + 0.3 * Math.sin(phase * Math.PI * 2); // 0.7–1.0
-  const r = baseRadius * pulse * avgScale;
-  const color = isGood ? COLOR_GLOW_GOOD : COLOR_GLOW_CORRECTION;
+  // Breathing pulse: radius oscillates between 85% and 115%
+  const pulse = 0.85 + 0.15 * Math.sin(phase * Math.PI * 2);
+  const r = baseRadius * 1.6 * pulse * avgScale; // larger radius for visible halo
+  const pxX = cx * sx;
+  const pxY = cy * sy;
+
+  // Parse base color into RGB for gradient stops
+  const baseColor = isGood ? COLOR_GLOW_GOOD : COLOR_GLOW_CORRECTION;
+  // COLOR_GLOW_GOOD = '#34d399', COLOR_GLOW_CORRECTION = '#ff6b6b'
+  const rr = parseInt(baseColor.slice(1, 3), 16);
+  const gg = parseInt(baseColor.slice(3, 5), 16);
+  const bb = parseInt(baseColor.slice(5, 7), 16);
 
   ctx.save();
 
-  // Outer glow ring (large, diffuse)
-  ctx.beginPath();
-  ctx.arc(cx * sx, cy * sy, r * 1.8, 0, Math.PI * 2);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5 * avgScale;
-  ctx.globalAlpha = 0.15 + 0.1 * pulse;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 30 * avgScale;
-  ctx.stroke();
+  // Create radial gradient: bright center → transparent edges
+  const grad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, r);
+  const centerAlpha = 0.35 + 0.15 * pulse;  // 0.35–0.50
+  const midAlpha = 0.18 + 0.07 * pulse;     // 0.18–0.25
+  grad.addColorStop(0,    `rgba(${rr},${gg},${bb},${centerAlpha})`);
+  grad.addColorStop(0.3,  `rgba(${rr},${gg},${bb},${midAlpha})`);
+  grad.addColorStop(0.65, `rgba(${rr},${gg},${bb},0.06)`);
+  grad.addColorStop(1,    `rgba(${rr},${gg},${bb},0)`);
 
-  // Middle ring (sharper)
   ctx.beginPath();
-  ctx.arc(cx * sx, cy * sy, r * 1.2, 0, Math.PI * 2);
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2 * avgScale;
-  ctx.globalAlpha = 0.3 + 0.15 * pulse;
-  ctx.shadowBlur = 15 * avgScale;
-  ctx.stroke();
+  ctx.arc(pxX, pxY, r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
 
-  // Inner dot (bright center)
+  // Bright core dot for sharp visual anchor
+  const coreR = baseRadius * 0.3 * avgScale;
+  const coreGrad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, coreR);
+  const coreAlpha = 0.6 + 0.25 * pulse; // 0.6–0.85
+  coreGrad.addColorStop(0,   `rgba(${rr},${gg},${bb},${coreAlpha})`);
+  coreGrad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${coreAlpha * 0.4})`);
+  coreGrad.addColorStop(1,   `rgba(${rr},${gg},${bb},0)`);
   ctx.beginPath();
-  ctx.arc(cx * sx, cy * sy, r * 0.35, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.5 + 0.3 * pulse;
-  ctx.shadowBlur = 20 * avgScale;
+  ctx.arc(pxX, pxY, coreR, 0, Math.PI * 2);
+  ctx.fillStyle = coreGrad;
   ctx.fill();
 
   ctx.restore();
@@ -614,10 +624,10 @@ export function renderSkeletonToCanvas(
   // ─── IDEAL-OVERLAY: Soll-Position als gestrichelte grüne Hilfslinie ───
   // Zeigt der Lehrerin/Schülerin, WIE die Position korrekt aussehen sollte.
   // Nur sichtbar wenn showIdealOverlay === true und ein Joint selektiert ist.
-  const IDEAL_COLOR = '#34d399';      // smaragdgrün
-  const IDEAL_DASH = [8, 6];          // gestrichelt
-  const IDEAL_WIDTH = 2.5;
-  const IDEAL_ALPHA = 0.65;
+  const IDEAL_COLOR = '#22c55e';      // kräftiges grün (statt smaragd – besser sichtbar)
+  const IDEAL_DASH = [12, 8];          // größere Striche für bessere Sichtbarkeit
+  const IDEAL_WIDTH = 3.5;             // dicker für Kontrast
+  const IDEAL_ALPHA = 0.85;            // hohe Opacity
 
   if (opts.showIdealOverlay && opts.selectedJointId && opts.selectedJointId !== '') {
     ctx.save();
