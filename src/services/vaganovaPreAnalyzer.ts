@@ -370,8 +370,9 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   // Knee valgus L
   if (worstKneeL && worstKneeL.value > 3) {
     const timeSec = worstKneeL.timeSec;
+    const v = worstKneeL.value;
     candidates.push({
-      priority: worstKneeL.value * 3, // Knie-Valgus ist Gelenk-Sicherheitsthema
+      priority: v * 3,
       category: 'CORRECTION',
       cue: {
         id: `ki-kneeL-${timeSec.toFixed(3)}`,
@@ -379,21 +380,28 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         timecodeStr: fmtTime(timeSec),
         poseName: 'Linkes Knie-Alignment (KI erkannt)',
         status: 'CORRECTION',
-        headline: `Linkes Knie kippt nach innen – ${worstKneeL.value.toFixed(1)}°`,
+        headline: `Linkes Knie kippt nach innen – ${v.toFixed(1)}°`,
         cueMetaphor: '"Beide Knie sind wie zwei Scheinwerfer – beide zeigen gleichzeitig nach außen in den Raum."',
         jointFocusId: 'left_knee',
         dataSource: 'KI_AUTO',
-        kiNote: `Linkes Knie zeigt ${worstKneeL.value.toFixed(1)}° Valgus-Drift an diesem Frame.`,
+        diagnosisMetaphor: '"Das Knie ist wie eine Türangel — wenn sie locker wird, fällt die Tür nach innen. Hier gibt die Hüft-Angel kurz nach."',
+        kiNote: `An diesem Frame kippt das linke Knie ${v.toFixed(1)}° nach innen — gut sichtbar, wenn man auf die Verbindungslinie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie zusammen. Das passiert, wenn die Außenrotation aus der Hüfte nicht aktiv genug gehalten wird. Sehr häufig beim Plié und gut trainierbar.`,
+        diagnosisText: `Am tiefsten Punkt des Pliés kippt das linke Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Messwert: ${v.toFixed(1)}° mediale Deviation. Das ist ein rein muskuläres Thema und bei jungen Schülerinnen sehr häufig. Die gute Nachricht: Es korrigiert sich mit gezieltem Krafttraining vollständig.`,
+        goalText: 'Das Knie bleibt vom ersten Moment des Pliés bis zum tiefsten Punkt direkt über dem mittleren Zeh — die gedachte Linie von Hüfte zu Knie zu Zehenspitze bleibt eine gerade Linie. Die Außenrotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse oder ein Kippen des Fußes. Im Ergebnis öffnen sich die Knie wie Türen gleichmäßig nach außen, bleiben dabei stabil und kontrolliert. Das ist kein ästhetisches Ziel, sondern eine Frage der Gelenk-Gesundheit — langfristig schützt diese Ausrichtung das Kniegelenk.',
+        practiceText: 'Täglich an der Stange: Nur demi-plié, sehr langsam. Im tiefsten Punkt kurz anhalten und in den Spiegel schauen — ist das Knie über dem zweiten oder dritten Zeh? Wenn nicht: kurz aktiv nach außen drücken, ohne die Ferse zu heben. Die Muskeln außen an der Hüfte sollen dabei deutlich arbeiten — das ist der richtige Muskel. 10 Wiederholungen, bewusst und langsam. Erst wenn das im demi-plié sicher sitzt, kommt das grand plié dazu. Dieser Fehler ist ein reines Kraft-Thema und korrigiert sich mit gezieltem Training in wenigen Wochen vollständig.',
+        referenceImageKey: 'plie_knie_korrekt',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° mediale Deviation (Knie-Valgus), linkes Knie. Sollwert: 0° — Patella lotrecht über 2. und 3. Zehe. Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nDer Fehler ist auf die linke untere Extremität isoliert. Das Fußlängsgewölbe ist mit hoher Wahrscheinlichkeit kollabiert (Pronation / "Rolling in") — dieser Fußfehler geht dem Knie-Einknicken voraus und ist der eigentliche Auslöser. Im Slow-Mo prüfen: An welchem Punkt im Plié beginnt das Gewölbe einzubrechen?\n\nKINEMATISCHE KETTE\nDas Knie selbst ist nicht der Verursacher. Die Kausalkette: Mangelnde Außenrotation (En-dehors) im Hüftgelenk → Hüfte überträgt die Torsion ans Knie → Knie weicht medial aus → Fuß proniert als Endkompensation. Die tiefen Außenrotatoren (M. piriformis, Mm. gemelli, M. gluteus maximus) und M. tibialis posterior (Fußgewölbe) sind die Schlüsselmuskeln.\n\nDIFFERENZIALDIAGNOSE\nPrimär Kraftdefizit (80%): Pelvitrochanteräre Muskulatur hält im tiefen Plié nicht mehr durch. Sekundär Koordination (20%): Aufmerksamkeit auf Rotation geht beim Absenken verloren.\n\nSOFORT-FOKUS\nRotation tief aus dem Hüftgelenk aktivieren — nicht das Knie manuell nach außen drücken. Gewicht bewusst auf die Fußaußenkante verlagern, Gewölbe aufrichten.`,
       },
-      reportEntry: { label: 'Knie-Einfallen links', timecode: fmtTime(timeSec), value: `${worstKneeL.value.toFixed(1)}°` },
+      reportEntry: { label: 'Knie-Einfallen links', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
     });
   }
 
   // Knee valgus R
   if (worstKneeR && worstKneeR.value > 3) {
     const timeSec = worstKneeR.timeSec;
+    const v = worstKneeR.value;
     candidates.push({
-      priority: worstKneeR.value * 3,
+      priority: v * 3,
       category: 'CORRECTION',
       cue: {
         id: `ki-kneeR-${timeSec.toFixed(3)}`,
@@ -401,21 +409,28 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         timecodeStr: fmtTime(timeSec),
         poseName: 'Rechtes Knie-Alignment (KI erkannt)',
         status: 'CORRECTION',
-        headline: `Rechtes Knie kippt nach innen – ${worstKneeR.value.toFixed(1)}°`,
+        headline: `Rechtes Knie kippt nach innen – ${v.toFixed(1)}°`,
         cueMetaphor: '"Beide Knie sind wie zwei Scheinwerfer – beide zeigen gleichzeitig nach außen in den Raum."',
         jointFocusId: 'right_knee',
         dataSource: 'KI_AUTO',
-        kiNote: `Rechtes Knie zeigt ${worstKneeR.value.toFixed(1)}° Valgus-Drift an diesem Frame.`,
+        diagnosisMetaphor: '"Schau auf dein Knie im Spiegel: Zeigt es nach vorne über den Zeh — oder biegt es sich nach innen weg wie eine einknicke Brücke?"',
+        kiNote: `An diesem Frame kippt das rechte Knie ${v.toFixed(1)}° nach innen — gut sichtbar, wenn man auf die Verbindungslinie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie zusammen. Das ist ein klassisches Kraftdefizit in den tiefen Außenrotatoren der Hüfte — sehr häufig und gut trainierbar.`,
+        diagnosisText: `Am tiefsten Punkt des Pliés kippt das rechte Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Messwert: ${v.toFixed(1)}° mediale Deviation. Bei jungen Schülerinnen im Plié ist das sehr häufig und korrigiert sich mit gezieltem Krafttraining. Positiv: Der Oberkörper und die linke Seite sehen in diesem Frame solide aus — der Fehler ist isoliert.`,
+        goalText: 'Das Knie bleibt vom ersten Moment des Pliés bis zum tiefsten Punkt direkt über dem mittleren Zeh — die gedachte Linie von Hüfte zu Knie zu Zehenspitze bleibt eine gerade Linie. Die Außenrotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse oder ein Kippen des Fußes. Im Ergebnis öffnen sich die Knie wie Türen gleichmäßig nach außen, bleiben dabei stabil und kontrolliert. Das ist kein ästhetisches Ziel, sondern eine Frage der Gelenk-Gesundheit — langfristig schützt diese Ausrichtung das Kniegelenk.',
+        practiceText: 'Täglich an der Stange: Nur demi-plié, sehr langsam. Im tiefsten Punkt kurz anhalten und in den Spiegel schauen — ist das rechte Knie über dem zweiten oder dritten Zeh? Wenn nicht: kurz aktiv nach außen drücken, ohne die Ferse zu heben. Die Muskeln außen an der Hüfte sollen dabei deutlich arbeiten — das ist der richtige Muskel. 10 Wiederholungen, bewusst und langsam. Hilfreiche Übung: Im Sitzen einen Gummiball zwischen die Knie klemmen und nach außen drücken — das trainiert genau die Außenrotatoren, die hier fehlen. Dieser Fehler korrigiert sich mit gezieltem Training in wenigen Wochen vollständig.',
+        referenceImageKey: 'plie_knie_korrekt',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° mediale Deviation (Knie-Valgus), rechtes Knie. Sollwert: 0° — Patella lotrecht über 2. und 3. Zehe. Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nOberkörper und Carré bleiben in diesem Frame stabil — der Fehler ist auf die rechte untere Extremität isoliert. Das Fußlängsgewölbe ist mit hoher Wahrscheinlichkeit kollabiert (Pronation / "Rolling in"). Im Slow-Mo prüfen: An welchem Punkt im Plié beginnt das Gewölbe einzubrechen?\n\nKINEMATISCHE KETTE\nDas Knie selbst ist nicht der Verursacher. Die Kausalkette: Mangelnde Außenrotation (En-dehors) im Hüftgelenk → Hüfte überträgt die Torsion ans Knie → Knie weicht medial aus → Fuß proniert als Endkompensation. Die tiefen Außenrotatoren (M. piriformis, Mm. gemelli, M. gluteus maximus) und M. tibialis posterior (Fußgewölbe) sind die Schlüsselmuskeln.\n\nDIFFERENZIALDIAGNOSE\nPrimär Kraftdefizit (80%): Pelvitrochanteräre Muskulatur hält im tiefen Plié nicht mehr durch. Sekundär Koordination (20%): Aufmerksamkeit auf Rotation geht beim Absenken verloren. Im Slow-Mo prüfen: Passiert das Einknicken im ersten Drittel des Plié (Kraft) oder erst am Tiefpunkt (Ermüdung)?\n\nSOFORT-FOKUS\nRotation tief aus dem Hüftgelenk aktivieren — nicht das Knie manuell nach außen drücken. Gewicht bewusst auf die Fußaußenkante (kleiner Zeh) verlagern, Gewölbe aufrichten. Taktiler Hinweis: Druck am Trochanter major nach außen-oben.`,
       },
-      reportEntry: { label: 'Knie-Einfallen rechts', timecode: fmtTime(timeSec), value: `${worstKneeR.value.toFixed(1)}°` },
+      reportEntry: { label: 'Knie-Einfallen rechts', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
     });
   }
 
   // Arm line
   if (worstArm && worstArm.value > 10) {
     const timeSec = worstArm.timeSec;
+    const v = worstArm.value;
     candidates.push({
-      priority: worstArm.value * 1.5,
+      priority: v * 1.5,
       category: 'CORRECTION',
       cue: {
         id: `ki-arm-${timeSec.toFixed(3)}`,
@@ -423,57 +438,75 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         timecodeStr: fmtTime(timeSec),
         poseName: 'Arm-Linienführung (KI erkannt)',
         status: 'CORRECTION',
-        headline: `Arm-Linie ${worstArm.value.toFixed(0)}° – Ellbogen oder Handgelenk prüfen`,
+        headline: `Arm-Linie ${v.toFixed(0)}° – Ellbogen oder Handgelenk prüfen`,
         cueMetaphor: '"Der Arm fließt wie ein Fluss – vom Schulterblatt bis zur Fingerspitze, ohne Staustufe dazwischen."',
         jointFocusId: 'left_elbow',
         dataSource: 'KI_AUTO',
-        kiNote: `Arm-Linienführung zeigt ${worstArm.value.toFixed(0)}° Abweichung von der idealen Kurve.`,
+        diagnosisMetaphor: '"Stell dir einen Gartenschlauch vor: Wenn du ihn irgendwo abknickst, fließt das Wasser nicht mehr durch. Genau das passiert hier mit der Energie im Arm."',
+        kiNote: `Der Arm verliert hier die durchfließende Linie vom Schulterblatt bis zur Fingerspitze — meist als leichter Knick im Ellbogen oder als abgeknicktes Handgelenk sichtbar. ${v.toFixed(0)}° Abweichung an diesem Frame.`,
+        diagnosisText: `Der Arm verliert hier die durchfließende Linie vom Schulterblatt bis zur Fingerspitze — meist als leichter Knick im Ellbogen (zu hoch oder zu tief) oder als abgeknicktes Handgelenk sichtbar. Von der Seite betrachtet wirkt der Arm dann nicht fließend, sondern ein bisschen gebrochen. ${v.toFixed(0)}° Abweichung an diesem Frame. Das ist eine Frage der Körperwahrnehmung — wenn man einmal fühlt, wie sich der "durchfließende" Arm anfühlt, korrigiert sich das oft sehr schnell. Es ist kein Kraft-Thema, sondern ein Aufmerksamkeits- und Gewohnheitsthema.`,
+        goalText: 'Der Arm bildet eine fließende, leicht gerundete Kurve vom Schulterblatt bis zur Fingerspitze — kein spitzer Knick im Ellbogen, kein abgeknicktes Handgelenk, kein hochgezogenes Schulterblatt. Die Position des Ellbogens ist dabei entscheidend: Er liegt geringfügig tiefer als die Schulter, die Innenseite des Ellbogens zeigt leicht zur Decke. Das Handgelenk ist eine natürliche Verlängerung des Unterarms, nicht abgeknickt oder überstreckt. Diese weiche Linie gibt dem Port de bras seine Ausdruckskraft.',
+        practiceText: 'Vor dem Spiegel ohne Musik: Den Arm langsam durch alle Positionen führen (1., 2., 3.) und dabei gezielt auf den Ellbogen achten. An jeder Position kurz anhalten: Ist der Ellbogen tiefer als die Schulter? Zeigt die Arminnenseite zur Decke? Dann das Handgelenk: Liegt es in der Verlängerung des Unterarms? Diese Kontrolle bewusst machen, bis sie automatisch wird. Übung: Arm in Position 1 halten, Augen schließen, Körpergefühl spüren. Augen öffnen, mit dem Spiegel vergleichen. Der Abstand zwischen Gefühl und Realität schließt sich mit der Zeit.',
+        referenceImageKey: 'port_de_bras_ideal',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(0)}° Abweichung von der idealen Armlinienführung. Sollwert: <20° (weiche Allongé-Kurve, 160°–170° im Ellbogengelenk). Abweichung: ${v.toFixed(0)}°.\n\nGESAMTBILD DIESES FRAMES\nDie Körperachse wirkt insgesamt stabil. Die Schulter ist wahrscheinlich leicht eleviert (hochgezogen) — das ist fast immer mit einem Arm-Knick korreliert. Das Handgelenk möglicherweise überstreckt oder spannungslos ("tote Hand").\n\nKINEMATISCHE KETTE\nEine gebrochene Armlinie entsteht fast immer durch fehlende Verankerung des Schulterblatts am Thorax. Wenn der untere Trapezius und M. latissimus dorsi das Schulterblatt nicht in aktiver Depression halten, übernimmt der M. deltoideus die Haltearbeit allein — Resultat: Schulter geht hoch, Ellbogen knickt ein.\n\nDIFFERENZIALDIAGNOSE\nPrimär Koordination / Gewohnheit: Die Schülerin positioniert die Hand im Raum, statt Energie aus dem Rücken durch den Ellbogen bis in die Fingerspitzen zu denken. Selten ein Kraftproblem.\n\nSOFORT-FOKUS\nEllbogen energetisch heben, gleichzeitig das Schulterblatt in die Gesäßtasche senken. Verbale Korrektur: "Lass den Ellbogen den Arm führen, nicht die Hand."`,
       },
-      reportEntry: { label: 'Arm-Linienführung', timecode: fmtTime(timeSec), value: `${worstArm.value.toFixed(0)}°` },
+      reportEntry: { label: 'Arm-Linienführung', timecode: fmtTime(timeSec), value: `${v.toFixed(0)}°` },
     });
   }
 
   // Spine tilt
   if (worstSpine && worstSpine.value > 5) {
     const timeSec = worstSpine.timeSec;
+    const v = worstSpine.value;
     candidates.push({
-      priority: worstSpine.value * 2.5, // Wirbelsäule = zentrale Achse, hohe Priorität
+      priority: v * 2.5,
       category: 'CORRECTION',
       cue: {
         id: `ki-spine-${timeSec.toFixed(3)}`,
         timeSeconds: timeSec,
         timecodeStr: fmtTime(timeSec),
         poseName: 'Oberkörper-Neigung (KI erkannt)',
-        status: worstSpine.value > 10 ? 'WARNING' : 'CORRECTION',
-        headline: `Oberkörper neigt sich ${worstSpine.value.toFixed(1)}° zur Seite`,
+        status: v > 10 ? 'WARNING' : 'CORRECTION',
+        headline: `Oberkörper neigt sich ${v.toFixed(1)}° zur Seite`,
         cueMetaphor: '"Stell dir vor, dein Kopf ist an einem unsichtbaren Faden aufgehängt – er zieht dich gerade nach oben."',
         jointFocusId: 'spine_center',
         dataSource: 'KI_AUTO',
-        kiNote: `Die Wirbelsäule zeigt ${worstSpine.value.toFixed(1)}° seitliche Neigung. In der Vaganova-Methodik soll die Wirbelsäule eine stabile vertikale Achse bilden. Leichte Neigungen sind bei jungen Schülerinnen normal und korrigieren sich mit Kraft- und Körperwahrnehmungstraining.`,
+        diagnosisMetaphor: '"Stell dir vor, deine Wirbelsäule ist ein Turm aus Bauklötzen — wenn einer schief liegt, kippt alles darüber. Hier rutscht ein Baustein leicht zur Seite."',
+        kiNote: `Die Wirbelsäule zeigt ${v.toFixed(1)}° seitliche Neigung an diesem Frame. In der Vaganova-Methodik soll die Wirbelsäule eine stabile vertikale Achse bilden. Leichte Neigungen sind bei jungen Schülerinnen normal und korrigieren sich mit Kraft- und Körperwahrnehmungstraining.`,
+        diagnosisText: `Der Oberkörper neigt sich hier ${v.toFixed(1)}° zur Seite — das sieht man, wenn man eine gedachte Linie vom Scheitel zum Becken zieht: sie ist nicht senkrecht, sondern leicht schräg. Das passiert häufig, wenn das Gewicht unbewusst auf eine Seite verlagert wird, oder wenn die seitliche Rumpfmuskulatur (M. obliquus, M. quadratus lumborum) auf einer Seite schwächer ist als auf der anderen. Bei jungen Schülerinnen ist das sehr häufig und kein Grund zur Sorge — es ist ein Kraft- und Aufmerksamkeitsthema, das sich mit bewusstem Training korrigiert.`,
+        goalText: 'Die Wirbelsäule bildet eine stabile vertikale Achse — vom Scheitel bis zum Steißbein eine gerade, aufrechte Linie. Dabei geht es nicht um militärisches Geradestehen, sondern um eine natürliche, energetische Aufrichtung: der Kopf schwebt leicht nach oben, das Becken ist neutral, die Schultern liegen entspannt auf gleicher Höhe. Im Ballett ist diese vertikale Achse das Fundament für alles — Drehungen, Sprünge, Balancen. Ohne stabile Achse kann keine saubere Technik entstehen.',
+        practiceText: 'Übung 1: An der Wand stehen — Hinterkopf, Schulterblätter, Gesäß und Fersen berühren die Wand. Diese Position 30 Sekunden halten und dabei normal atmen. Das Gefühl im Körper speichern. Dann einen Schritt von der Wand weg und die Position halten. Übung 2: Vor dem Spiegel stehen und die Schultern vergleichen — ist eine höher als die andere? Bewusst korrigieren und das neue Gefühl abspeichern. Übung 3: Im Plié bewusst darauf achten, ob der Oberkörper nach rechts oder links ausweicht. Wenn ja: kurz stoppen, korrigieren, weitermachen. 5× täglich, bis die vertikale Achse automatisch ist.',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° laterale Neigung der Wirbelsäulenachse. Sollwert: <3° (funktionelle Vertikale). Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nDie seitliche Neigung deutet auf eine asymmetrische Gewichtsverteilung hin. Prüfen: Ist die Neigung konsistent (strukturell) oder nur in bestimmten Phasen (kompensatorisch)? Korreliert sie mit einer Schulter-Elevation auf der Gegenseite?\n\nKINEMATISCHE KETTE\nDie laterale Rumpfneigung entsteht meist durch Schwäche im M. quadratus lumborum und M. obliquus internus der Gegenseite. Bei einseitiger Belastung (z.B. immer an derselben Stangenseite stehen) kann sich eine habituelle Neigung entwickeln. Im Épaulement-Kontext kann eine kontrollierte Neigung korrekt sein — prüfen, ob bewusst oder unbewusst.\n\nDIFFERENZIALDIAGNOSE\nPrimär Gewohnheit/Aufmerksamkeit (60%): Unbewusstes Verlagern des Gewichts auf die dominante Seite. Sekundär Kraftasymmetrie (30%): Eine Seite der seitlichen Rumpfmuskulatur ist schwächer. Strukturell (10%): Skoliose oder Beinlängendifferenz — nur bei konsistenter Abweichung prüfen.\n\nSOFORT-FOKUS\nBewusstes Zentrieren des Gewichts auf beide Füße gleichmäßig. Verbale Korrektur: "Stell dir vor, du stehst auf einer Waage unter jedem Fuß — beide sollen das Gleiche anzeigen."`,
       },
-      reportEntry: { label: 'Oberkörper-Neigung', timecode: fmtTime(timeSec), value: `${worstSpine.value.toFixed(1)}°` },
+      reportEntry: { label: 'Oberkörper-Neigung', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
     });
   }
 
   // Pelvic tilt
   if (worstPelvis && worstPelvis.value > 8) {
     const timeSec = worstPelvis.timeSec;
+    const v = worstPelvis.value;
     candidates.push({
-      priority: worstPelvis.value * 2, // Becken = Fundament
+      priority: v * 2,
       category: 'CORRECTION',
       cue: {
         id: `ki-pelvis-${timeSec.toFixed(3)}`,
         timeSeconds: timeSec,
         timecodeStr: fmtTime(timeSec),
         poseName: 'Beckenkippung (KI erkannt)',
-        status: worstPelvis.value > 15 ? 'WARNING' : 'CORRECTION',
-        headline: `Becken kippt ${worstPelvis.value.toFixed(1)}° – Neutralposition anstreben`,
+        status: v > 15 ? 'WARNING' : 'CORRECTION',
+        headline: `Becken kippt ${v.toFixed(1)}° – Neutralposition anstreben`,
         cueMetaphor: '"Stell dir vor, dein Becken ist eine Schüssel mit Wasser – kein Tropfen darf verschüttet werden."',
         jointFocusId: 'pelvis_core',
         dataSource: 'KI_AUTO',
-        kiNote: `Das Becken zeigt ${worstPelvis.value.toFixed(1)}° Kippung (anterior oder lateral). In der Vaganova-Methodik soll das Becken neutral-aufrecht stehen. Häufige Ursache: schwache Gluteal- oder Bauchmuskulatur, die das Becken nicht gegen die Gravitation stabilisiert.`,
+        diagnosisMetaphor: '"Stell dir eine Wasserschüssel auf deinem Becken vor: Wenn sie nach vorne kippt, läuft Wasser über die Oberschenkel. Wenn nach hinten, über den Rücken. Hier kippt die Schüssel — das Wasser würde herauslaufen."',
+        kiNote: `Das Becken zeigt ${v.toFixed(1)}° Kippung an diesem Frame. In der Vaganova-Methodik soll das Becken neutral-aufrecht stehen. Häufige Ursache: schwache Gluteal- oder Bauchmuskulatur, die das Becken nicht gegen die Gravitation stabilisiert.`,
+        diagnosisText: `Das Becken kippt hier ${v.toFixed(1)}° aus der Neutralposition — das bedeutet, die natürliche S-Kurve der Wirbelsäule wird entweder verstärkt (Hohlkreuz bei Kippung nach vorne) oder abgeflacht (Kippung nach hinten). Bei jungen Schülerinnen passiert das häufig im Plié, wenn die Bauch- und Glutealmuskulatur das Becken nicht aktiv stabilisieren kann. Das ist kein Fehler, den man "wegdenken" kann — es braucht gezielte Kräftigung. Die gute Nachricht: Das Becken-Alignment reagiert sehr schnell auf Training, oft schon nach 2-3 Wochen bewusster Arbeit.`,
+        goalText: 'Das Becken bleibt in der neutralen Mitte — weder nach vorne gekippt (Hohlkreuz) noch nach hinten eingerollt (Rundrücken). Die Lendenwirbelsäule behält ihre natürliche, sanfte Kurve. Schultern, Becken und Standfläche sind sauber übereinandergestapelt — das gibt der ganzen Bewegung Stabilität und Eleganz. Diese neutrale Beckenposition ist keine starre Fixierung, sondern ein aktives, lebendiges Gleichgewicht, das sich bei jeder Bewegung mitbewegt, aber nie die Kontrolle verliert.',
+        practiceText: 'Übung 1: Leg eine Hand auf den Bauchnabel, eine auf die Lendenwirbel — beim langsamen Plié spüren, ob sich die Lendenwirbel mitbewegen. Sie sollen ruhig bleiben. Sobald du das Gefühl kennst, lass die Hände weg und vertrau dem Körpergefühl. Übung 2: Im Spiegel von der Seite schauen — ist die natürliche S-Kurve der Wirbelsäule noch da, oder wird sie zum Hohlkreuz oder Flachrücken? Übung 3: Becken-Uhr — im Stehen das Becken langsam kreisen lassen (wie eine Uhr: 12=vorne, 6=hinten, 3/9=seitlich). Dann in der Mitte stoppen — das ist die Neutralposition. 5× täglich diese Neutralposition bewusst finden und 10 Sekunden halten.',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° Beckenneigung (anterior/lateral). Sollwert: <5° relative Deviation von der neutralen Achse. Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nEine Beckenkippung verändert die gesamte Wirbelsäulenmechanik. Bei anteriorer Kippung: Hyperlordose der LWS, kompensatorische Kyphose der BWS, Protraktion des Kopfes. Bei posteriorer Kippung: Abflachung der LWS, Verlust der Federungsfunktion.\n\nKINEMATISCHE KETTE\nDas Becken ist das Bindeglied zwischen Ober- und Unterkörper. Eine Beckenkippung kompromittiert sowohl die En-dehors-Arbeit in der Hüfte (reduzierter Rotationsradius) als auch die Rumpfstabilität (Verlust der Core-Spannung). Schlüsselmuskeln: M. iliopsoas (Hüftbeuger — bei Verkürzung kippt das Becken nach vorne), M. gluteus maximus und M. rectus abdominis (halten das Becken neutral), M. erector spinae (bei Hypertonie kippt das Becken nach vorne).\n\nDIFFERENZIALDIAGNOSE\nAnterior (häufiger bei Kindern, 70%): Verkürzter M. iliopsoas + schwache Bauchmuskulatur. Lateral (seltener, 20%): Einseitige Belastung oder Beinlängendifferenz. Posterior (selten, 10%): Übertriebenes "Einziehen" des Beckens aus falsch verstandener Korrektur.\n\nSOFORT-FOKUS\nBewusstes Aufstellen des Beckens ohne Verkrampfung. Taktiler Hinweis: Eine Hand auf den unteren Bauch, eine auf das Steißbein — beide Hände sollen vertikal übereinander sein. Verbale Korrektur: "Lass das Steißbein schwer zum Boden sinken, als hätte es ein kleines Gewicht."`,
       },
-      reportEntry: { label: 'Beckenkippung', timecode: fmtTime(timeSec), value: `${worstPelvis.value.toFixed(1)}°` },
+      reportEntry: { label: 'Beckenkippung', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
     });
   }
 
@@ -482,7 +515,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (bestShoulder && bestShoulder.value > 150) {
     const timeSec = bestShoulder.timeSec;
     candidates.push({
-      priority: bestShoulder.value - 140, // 150→10, 180→40
+      priority: bestShoulder.value - 140,
       category: 'GOOD',
       cue: {
         id: `ki-shoulder-good-${timeSec.toFixed(3)}`,
@@ -494,7 +527,13 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         cueMetaphor: '"Die Schultern sind ein Tablett, das du balancierst — kein Tropfen darf herunterfallen."',
         jointFocusId: 'shoulder_line',
         dataSource: 'KI_AUTO',
-        kiNote: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel.',
+        diagnosisMetaphor: '"Genau so soll es aussehen: Die Schultern liegen wie Flügel, die ruhig ausgebreitet sind — weder hochgezogen noch eingefallen."',
+        kiNote: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel — die Schulterblätter sitzen aktiv nach unten, ohne Anspannung im Nacken. Das gibt der Bewegung sofort mehr Eleganz.',
+        diagnosisText: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel — die Schulterblätter sitzen aktiv nach unten, ohne Anspannung im Nacken. Das gibt der Bewegung sofort mehr Eleganz und wirkt auf alle im Raum. Das ist eine echte Stärke: diese ruhige, breite Schulter-Linie bewusst im Körpergedächtnis verankern — so soll es immer aussehen. Gerade bei jungen Schülerinnen ist es selten, dass die Schultern so konsequent ruhig bleiben.',
+        goalText: 'Diese Schulter-Position als Referenz-Gefühl im Körpergedächtnis verankern. Hier liegt alles richtig: Die Schulterblätter sitzen breit und aktiv nach unten — nicht hochgezogen, nicht zusammengekniffen. Der Nacken ist lang und frei. Die horizontale Schulterlinie gibt der gesamten Oberkörperhaltung Würde und Ruhe. Dieses Gefühl kennen und auf Abruf reproduzieren können — das ist das Ziel.',
+        practiceText: 'Diesen Frame nutzen als persönliche Referenz. Bewusst im Körper spüren: Was passiert gerade mit den Schulterblättern? Wo liegt die Spannung? Dieses Körpergefühl als "Anker" speichern. Übung: Schultern hochziehen, drei Sekunden halten, dann langsam loslassen und tiefer sinken lassen als normal — das ist die richtige Position. Mehrmals täglich, auch ohne Tanzen: beim Sitzen, beim Gehen. Diese Schulterposition soll zur Normalstellung werden, nicht zur bewussten Anspannung.',
+        referenceImageKey: 'epaulement_ideal',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${(bestShoulder.value).toFixed(0)}° Schulter-Symmetriewert (180° = perfekte Horizontalität). Abweichung: nahe 0°. Das ist der beste gemessene Frame in dieser Aufnahme.\n\nGESAMTBILD DIESES FRAMES\nExzellente Gesamthaltung: Schulterblätter sitzen aktiv in Depression auf dem Thorax. Das Épaulement wird korrekt aus der BWS initiiert, nicht aus den Schultergelenken.\n\nKINEMATISCHE KETTE\nPerfekte Schulter-Horizontalität beweist exzellente Kernstabilität. Das Zusammenspiel von tiefer Bauchmuskulatur, Multifidus und unterem Trapezius funktioniert einwandfrei.\n\nSOFORT-FOKUS\nLob mit somatischer Aufgabe: "Merk dir das Gefühl des weiten Schlüsselbeins — das ist dein Anker-Moment."`,
       },
       reportEntry: { label: 'Schulter-Horizontalität', value: `${(bestShoulder.value).toFixed(0)}%` },
     });
@@ -503,7 +542,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (bestCoG && bestCoG.value > 80) {
     const timeSec = bestCoG.timeSec;
     candidates.push({
-      priority: bestCoG.value - 70, // 80→10, 100→30
+      priority: bestCoG.value - 70,
       category: 'GOOD',
       cue: {
         id: `ki-cog-good-${timeSec.toFixed(3)}`,
@@ -515,7 +554,12 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         cueMetaphor: '"Stell dir vor, du hast einen Laserstrahl am Bauchnabel — er zeigt exakt zwischen deine Füße auf den Boden."',
         jointFocusId: 'pelvis_core',
         dataSource: 'KI_AUTO',
-        kiNote: `Der projizierte Körperschwerpunkt liegt stabil über der Standfläche.`,
+        diagnosisMetaphor: '"Der Körperschwerpunkt steht wie ein ruhiger Anker genau über der Mitte der Standfläche — das gibt jeder Bewegung Sicherheit und Eleganz."',
+        kiNote: 'An diesem Frame liegt der projizierte Körperschwerpunkt stabil über der Standfläche — mit nur minimaler Abweichung. Die Rumpfstabilität arbeitet optimal mit dem Gleichgewicht zusammen.',
+        diagnosisText: 'An diesem Frame liegt der projizierte Körperschwerpunkt stabil über der Standfläche — mit nur minimaler Abweichung. Das ist eine echte Stärke: die Rumpfstabilität (Core) arbeitet hier optimal mit dem Gleichgewicht zusammen. Bei vielen jungen Schülerinnen driftet der Schwerpunkt im Plié seitlich ab — hier passiert das nicht. Dieses Gefühl der zentralen Balance bewusst verankern, es ist die Basis für alle Balancen und Drehungen, die später kommen.',
+        goalText: 'Der Schwerpunkt bleibt in jeder Phase der Bewegung — vom Aufstieg bis zum Tiefpunkt — ruhig über der Standfläche zentriert. Keine seitliche Drift, kein Kippen nach vorne oder hinten. Das ist die Basis für alle Balancen und Drehungen. Diese zentrierte Schwerpunktlage als Heimgefühl verankern — wenn der Schwerpunkt stimmt, fühlt sich jede Bewegung mühelos an.',
+        practiceText: 'Im Spiegel von vorne und von der Seite: Gibt es einen Moment, wo der Oberkörper seitlich ausweicht? Beim Plié bewusst spüren: Ist das Gewicht gleichmäßig auf beiden Füßen? Übung: Relevé mit geschlossenen Augen — 5 Sekunden halten. Wenn der Schwerpunkt zentriert ist, fühlt sich das mühelos an. Weitere Übung: Im Demi-plié die Augen schließen und spüren, ob das Gewicht gleichmäßig auf beiden Fußsohlen liegt. Die Zehen sollen locker bleiben, die Arbeit kommt aus der Mitte.',
+        technicalAnalysis: `METRISCHE DIAGNOSE\nDer projizierte Schwerpunkt liegt mit minimaler Abweichung über der Standfläche. Das zeigt eine gute Core-Stabilität und propriozeptive Kontrolle.\n\nGESAMTBILD DIESES FRAMES\nDie Schwerpunktstabilität ist ein Indikator für die Gesamtqualität der Haltung — wenn der Core arbeitet, profitiert jede andere Körperregion davon.\n\nKINEMATISCHE KETTE\nZentrierter Schwerpunkt = aktive tiefe Bauchmuskulatur (M. transversus abdominis) + koordinierte Glutealmuskulatur + gute propriozeptive Rückmeldung aus den Füßen.\n\nSOFORT-FOKUS\nDiese Qualität bewusst verankern. Verbale Bestätigung: "So fühlt sich Balance an — merk dir das Gefühl in den Fußsohlen."`,
       },
       reportEntry: { label: 'Körperschwerpunkt', value: 'Stabil' },
     });
@@ -524,7 +568,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (bestMoment && bestMoment.value >= 4) {
     const timeSec = bestMoment.timeSec;
     candidates.push({
-      priority: bestMoment.value * 3, // High priority for "best overall"
+      priority: bestMoment.value * 3,
       category: 'GOOD',
       cue: {
         id: `ki-best-moment-${timeSec.toFixed(3)}`,
@@ -536,7 +580,12 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
         cueMetaphor: '"Dieser Moment ist dein persönlicher Referenz-Frame — so sieht dein Bestes aus. Merk dir das Gefühl."',
         jointFocusId: 'pelvis_core',
         dataSource: 'KI_AUTO',
+        diagnosisMetaphor: '"Das ist wie ein Foto von deinem besten Moment — alles stimmt gleichzeitig. So sieht es aus, wenn der ganze Körper zusammenarbeitet."',
         kiNote: `An diesem Frame sind ${bestMoment.value} von 6 gemessenen Metriken gleichzeitig im grünen Bereich — das ist der beste Gesamtmoment in dieser Aufnahme.`,
+        diagnosisText: `An diesem Frame arbeitet alles zusammen: ${bestMoment.value} von 6 gemessenen Bereichen (Wirbelsäule, Becken, Schultern, linkes Knie, rechtes Knie, Schwerpunkt) sind gleichzeitig im grünen Bereich. Das ist der Moment, in dem der ganze Körper als Einheit funktioniert. Dieser Frame ist der persönliche Referenz-Moment — so sieht es aus, wenn Kraft, Koordination und Aufmerksamkeit zusammenwirken. Dieses Gefühl bewusst abspeichern.`,
+        goalText: 'Diesen Moment als inneres Bild verankern — so sieht das eigene Optimum aus. Das Ziel ist nicht, diesen Frame zu kopieren, sondern das Körpergefühl dieses Moments auf Abruf reproduzieren zu können. Wie fühlen sich die Fußsohlen an? Wo liegt die Spannung? Wie weit ist das Schlüsselbein? Je öfter dieses Gefühl bewusst herbeigerufen wird, desto mehr wird es zur normalen Haltung.',
+        practiceText: 'Diesen Frame im Video als persönlichen Referenzpunkt speichern. Vor jeder Unterrichtsstunde einmal ansehen und das Körpergefühl abrufen. Übung: In der Grundposition stehen, Augen schließen, das Bild dieses Frames vor dem inneren Auge sehen. Dann den Körper danach ausrichten — ohne Spiegel, rein nach Gefühl. Augen öffnen und im Spiegel vergleichen. Der Abstand zwischen innerem Bild und Realität wird mit der Zeit kleiner.',
+        technicalAnalysis: `METRISCHE DIAGNOSE\n${bestMoment.value}/6 Metriken gleichzeitig im Sollbereich: Wirbelsäule (<5° Neigung), Becken (<8° Kippung), Schultern (<5° Asymmetrie), Knie L (<3° Valgus), Knie R (<3° Valgus), Schwerpunkt (<5% Deviation).\n\nGESAMTBILD DIESES FRAMES\nDies ist der statistische Hochpunkt dieser Aufnahme. Als persönliche Baseline für Fortschrittstracking speichern — bei der nächsten Aufnahme vergleichen, ob dieser Wert konsistent oder verbessert ist.\n\nKINEMATISCHE KETTE\nWenn alle Metriken gleichzeitig grün sind, arbeiten alle Muskelketten als koordinierte Einheit: Core-Stabilität, Bein-Alignment, Schultergürtel-Depression und propriozeptive Balance funktionieren synchron.\n\nSOFORT-FOKUS\nDiesen Frame als Referenz-Moment dokumentieren und in der nächsten Stunde als Ausgangspunkt verwenden. Frage an die Schülerin: "Erinnerst du dich, wie sich dieser Moment angefühlt hat?"`,
       },
       reportEntry: { label: 'Bester Gesamtmoment', value: `${bestMoment.value}/6 Metriken OK` },
     });
