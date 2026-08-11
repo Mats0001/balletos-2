@@ -50,6 +50,8 @@ export interface CanvasRenderOptions {
   showIdealOverlay?: boolean;
   /** Dim everything except the focused joint area (spotlight effect) */
   showFocusDim?: boolean;
+  /** Index of the actually clicked landmark (for glow positioning) */
+  clickedLandmarkIndex?: number;
   isPlie: boolean;
   /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -681,8 +683,7 @@ export function renderSkeletonToCanvas(
   }
 
   // ─── GLOW-HIGHLIGHT FÜR SELEKTIERTE CUE-POINTS ───
-  // Rendering-Reihenfolge: Focus-Dim → Glow → Ideal-Overlay
-  // Glow VOR Ideal-Overlay damit Labels nicht überdeckt werden.
+  // Glow sitzt auf dem TATSÄCHLICH angeklickten Landmark, nicht auf der Region-Mitte.
   const selId = opts.selectedJointId;
   const glowPhase = opts.glowPulsePhase ?? 0;
   const isGood = opts.glowType === 'GOOD';
@@ -692,40 +693,49 @@ export function renderSkeletonToCanvas(
     let glowY: number | undefined;
     let glowRadius = 25;
 
-    switch (selId) {
-      case 'left_knee':
-        glowX = kneeL.x; glowY = kneeL.y;
-        glowRadius = 28;
-        break;
-      case 'right_knee':
-        glowX = kneeR.x; glowY = kneeR.y;
-        glowRadius = 28;
-        break;
-      case 'left_elbow':
-        glowX = elbowL.x; glowY = elbowL.y;
-        glowRadius = 24;
-        break;
-      case 'spine_center':
-        glowX = sternum.x; glowY = sternum.y;
-        glowRadius = 30;
-        break;
-      case 'pelvis_core':
-        glowX = pelvisCenter.x; glowY = pelvisCenter.y;
-        glowRadius = 30;
-        break;
-      case 'shoulder_line':
-        glowX = (shoulderL.x + shoulderR.x) / 2;
-        glowY = (shoulderL.y + shoulderR.y) / 2;
-        glowRadius = 35;
-        break;
-      case 'head_epaulement':
-        glowX = head.x; glowY = head.y;
-        glowRadius = 26;
-        break;
-      case 'port_de_bras_arms':
-        drawGlowRing(ctx, elbowL.x, elbowL.y, 22, glowPhase, isGood, sx, sy);
-        drawGlowRing(ctx, elbowR.x, elbowR.y, 22, glowPhase, isGood, sx, sy);
-        break;
+    // PRIMARY: Use the actually clicked landmark for precise glow positioning
+    const clickedIdx = opts.clickedLandmarkIndex;
+    if (clickedIdx !== undefined && sk) {
+      // Map landmark index → skeleton point (includes all clickable joints)
+      const LANDMARK_TO_POINT: Record<number, { x: number; y: number } | null> = {
+        0: head, 11: shoulderL, 12: shoulderR, 13: elbowL, 14: elbowR,
+        15: wristL, 16: wristR, 23: pelvisL, 24: pelvisR,
+        25: kneeL, 26: kneeR, 27: ankleL, 28: ankleR,
+        29: footL ?? ankleL, 30: footR ?? ankleR,  // heel → use foot or ankle fallback
+        31: footL ?? ankleL, 32: footR ?? ankleR,   // toe → use foot or ankle fallback
+      };
+      const point = LANDMARK_TO_POINT[clickedIdx];
+      if (point) {
+        glowX = point.x;
+        glowY = point.y;
+        // Scale radius by joint importance
+        const largeJoints = new Set([23, 24, 25, 26]);
+        const headJoints = new Set([0]);
+        glowRadius = headJoints.has(clickedIdx) ? 26
+                   : largeJoints.has(clickedIdx) ? 28
+                   : 24;
+      }
+    }
+
+    // FALLBACK: If no clickedLandmarkIndex, use the old region-center logic
+    if (glowX === undefined) {
+      switch (selId) {
+        case 'left_knee':       glowX = kneeL.x; glowY = kneeL.y; glowRadius = 28; break;
+        case 'right_knee':      glowX = kneeR.x; glowY = kneeR.y; glowRadius = 28; break;
+        case 'left_elbow':      glowX = elbowL.x; glowY = elbowL.y; glowRadius = 24; break;
+        case 'right_elbow':     glowX = elbowR.x; glowY = elbowR.y; glowRadius = 24; break;
+        case 'spine_center':    glowX = sternum.x; glowY = sternum.y; glowRadius = 30; break;
+        case 'pelvis_core':     glowX = pelvisCenter.x; glowY = pelvisCenter.y; glowRadius = 30; break;
+        case 'shoulder_line':
+          glowX = (shoulderL.x + shoulderR.x) / 2;
+          glowY = (shoulderL.y + shoulderR.y) / 2;
+          glowRadius = 35; break;
+        case 'head_epaulement': glowX = head.x; glowY = head.y; glowRadius = 26; break;
+        case 'port_de_bras_arms':
+          drawGlowRing(ctx, elbowL.x, elbowL.y, 22, glowPhase, isGood, sx, sy);
+          drawGlowRing(ctx, elbowR.x, elbowR.y, 22, glowPhase, isGood, sx, sy);
+          break;
+      }
     }
 
     if (glowX !== undefined && glowY !== undefined) {

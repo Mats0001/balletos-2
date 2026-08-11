@@ -61,6 +61,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
   const [selectedJointId, setSelectedJointId] = useState<string>('');
+  /** Index of the actually clicked landmark (for glow positioning on exact joint) */
+  const [clickedLandmarkIndex, setClickedLandmarkIndex] = useState<number | undefined>(undefined);
   /** Glow type for selected cue point: 'GOOD' (green) or 'CORRECTION' (red-warm) */
   const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
@@ -729,6 +731,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   showCoG,
                   showAngleArcs,
                   selectedJointId: !isPlaying ? selectedJointId : '',
+                  clickedLandmarkIndex: !isPlaying ? clickedLandmarkIndex : undefined,
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: activeCueGlowTypeRef.current,
                   showIdealOverlay: !isPlaying && showIdealOverlay,
@@ -763,7 +766,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // FIX (Berater 2026-08-11): overlayMode removed from deps.
   // Mode is read via overlayModeRef inside the loop → no effect restart on mode switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, showIdealOverlay, showFocusDim]);
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, clickedLandmarkIndex, showIdealOverlay, showFocusDim]);
 
   // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
   useEffect(() => {
@@ -872,6 +875,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
       setSelectedFrameTime(cue.timecodeStr);
       setSelectedJointId(cue.jointFocusId);
+      setClickedLandmarkIndex(undefined); // Cue-based → fallback to region-center glow
       activeCueGlowTypeRef.current = cue.status === 'GOOD' ? 'GOOD' : 'CORRECTION';
 
       // ── AUTO-ZOOM: Zoom zum relevanten Gelenk ──
@@ -1066,6 +1070,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       const mappedJointId = boneJointOverride || LANDMARK_TO_JOINT_ID[nearestIdx];
       if (mappedJointId) {
         setSelectedJointId(mappedJointId);
+        setClickedLandmarkIndex(nearestIdx);
 
         // Determine glow type from current overlay packet state
         const pkt = stabilizedOverlayRef.current;
@@ -1319,6 +1324,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setZoomLevel(1);
         setPanOffset({ x: 0, y: 0 });
         setSelectedJointId('');
+        setClickedLandmarkIndex(undefined);
         setShowIdealOverlay(false);
         setJointPopover(null);
         setIsAnnotationModeActive(false);
