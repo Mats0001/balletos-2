@@ -95,6 +95,38 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
   const [summaryOpen, setSummaryOpen] = useState<boolean>(true);
   const [summaryTab, setSummaryTab] = useState<number>(0);
+
+  // VIDEO RENAME STATE
+  const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState<string>('');
+
+  // ANALYSE-TOAST STATE
+  const [analyseToast, setAnalyseToast] = useState<string | null>(null);
+  const analyseToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleRenameVideo = () => {
+    if (!renamingVideoId || !renameValue.trim()) {
+      setRenamingVideoId(null);
+      return;
+    }
+    videoStore.renameVideo(renamingVideoId, renameValue.trim());
+    setVideoList(videoStore.getAllVideos());
+    setRenamingVideoId(null);
+  };
+
+  const startRename = () => {
+    const vid = videoList.find(v => v.url === selectedDevVideoUrl);
+    if (!vid) return;
+    setRenamingVideoId(vid.id);
+    setRenameValue(vid.title);
+  };
+
+  const showAnalyseToast = (msg: string) => {
+    setAnalyseToast(msg);
+    if (analyseToastTimerRef.current) clearTimeout(analyseToastTimerRef.current);
+    analyseToastTimerRef.current = setTimeout(() => setAnalyseToast(null), 4000);
+  };
+
   const toggleCueExpanded = (id: string) => {
     setSummaryOpen(false); // Gesamt-Summary einklappen wenn Cue geöffnet wird
     setExpandedCueIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -308,7 +340,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
     setAnalysisReport(report);
 
-    // ── Übungsname in Navbar aktualisieren ──────────────────────────────
+    // ── Analyse-Toast zeigen ──────────────────────────────────────────
+    if (report) {
+      const s = report.strengths.length;
+      const c = report.corrections.length;
+      const totalCues = autoCuePoints.length;
+      showAnalyseToast(
+        `✅ Analyse abgeschlossen: ${totalCues} Cue-Points · ${s} Stärke${s !== 1 ? 'n' : ''} · ${c} Korrektur${c !== 1 ? 'en' : ''}`
+      );
+      setSummaryOpen(true); // Zusammenfassung automatisch aufklappen
+    }
+
+    // ── Übungsname in Navbar aktualisieren ─────────────────────────────────────
     // motionClass.detectedPoseName ist nach dem Scan bekannt
     if (onExerciseChange) {
       const perspLabel = motionClass.detectedPerspective === 'FRONTAL' ? 'Frontal' : 'Profil';
@@ -1435,29 +1478,88 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       }}>
         {/* Left: Video Selector & KI-Analyse Status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <select
-            value={selectedDevVideoUrl}
-            onChange={(e) => handleVideoSelect(e.target.value)}
-            style={{
-              background: 'rgba(25, 20, 35, 0.9)',
-              color: '#ffffff',
-              border: '1px solid rgba(192, 132, 252, 0.3)',
-              borderRadius: '10px',
-              padding: '5px 10px',
-              fontSize: '11px',
-              fontWeight: 600,
-              fontFamily: 'Montserrat',
-              outline: 'none',
-              cursor: 'pointer',
-              maxWidth: '200px'
-            }}
-          >
-            {videoList.map(vid => (
-              <option key={vid.id} value={vid.url} style={{ background: '#1c1c1e', color: '#fff' }}>
-                {vid.title}
-              </option>
-            ))}
-          </select>
+          {/* Video-Selector mit Rename-Inline */}
+          {renamingVideoId ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRenameVideo();
+                  if (e.key === 'Escape') setRenamingVideoId(null);
+                }}
+                onBlur={() => handleRenameVideo()}
+                style={{
+                  background: 'rgba(25, 20, 35, 0.95)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(192, 132, 252, 0.5)',
+                  borderRadius: '8px',
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  fontFamily: 'Montserrat',
+                  outline: 'none',
+                  width: '200px',
+                }}
+              />
+              <button
+                onClick={() => handleRenameVideo()}
+                style={{ background: 'rgba(48,209,88,0.15)', color: '#30d158', border: 'none', borderRadius: '6px', padding: '3px 6px', fontSize: '10px', cursor: 'pointer' }}
+              >
+                <Save size={11} />
+              </button>
+              <button
+                onClick={() => setRenamingVideoId(null)}
+                style={{ background: 'rgba(255,69,58,0.15)', color: '#ff453a', border: 'none', borderRadius: '6px', padding: '3px 6px', fontSize: '10px', cursor: 'pointer' }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <select
+                value={selectedDevVideoUrl}
+                onChange={(e) => handleVideoSelect(e.target.value)}
+                style={{
+                  background: 'rgba(25, 20, 35, 0.9)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(192, 132, 252, 0.3)',
+                  borderRadius: '10px',
+                  padding: '5px 10px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  fontFamily: 'Montserrat',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  maxWidth: '200px'
+                }}
+              >
+                {videoList.map(vid => (
+                  <option key={vid.id} value={vid.url} style={{ background: '#1c1c1e', color: '#fff' }}>
+                    {vid.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={startRename}
+                title="Video umbenennen"
+                style={{
+                  background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.5)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '6px',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Edit2 size={11} />
+              </button>
+            </div>
+          )}
 
           {/* Upload – Icon-Pill */}
           <button
@@ -1862,6 +1964,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.55)' }}>Wird analysiert &amp; für nächste Sitzung gespeichert…</span>
                       </>
                     )}
+                  </div>
+                )}
+
+                {/* Analyse-Abschluss Toast */}
+                {analyseToast && !isPreIndexing && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '60px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(48,209,88,0.15)',
+                    border: '1px solid rgba(48,209,88,0.4)',
+                    backdropFilter: 'blur(12px)',
+                    borderRadius: '10px',
+                    padding: '8px 16px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    color: '#30d158',
+                    zIndex: 45,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 4px 20px rgba(48,209,88,0.2)',
+                  }}>
+                    {analyseToast}
                   </div>
                 )}
 

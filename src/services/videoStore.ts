@@ -19,11 +19,61 @@ export const defaultDevStudioVideos: StoredVideoItem[] = [
   { id: 'v9', title: '🩰 Nicole Studio Saal Clip 9 (IMG_2281.mp4)', url: '/videos/nicole_saal_9.mp4', topic: 'Arabesque & Körperhaltung' }
 ];
 
+const CUSTOM_TITLES_KEY = 'balletos_video_custom_titles';
+
 class VideoStoreService {
   private customVideos: StoredVideoItem[] = [];
+  /** Persistente benutzerdefinierte Titel (videoId → title) */
+  private customTitles: Map<string, string>;
+
+  constructor() {
+    // Gespeicherte Titel aus localStorage laden
+    this.customTitles = new Map();
+    try {
+      const stored = localStorage.getItem(CUSTOM_TITLES_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<string, string>;
+        for (const [k, v] of Object.entries(parsed)) {
+          this.customTitles.set(k, v);
+        }
+      }
+    } catch { /* noop */ }
+  }
+
+  private persistTitles() {
+    try {
+      const obj: Record<string, string> = {};
+      this.customTitles.forEach((v, k) => { obj[k] = v; });
+      localStorage.setItem(CUSTOM_TITLES_KEY, JSON.stringify(obj));
+    } catch { /* noop */ }
+  }
 
   public getAllVideos(): StoredVideoItem[] {
-    return [...defaultDevStudioVideos, ...this.customVideos];
+    const all = [...defaultDevStudioVideos, ...this.customVideos];
+    // Benutzerdefinierte Titel anwenden
+    return all.map(v => {
+      const customTitle = this.customTitles.get(v.id);
+      return customTitle ? { ...v, title: customTitle } : v;
+    });
+  }
+
+  /**
+   * Benennt ein Video um. Funktioniert für Default- und Upload-Videos.
+   * Der Titel wird in localStorage persistiert.
+   */
+  public renameVideo(videoId: string, newTitle: string): void {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    this.customTitles.set(videoId, trimmed);
+    this.persistTitles();
+  }
+
+  /**
+   * Setzt den Titel eines Videos auf den Original-Titel zurück.
+   */
+  public resetTitle(videoId: string): void {
+    this.customTitles.delete(videoId);
+    this.persistTitles();
   }
 
   public addCustomVideo(file: File): StoredVideoItem {
