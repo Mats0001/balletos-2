@@ -617,17 +617,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Canvas draw always runs at 60fps using cached analysis
               const c = cachedAnalysisRef.current;
               if (c) {
-                // Compute TeacherOverlayPacket from fresh analysis
-                // (Engine is stateless — no re-render triggered)
-                const overlayPacket: TeacherOverlayPacket | undefined =
-                  overlayMode === 'lehrer-ampel'
-                    ? teacherHeuristicEngine.compute(
-                        c.vagAn,
-                        c.sk,
-                        v.currentTime,
-                        streamEpochRef.current,
-                      )
-                    : undefined;
+                // ⛔ DEAKTIVIERT (Berater 2026-08-11, korrigierte Reihenfolge):
+                // TeacherHeuristicEngine darf erst NACH Frame-Wahrheit (Schritte 1-6)
+                // runtime-aktiviert werden. Bis dahin: Renderer zeigt neutral/blocked.
+                // Wird in Schritt 9 reaktiviert.
+                //
+                // const overlayPacket: TeacherOverlayPacket | undefined =
+                //   overlayMode === 'lehrer-ampel'
+                //     ? teacherHeuristicEngine.compute(c.vagAn, c.sk, v.currentTime, streamEpochRef.current)
+                //     : undefined;
+                const overlayPacket: TeacherOverlayPacket | undefined = undefined;
 
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: showSkeleton,
