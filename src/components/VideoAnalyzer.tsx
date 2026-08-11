@@ -187,11 +187,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [captionPanelOpen, setCaptionPanelOpen] = useState<boolean>(false);
   const [captionDraft, setCaptionDraft] = useState<string>('');
 
-  // 🦴 Joint popover state
+  // 🦴 Joint popover state (normalizedX/Y are 0–1 relative to canvas)
   const [jointPopover, setJointPopover] = useState<{
     landmarkIndex: number;
-    pixelX: number;
-    pixelY: number;
+    normalizedX: number;
+    normalizedY: number;
   } | null>(null);
 
   // Persist annotations to localStorage whenever they change
@@ -1023,11 +1023,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
 
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
-      // Snap popover anchor to the representative joint pixel position
+      // Snap popover anchor to the representative joint position (normalized 0–1)
       const repLm = lm[nearestIdx];
-      const snapX = repLm ? repLm.x * bounds.width : clickX;
-      const snapY = repLm ? repLm.y * bounds.height : clickY;
-      setJointPopover({ landmarkIndex: nearestIdx, pixelX: snapX, pixelY: snapY });
+      const normX = repLm ? repLm.x : clickX / bounds.width;
+      const normY = repLm ? repLm.y : clickY / bounds.height;
+      setJointPopover({ landmarkIndex: nearestIdx, normalizedX: normX, normalizedY: normY });
       // Pause video for better exploration
       if (videoRef.current && !videoRef.current.paused) {
         videoRef.current.pause();
@@ -1319,6 +1319,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setZoomLevel(1);
         setPanOffset({ x: 0, y: 0 });
         setSelectedJointId('');
+        setShowIdealOverlay(false);
+        setJointPopover(null);
         setIsAnnotationModeActive(false);
       }
     }
@@ -2435,8 +2437,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Compute viewport coords from the skeleton canvas bounding rect
               const canvasRect = canvasRef.current?.getBoundingClientRect();
               if (!canvasRect) return null;
-              const vpJointX = canvasRect.left + jointPopover.pixelX;
-              const vpJointY = canvasRect.top + jointPopover.pixelY;
+              // Normalized coords × transformed rect = correct viewport position during zoom/pan
+              const vpJointX = canvasRect.left + jointPopover.normalizedX * canvasRect.width;
+              const vpJointY = canvasRect.top + jointPopover.normalizedY * canvasRect.height;
               return (
                 <SkeletonJointPopover
                   knowledge={knowledge}
