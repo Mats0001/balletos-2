@@ -2256,6 +2256,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       : `1px solid ${cueBorderColor(cue.status)}`,
                     borderRadius: '10px',
                     overflow: 'hidden',
+                    flexShrink: 0,
                     transition: 'border-color 0.2s ease, background 0.2s ease',
                     opacity: cue.provenance === 'nicole_rejected' ? 0.45 : 1,
                   }}
