@@ -383,6 +383,22 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   }
 
   if (bestCoG && bestCoG.value > 80) {
+    const timeSec = bestCoG.timeSec;
+    autoCuePoints.push({
+      id: `ki-cog-good-${timeSec.toFixed(3)}`,
+      timeSeconds: timeSec,
+      timecodeStr: fmtTime(timeSec),
+      poseName: 'Körperschwerpunkt-Stabilität (KI erkannt)',
+      status: 'GOOD',
+      headline: 'Sehr gute Schwerpunkt-Kontrolle – Stabilität über Standfläche',
+      cueMetaphor: '"Stell dir vor, du hast einen Laserstrahl am Bauchnabel — er zeigt exakt zwischen deine Füße auf den Boden."',
+      jointFocusId: 'pelvis_core',
+      dataSource: 'KI_AUTO',
+      diagnosisMetaphor: '"Der Körperschwerpunkt steht wie ein ruhiger Anker genau über der Mitte der Standfläche — das gibt jeder Bewegung Sicherheit und Eleganz."',
+      kiNote: `An diesem Frame liegt der projizierte Körperschwerpunkt stabil über der Standfläche — mit nur minimaler Abweichung. Das ist eine echte Stärke: die Rumpfstabilität (Core) arbeitet hier optimal mit dem Gleichgewicht zusammen. Dieses Gefühl der zentralen Balance als Referenz verankern.`,
+      goalText: 'Der Schwerpunkt bleibt in jeder Phase der Bewegung — vom Aufstieg bis zum Tiefpunkt — ruhig über der Standfläche zentriert. Keine seitliche Drift, kein Kippen nach vorne oder hinten. Das ist die Basis für alle Balancen und Drehungen.',
+      practiceText: 'Im Spiegel von vorne und von der Seite: Gibt es einen Moment, wo der Oberkörper seitlich ausweicht? Beim Plié bewusst spüren: Ist das Gewicht gleichmäßig auf beiden Füßen? Übung: Relevé mit geschlossenen Augen — 5 Sekunden halten. Wenn der Schwerpunkt zentriert ist, fühlt sich das mühelos an.',
+    });
     strengths.push({ label: 'Körperschwerpunkt über Standfläche', value: 'Stabil' });
   }
 

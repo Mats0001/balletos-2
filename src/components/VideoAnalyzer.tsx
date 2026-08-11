@@ -990,12 +990,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         practice: 'Schultern hochziehen, 3 Sekunden halten, dann langsam loslassen und tiefer als normal sinken lassen — das ist die richtige Position. Täglich auch außerhalb des Tanzens üben.',
       },
       {
-        condition: (va.pelvicTilt?.status === 'ERROR' || va.spineTilt?.status === 'ERROR'),
+        condition: (va.spineTilt?.status === 'ERROR'),
+        headline: 'Oberkörper-Achse – Wirbelsäule aufrichten',
+        status: 'WARNING',
+        diag: `Die Torso-Linie weicht von der Senkrechten ab — der Oberkörper neigt sich seitlich oder nach vorne. Gemessen: ${va.spineTilt?.value?.toFixed(1) ?? '?'}° Abweichung. Die gelbe Torso-Linie im Skeleton zeigt genau diese Schiefstellung. Das passiert häufig, wenn die seitliche Rumpfmuskulatur oder die Tiefenstabilisatoren (M. multifidus, M. transversus abdominis) ermüden.`,
+        goal: 'Die Wirbelsäule bleibt wie eine aufgefädelte Perlenkette lang und senkrecht — keine Seitneigung, kein Vorbeugen. Die Torso-Linie im Skeleton sollte grün sein (vertikal). Der Oberkörper liegt ruhig über dem Becken, als ob ein Faden den Scheitel zur Decke zieht.',
+        practice: 'An der Stange: Plié ausführen und dabei im Spiegel (Seitenansicht) beobachten, ob der Oberkörper genau senkrecht bleibt. Faust zwischen Brustbein und Kinn halten — der Abstand sollte sich im Plié nicht verändern. Seitlich: Hände auf die Hüften — beim Tendu bleibt der Oberkörper exakt über dem Becken, kein Ausweichen zur Standbeinseite.',
+      },
+      {
+        condition: (va.pelvicTilt?.status === 'ERROR'),
         headline: 'Becken-Achse – Neutralposition halten',
         status: 'WARNING',
-        diag: `Beckenkippung oder Wirbelsäulenabweichung erkannt. Wert: ${va.pelvicTilt?.value?.toFixed(1) ?? va.spineTilt?.value?.toFixed(1) ?? '?'}°. Das führt zu Kompensation in der gesamten Kette.`,
+        diag: `Beckenkippung erkannt — das Becken ist nach vorne oder hinten rotiert. Wert: ${va.pelvicTilt?.value?.toFixed(1) ?? '?'}°. Eine gekippte Beckenposition verschiebt die gesamte Körperachse und führt zu Kompensation in Wirbelsäule und Knien.`,
         goal: 'Becken in neutraler Mitte — nicht aktiv eingedrückt, nicht gewölbt. Wirbelsäule behält ihre natürliche S-Kurve. Energie fließt nach oben zur offenen Brust.',
-        practice: 'Hand auf Bauchnabel, Hand auf Lendenwirbel — beim langsamen Plié spüren, ob sich die Lendenwirbel mitbewegen. Sie sollen ruhig bleiben.',
+        practice: 'Hand auf Bauchnabel, Hand auf Lendenwirbel — beim langsamen Plié spüren, ob sich die Lendenwirbel mitbewegen. Sie sollen ruhig bleiben. Übung: \"Wasserglas auf dem Steißbein\" — im Stehen und Plié darf es nicht kippen.',
       },
       {
         condition: (va.shoulderSymmetry?.status === 'CORRECT' && va.shoulderElevationL?.status !== 'ERROR' && va.shoulderElevationR?.status !== 'ERROR'),
@@ -1413,11 +1421,31 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     videoEl?.videoHeight || 1
   );
 
+  // Derive finding severity from the evidence ledger (Fix D, 2026-08-11)
+  // The headline comes from the "activeCp" – the most prominent checkpoint.
+  // Map checkpoint status → inspector severity for correct coloring.
+  const deriveFindingSeverity = (): 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL' => {
+    if (!feedbackObj.checkpointResults || feedbackObj.checkpointResults.length === 0) return 'NEUTRAL';
+    // Find the checkpoint whose name appears in the headline
+    const activeResult = feedbackObj.checkpointResults.find(cp =>
+      feedbackObj.findingHeadline.includes(cp.name)
+    );
+    if (!activeResult) return 'NEUTRAL';
+    switch (activeResult.status) {
+      case 'auffaellig': return 'CORRECTION';
+      case 'review': return 'WARNING';
+      case 'richtig': return 'GOOD';
+      case 'nicht_auswertbar': return 'NEUTRAL';
+      default: return 'NEUTRAL';
+    }
+  };
+
   const inspectorData: JetztWichtigInspectorData = {
     studentName: feedbackObj.studentName,
     exerciseName: `${motionClass.detectedPoseName} (${motionClass.detectedPerspective === 'FRONTAL' ? 'Frontal' : 'Profil-Seite'})`,
     timestampStr: feedbackObj.timestampStr,
     findingHeadline: feedbackObj.findingHeadline,
+    findingSeverity: deriveFindingSeverity(),
     whyRelevant: feedbackObj.whyRelevant,
     positiveNote: feedbackObj.positiveNote,
     uncertaintyNote: feedbackObj.uncertaintyNote,

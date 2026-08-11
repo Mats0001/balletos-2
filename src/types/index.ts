@@ -98,6 +98,8 @@ export interface JetztWichtigInspectorData {
   exerciseName: string;
   timestampStr: string;
   findingHeadline: string;
+  /** Severity of the finding – drives headline color (Fix D, 2026-08-11) */
+  findingSeverity?: 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL';
   whyRelevant: string;
   positiveNote: string;
   uncertaintyNote: string;

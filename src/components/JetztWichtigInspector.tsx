@@ -84,7 +84,14 @@ export const JetztWichtigInspector: React.FC<Props> = ({ data, onApplyDictation 
           <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffffff', fontFamily: 'Montserrat' }}>
             <span style={{ color: '#c084fc' }}>{data.exerciseName}</span>
           </div>
-          <div style={{ fontSize: '11px', color: '#ff453a', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{
+            fontSize: '11px',
+            color: data.findingSeverity === 'GOOD' ? '#30d158'
+              : data.findingSeverity === 'CORRECTION' ? '#ff453a'
+              : data.findingSeverity === 'WARNING' ? '#ff9f0a'
+              : 'rgba(255,255,255,0.6)', // NEUTRAL or undefined → light gray
+            fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px'
+          }}>
             <AlertCircle size={12} /> {dictatedText ? `Diktat: "${dictatedText}"` : data.findingHeadline}
           </div>
         </div>
