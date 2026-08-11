@@ -395,16 +395,18 @@ export function renderSkeletonToCanvas(
     for (const [anklePoint, turnoutKey] of turnoutPairs) {
       const turnoutVal = va?.[turnoutKey];
       const turnoutConf = turnoutVal?.confidence ?? 0.7;
+      // FIX (Berater 2026-08-11): Turnout-Farbe NUR aus Packet, nicht aus .status
       const tColor = mode === 'lehrer-ampel'
-        ? statusColor(turnoutVal?.status)
+        ? packetColor(turnoutKey === 'turnoutL' ? 'footL' : 'footR')
         : boneColor(COLOR_SPINE);
       ctx.beginPath();
       ctx.arc(anklePoint.x * sx, anklePoint.y * sy, 28 * avgS, Math.PI, 0);
       ctx.strokeStyle = tColor;
       ctx.lineWidth = 3 * avgS;
       ctx.globalAlpha = confidenceAlpha(turnoutConf) * 0.7;
+      // FIX: Kein direkter .status-Check für Füllfarbe
       ctx.fillStyle = mode === 'lehrer-ampel'
-        ? (turnoutVal?.status === 'CORRECT' ? 'rgba(48,209,88,0.12)' : 'rgba(255,214,10,0.10)')
+        ? 'rgba(255,255,255,0.06)' // Neutral — Packet bestimmt Outline-Farbe
         : 'rgba(226,232,240,0.06)';
       ctx.fill();
       ctx.stroke();
@@ -414,8 +416,8 @@ export function renderSkeletonToCanvas(
 
   // ─── KOPF & HALS ───
   const headConf = opts.vaganovaAnalysis?.headTilt?.confidence;
-  const headStatusC = statusColor(opts.vaganovaAnalysis?.headTilt?.status);
-  const headC = mode === 'lehrer-ampel' ? headStatusC : boneColor(COLOR_HEAD);
+  // FIX (Berater 2026-08-11): Kopf-Farbe NUR aus Packet
+  const headC = mode === 'lehrer-ampel' ? packetColor('head') : boneColor(COLOR_HEAD);
   ctx.globalAlpha = confidenceAlpha(headConf);
   drawCircle(ctx, head.x, head.y, 18,
     mode === 'lehrer-ampel' ? 'rgba(192,132,252,0.15)' : 'rgba(192,132,252,0.18)', sx, sy,
@@ -425,8 +427,9 @@ export function renderSkeletonToCanvas(
 
   // ─── WIRBELSÄULE ───
   const spineConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
+  // FIX (Berater 2026-08-11): Spine-Farbe NUR aus Packet
   const spineC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.spineTilt?.status)
+    ? packetColor('spine')
     : boneColor(COLOR_SPINE);
   ctx.globalAlpha = confidenceAlpha(spineConf);
   drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy);
@@ -441,8 +444,9 @@ export function renderSkeletonToCanvas(
   // ─── ARME (violett / status im Lehrer-Ampel-Modus) ───
   const armLConf = opts.vaganovaAnalysis?.armLineQualityL?.confidence;
   const armRConf = opts.vaganovaAnalysis?.armLineQualityR?.confidence;
-  const armLStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityL?.status);
-  const armRStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityR?.status);
+  // FIX (Berater 2026-08-11): Arm-Farbe NUR aus Packet
+  const armLStatusC = packetColor('armL');
+  const armRStatusC = packetColor('armR');
   const armLColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
     : mode === 'lehrer-ampel' ? armLStatusC : boneColor(COLOR_ARM);
   const armRColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
@@ -450,8 +454,9 @@ export function renderSkeletonToCanvas(
 
   // Schulterleiste
   const shConf = opts.vaganovaAnalysis?.shoulderSymmetry?.confidence;
+  // FIX (Berater 2026-08-11): Schulter-Farbe NUR aus Packet
   const shC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.shoulderSymmetry?.status)
+    ? packetColor('shoulder')
     : boneColor(COLOR_ARM);
   ctx.globalAlpha = confidenceAlpha(shConf);
   drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy);
@@ -499,8 +504,9 @@ export function renderSkeletonToCanvas(
   drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, torsoAlignC, 2.5, sx, sy, torsoDash);
   // Becken-Leiste
   const pelvisConf = opts.vaganovaAnalysis?.pelvicTilt?.confidence;
+  // FIX (Berater 2026-08-11): Becken-Farbe NUR aus Packet
   const pelvisC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.pelvicTilt?.status)
+    ? packetColor('pelvis')
     : boneColor(COLOR_PELVIS);
   ctx.globalAlpha = confidenceAlpha(pelvisConf);
   drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy);
