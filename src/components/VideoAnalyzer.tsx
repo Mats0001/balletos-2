@@ -1065,10 +1065,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
 
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
-      // Snap popover anchor to the representative joint position (normalized 0–1)
+      // Popover anchor: For JOINT clicks → snap to joint position.
+      // For BONE clicks → use the actual click position (user expects arrow where they clicked).
       const repLm = lm[nearestIdx];
-      const normX = repLm ? repLm.x : clickX / bounds.width;
-      const normY = repLm ? repLm.y : clickY / bounds.height;
+      const isBoneHit = boneJointOverride !== undefined || !repLm;
+      const normX = isBoneHit ? clickX / bounds.width  : repLm!.x;
+      const normY = isBoneHit ? clickY / bounds.height : repLm!.y;
       setJointPopover({ landmarkIndex: nearestIdx, normalizedX: normX, normalizedY: normY });
       // Pause video for better exploration
       if (videoRef.current && !videoRef.current.paused) {
