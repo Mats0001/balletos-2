@@ -1234,6 +1234,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       } else {
         videoRef.current.play().catch(() => {});
         if (refVideoRef.current) refVideoRef.current.play().catch(() => {});
+        // Reset zoom + cue-overlays when resuming playback
+        setZoomLevel(1);
+        setPanOffset({ x: 0, y: 0 });
+        setSelectedJointId('');
       }
     }
   };
@@ -2177,10 +2181,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           <div style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
             
             {/* VIEWPORT 1: HD BALLET VIDEO STREAM (NATIVE RELATIVE OVERLAY WRAP) */}
+            <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
             <div ref={videoContainerRef} style={{
-              position: 'relative',
-              width: '100%',
-              height: '100%',
+              position: 'absolute',
+              inset: 0,
               overflow: 'hidden',
               background: '#050407',
               transform: `scale(${zoomLevel}) translate(${panOffset.x}%, ${panOffset.y}%)`,
@@ -2199,7 +2203,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 if (!isDraggingRef.current) return;
                 const dx = e.clientX - dragStartRef.current.x;
                 const dy = e.clientY - dragStartRef.current.y;
-                // Convert pixel drag to % offset (scaled by container size and zoom)
                 const container = videoContainerRef.current;
                 if (!container) return;
                 const rect = container.getBoundingClientRect();
@@ -2332,6 +2335,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
 
             </div>{/* end videoContainerRef */}
+            </div>{/* end overflow wrapper */}
 
             {/* 🦴 JOINT KNOWLEDGE POPOVER – position:fixed, outside all overflow:hidden containers */}
             {jointPopover && overlayBounds && (() => {

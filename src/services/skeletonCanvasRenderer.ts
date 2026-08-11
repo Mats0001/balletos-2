@@ -633,22 +633,22 @@ export function renderSkeletonToCanvas(
     let focusR = 80;
 
     switch (opts.selectedJointId) {
-      case 'left_knee':   focusX = kneeL.x; focusY = kneeL.y; focusR = 90; break;
-      case 'right_knee':  focusX = kneeR.x; focusY = kneeR.y; focusR = 90; break;
-      case 'left_elbow':  focusX = elbowL.x; focusY = elbowL.y; focusR = 75; break;
-      case 'spine_center': focusX = sternum.x; focusY = sternum.y; focusR = 100; break;
-      case 'pelvis_core':  focusX = pelvisCenter.x; focusY = pelvisCenter.y; focusR = 95; break;
+      case 'left_knee':   focusX = kneeL.x; focusY = kneeL.y; focusR = 65; break;
+      case 'right_knee':  focusX = kneeR.x; focusY = kneeR.y; focusR = 65; break;
+      case 'left_elbow':  focusX = elbowL.x; focusY = elbowL.y; focusR = 55; break;
+      case 'spine_center': focusX = sternum.x; focusY = sternum.y; focusR = 70; break;
+      case 'pelvis_core':  focusX = pelvisCenter.x; focusY = pelvisCenter.y; focusR = 65; break;
       case 'shoulder_line': {
         focusX = (shoulderL.x + shoulderR.x) / 2;
         focusY = (shoulderL.y + shoulderR.y) / 2;
-        focusR = 120;
+        focusR = 85;
         break;
       }
-      case 'head_epaulement': focusX = head.x; focusY = head.y; focusR = 70; break;
+      case 'head_epaulement': focusX = head.x; focusY = head.y; focusR = 50; break;
       case 'port_de_bras_arms': {
         focusX = (elbowL.x + elbowR.x) / 2;
         focusY = (elbowL.y + elbowR.y) / 2;
-        focusR = 160;
+        focusR = 110;
         break;
       }
     }
