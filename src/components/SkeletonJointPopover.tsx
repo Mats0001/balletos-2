@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Zap, Dumbbell, AlertTriangle, TrendingDown, CheckCircle } from 'lucide-react';
+import { X, Zap, Dumbbell, AlertTriangle, TrendingDown, CheckCircle, Copy, Check } from 'lucide-react';
 import { JointKnowledge } from '../services/skeletonJointKnowledge';
 import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
 
@@ -91,6 +91,30 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 }) => {
   const color = REGION_COLORS[knowledge.region] ?? '#c084fc';
   const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyAll = useCallback(() => {
+    const parts: string[] = [
+      `${knowledge.name} · ${knowledge.region.toUpperCase()} · VAGANOVA`,
+      '',
+    ];
+    if (liveMeasurements.length > 0) {
+      parts.push('LIVE-MESSUNG:');
+      liveMeasurements.forEach(({ m }) => parts.push(`  ${m.label}: ${formatValue(m)}${m.norm ? ' | ' + m.norm : ''}`));
+      parts.push('');
+    }
+    parts.push(`BEFUND: ${knowledge.commonMistake}`);
+    parts.push('');
+    parts.push(`WARUM: ${knowledge.howAndWhy}`);
+    parts.push('');
+    parts.push(`${knowledge.exerciseTitle}: ${knowledge.exercise}`);
+    parts.push('');
+    parts.push(`VAGANOVA-STANDARD: ${knowledge.vaganovaRule}`);
+    navigator.clipboard.writeText(parts.join('\n')).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [knowledge, liveMeasurements]);
 
   // ESC to close
   useEffect(() => {
@@ -99,16 +123,15 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const W = 234;
+  const W = 280;
 
-  // ── POSITION: RECHTS-VERANKERT ───────────────────────────────────
-  // right: 348px = rechtes Panel (340px) + 8px Abstand
-  // So liegt das Popover IMMER zwischen Video und rechtem Panel.
-  // Es überdeckt NIE die Live-Messwerte.
-  const popoverRight = 348; // px vom rechten Viewport-Rand
-  // Gleiche vertikale Logik wie vorher:
-  let popoverTop = jointY - 200;
-  popoverTop = Math.max(10, Math.min(containerHeight - 50, popoverTop));
+  // ── POSITION: überlagert den Video-Content ──────────────────────────────────
+  // right: 356px = rechtes Panel (340px) + 16px Abstand — BLEIBT über dem Video
+  // Das Popover überlagert bewusst den Video-Content (wie ein Overlay)
+  const popoverRight = 356; // px vom rechten Viewport-Rand
+  let popoverTop = Math.max(8, jointY - 120);
+  const maxTop = containerHeight - 200;
+  popoverTop = Math.min(popoverTop, maxTop);
 
   // ── SVG CONNECTOR ─────────────────────────────────
   // Schwanz startet an der LINKEN Seite des Popovers (zur Mitte des Videos)
@@ -174,11 +197,9 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           right: `${popoverRight}px`,
           top: `${popoverTop}px`,
           width: `${W}px`,
-          // maxHeight: verbleibender Platz ab popoverTop bis zum unteren Rand (16px Abstand)
           maxHeight: `calc(100vh - ${popoverTop + 16}px)`,
           overflowX: 'hidden',
           overflowY: 'auto',
-          // Scrollbar sichtbar + passend zum Dark Theme
           scrollbarWidth: 'thin',
           scrollbarColor: `${color}60 rgba(255,255,255,0.05)`,
           zIndex: 9999,
@@ -199,18 +220,28 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 
         {/* HEADER */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px 8px', borderBottom: `1px solid ${color}20`, background: `linear-gradient(135deg, ${color}18 0%, transparent 100%)` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '17px' }}>{knowledge.emoji}</span>
-            <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+            <span style={{ fontSize: '17px', flexShrink: 0 }}>{knowledge.emoji}</span>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{knowledge.name}</div>
               <div style={{ fontSize: '9px', fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
                 {knowledge.region} · Vaganova
               </div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <X size={11} />
-          </button>
+          {/* Copy + Close buttons */}
+          <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+            <button
+              onClick={handleCopyAll}
+              title="Inhalt in Zwischenablage kopieren"
+              style={{ background: copied ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.07)', border: 'none', color: copied ? '#30d158' : 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '26px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s ease' }}
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+            </button>
+            <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <X size={11} />
+            </button>
+          </div>
         </div>
 
         {/* LIVE FRAME ANALYSIS – top priority block when data available */}

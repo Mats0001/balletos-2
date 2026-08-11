@@ -110,7 +110,7 @@ export interface JetztWichtigInspectorData {
 
 export type Location = 'MAINZ' | 'ALZEY';
 
-export type AgeGroup = 'MINIS' | 'KIDS' | 'TEENS' | 'MASTERCLASS';
+export type AgeGroup = 'MINIS' | 'KIDS' | 'TEENS' | 'ERWACHSENE' | 'MASTERCLASS';
 
 export interface Student {
   id: string;

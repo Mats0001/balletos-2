@@ -1,5 +1,5 @@
-import React from 'react';
-import { Camera, Sparkles, Activity, Users, Smartphone, Tv, MapPin, User, Sliders, Feather } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Camera, Sparkles, Activity, Users, Smartphone, MessageSquare, Send, Mic, MicOff, User } from 'lucide-react';
 import { Location, AgeGroup } from '../types';
 
 interface Props {
@@ -25,6 +25,47 @@ export const Navbar: React.FC<Props> = ({
   selectedStudent,
   onStudentChange
 }) => {
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'NICOLE' | 'KI'; text: string }>>([{
+    sender: 'KI',
+    text: 'Aurora KI bereit. Knie-Fuss-Linie und Plié-Tiefe werden laufend geprüft.'
+  }]);
+  const [inputText, setInputText] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  const handleSend = () => {
+    if (!inputText.trim()) return;
+    const txt = inputText.trim();
+    setChatMessages(prev => [...prev, { sender: 'NICOLE', text: txt }]);
+    setInputText('');
+    setTimeout(() => {
+      setChatMessages(prev => [...prev, {
+        sender: 'KI',
+        text: `Notiz gespeichert: "${txt}" — wird an Schüler-App übermittelt.`
+      }]);
+    }, 800);
+  };
+
+  const handleVoice = () => {
+    if (!isRecording) {
+      setIsRecording(true);
+      setTimeout(() => {
+        setIsRecording(false);
+        setChatMessages(prev => [
+          ...prev,
+          { sender: 'NICOLE', text: 'Knie-Fuss-Linie vor der Drehung über 2. Zeh kontrollieren.' },
+          { sender: 'KI', text: 'Diktat als Unterrichtsnotiz übernommen.' }
+        ]);
+      }, 2000);
+    } else {
+      setIsRecording(false);
+    }
+  };
   const tabs = [
     { id: 'cam', label: 'Saal-Kamera', icon: Camera },
     { id: 'metaphor', label: 'KI-Metaphern', icon: Sparkles },
@@ -126,6 +167,116 @@ export const Navbar: React.FC<Props> = ({
               <option key={s} value={s.split(' ')[0]} style={{ background: '#14121a' }}>{s}</option>
             ))}
           </select>
+        </div>
+      </div>
+
+      {/* KI-ASSISTENZ & SPRACHKONSOLE */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        background: 'rgba(10,8,14,0.6)',
+        border: '1px solid rgba(255,255,255,0.07)',
+        borderRadius: '16px',
+        overflow: 'hidden',
+        marginTop: '10px',
+        minHeight: 0,
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '7px 12px',
+          background: 'rgba(255,255,255,0.03)',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+          fontSize: '9px',
+          fontWeight: 700,
+          color: '#c8a2c8',
+          textTransform: 'uppercase',
+          letterSpacing: '1px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          flexShrink: 0,
+        }}>
+          <MessageSquare size={11} />
+          KI-Assistenz · Diktat
+        </div>
+
+        {/* Messages */}
+        <div style={{
+          flex: 1,
+          padding: '8px',
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          scrollbarWidth: 'thin',
+          scrollbarColor: 'rgba(168,129,189,0.3) transparent',
+        }}>
+          {chatMessages.map((msg, i) => (
+            <div
+              key={i}
+              style={{
+                alignSelf: msg.sender === 'NICOLE' ? 'flex-end' : 'flex-start',
+                background: msg.sender === 'NICOLE'
+                  ? 'linear-gradient(135deg, #a881bd 0%, #7b4f8a 100%)'
+                  : 'rgba(255,255,255,0.05)',
+                color: '#ffffff',
+                padding: '6px 10px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                lineHeight: 1.5,
+                maxWidth: '92%',
+              }}
+            >
+              <div style={{ fontSize: '8px', fontWeight: 800, color: msg.sender === 'NICOLE' ? 'rgba(255,255,255,0.65)' : '#c084fc', marginBottom: '2px', letterSpacing: '0.5px' }}>
+                {msg.sender === 'NICOLE' ? 'NICOLE' : 'AURORA KI'}
+              </div>
+              {msg.text}
+            </div>
+          ))}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{
+          padding: '6px',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+          display: 'flex',
+          gap: '4px',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          <input
+            type="text"
+            value={inputText}
+            onChange={e => setInputText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
+            placeholder="Frage an KI oder Diktat..."
+            style={{
+              flex: 1,
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.09)',
+              borderRadius: '10px',
+              color: '#fff',
+              padding: '5px 9px',
+              fontSize: '11px',
+              outline: 'none',
+              fontFamily: 'Montserrat',
+            }}
+          />
+          <button
+            onClick={handleVoice}
+            style={{ background: isRecording ? '#ff453a' : 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '8px', padding: '5px', cursor: 'pointer', flexShrink: 0 }}
+          >
+            {isRecording ? <MicOff size={12} color="#fff" /> : <Mic size={12} color="#a881bd" />}
+          </button>
+          <button
+            onClick={handleSend}
+            className="btn-monolith"
+            style={{ padding: '5px 8px', fontSize: '10px', flexShrink: 0 }}
+          >
+            <Send size={10} />
+          </button>
         </div>
       </div>
 

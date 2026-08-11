@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2 } from 'lucide-react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
@@ -14,10 +14,13 @@ import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, 
 import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
 import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
+import { vaganovaIdbCache } from '../services/vaganovaIdbCache';
 import { vaganovaAngleCalculator, VaganovaFullAnalysis } from '../services/vaganovaAngleCalculator';
 import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
 import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
+import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
+import { TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
@@ -26,9 +29,10 @@ import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeleton
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
   onSelectedCue?: (cue: VaganovaCuePoint | null) => void;
+  onExerciseChange?: (name: string) => void;
 }
 
-export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis, onSelectedCue }) => {
+export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis, onSelectedCue, onExerciseChange }) => {
   // Video Controls State
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -58,6 +62,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
   const [indexingProgress, setIndexingProgress] = useState<number>(0);
   const [indexingStatusStr, setIndexingStatusStr] = useState<string>('Bereite Frame-Lock vor...');
+  const [loadedFromCache, setLoadedFromCache] = useState<boolean>(false);
 
   // ZOOM & PAN ENGINE STATE
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
@@ -88,13 +93,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
-  const toggleCueExpanded = (id: string) =>
+  const [summaryOpen, setSummaryOpen] = useState<boolean>(true);
+  const [summaryTab, setSummaryTab] = useState<number>(0);
+  const toggleCueExpanded = (id: string) => {
+    setSummaryOpen(false); // Gesamt-Summary einklappen wenn Cue geöffnet wird
     setExpandedCueIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' | 'WARNING' }>({
+  };
+  // Tab state: 0=Was&Warum, 1=Ziel&Üben, 2=Technik
+  const [cueTabState, setCueTabState] = useState<Record<string, number>>({});
+  const getCueTab = (id: string) => cueTabState[id] ?? 0;
+  const setCueTab = (id: string, tab: number) => setCueTabState(prev => ({ ...prev, [id]: tab }));
+
+  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' | 'WARNING'; diagnosisText: string; goalText: string; practiceText: string }>({
     poseName: '',
     headline: '',
     cueMetaphor: '',
-    status: 'GOOD'
+    status: 'GOOD',
+    diagnosisText: '',
+    goalText: '',
+    practiceText: '',
   });
 
   // VAGANOVA CURRICULUM MODAL STATE
@@ -119,6 +136,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Lightbox state
   const [lightboxOpen, setLightboxOpen] = useState<boolean>(false);
   const [lightboxIndex, setLightboxIndex] = useState<number>(0);
+
+  // Caption selector: Nicole wählt was unter dem Screenshot stehen soll
+  const [captionPanelOpen, setCaptionPanelOpen] = useState<boolean>(false);
+  const [captionDraft, setCaptionDraft] = useState<string>('');
 
   // 🦴 Joint popover state
   const [jointPopover, setJointPopover] = useState<{
@@ -239,16 +260,31 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     if (!videoRef.current) return;
 
     setIsPreIndexing(true);
+    setLoadedFromCache(false);
     setIndexingProgress(0);
-    setIndexingStatusStr('Bereite 60 FPS Pre-Scan vor...');
+    setIndexingStatusStr('Suche im Cache...');
+
+    // Build stable IDB key: for uploads use File metadata, for built-ins use URL segment
+    const currentVideoObj = videoList.find(v => v.url === selectedDevVideoUrl);
+    const idbKey = vaganovaIdbCache.buildKey(
+      selectedDevVideoUrl,
+      (currentVideoObj as any)?._file as File | undefined
+    );
 
     await vaganovaFrameCache.preIndexVideo(
       selectedDevVideoUrl,
       videoRef.current,
-      (percent, step, total) => {
+      (percent, step, total, fromCache) => {
+        if (fromCache) {
+          setLoadedFromCache(true);
+          setIndexingStatusStr(`Aus Cache geladen (${step} Frames)`);
+        } else {
+          setLoadedFromCache(false);
+          setIndexingStatusStr(`Frame ${step}/${total} (${percent}%)`);
+        }
         setIndexingProgress(percent);
-        setIndexingStatusStr(`Frame ${step}/${total} (${percent}%)`);
-      }
+      },
+      idbKey
     );
 
     setIsPreIndexing(false);
@@ -271,6 +307,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       });
     }
     setAnalysisReport(report);
+
+    // ── Übungsname in Navbar aktualisieren ──────────────────────────────
+    // motionClass.detectedPoseName ist nach dem Scan bekannt
+    if (onExerciseChange) {
+      const perspLabel = motionClass.detectedPerspective === 'FRONTAL' ? 'Frontal' : 'Profil';
+      onExerciseChange(`${motionClass.detectedPoseName} (${perspLabel})`);
+    }
   };
 
   // Auto-Scan: startet automatisch wenn Video geladen ist und kein Cache vorhanden
@@ -515,6 +558,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Canvas draw always runs at 60fps using cached analysis
               const c = cachedAnalysisRef.current;
               if (c) {
+                // Compute TeacherOverlayPacket from fresh analysis
+                // (Engine is stateless — no re-render triggered)
+                const overlayPacket: TeacherOverlayPacket | undefined =
+                  overlayMode === 'lehrer-ampel'
+                    ? teacherHeuristicEngine.compute(
+                        c.vagAn,
+                        c.sk,
+                        v.currentTime,
+                        streamEpochRef.current,
+                      )
+                    : undefined;
+
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: showSkeleton,
                   showMotionTrails,
@@ -523,7 +578,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   selectedJointId,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
-                  overlayMode
+                  overlayMode,
+                  overlayPacket,
                 }, v.videoWidth, v.videoHeight);
               }
             } // end !skipDraw
@@ -630,19 +686,22 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setIsPlaying(true);
   };
 
-  // Interactive Cue-Point Seek & Auto Slow-Motion Handler
+  // Interactive Cue-Point Seek & Frame-Freeze Handler
+  // PROJECT_DECISION 2026-08-11: Clicking a cue point ALWAYS freezes the frame.
+  // The teacher needs to study the frozen frame before deciding on action.
+  // Slow-Mo playback is only triggered via the explicit 'Slow-Mo Sequenz' button.
   const handleSeekToCuePoint = (cue: VaganovaCuePoint) => {
     if (videoRef.current) {
       videoRef.current.currentTime = cue.timeSeconds;
       if (refVideoRef.current) refVideoRef.current.currentTime = cue.timeSeconds;
+
+      // Freeze frame immediately – teacher studies the still image
+      videoRef.current.pause();
+      setIsPlaying(false);
+
       setSelectedFrameTime(cue.timecodeStr);
       setSelectedJointId(cue.jointFocusId);
       vaganovaKineticAI.reset();
-
-      if (cue.status === 'CORRECTION') {
-        setPlaybackSpeed(0.25);
-        videoRef.current.playbackRate = 0.25;
-      }
 
       processStaticPausedFrame();
 
@@ -651,13 +710,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
   };
 
-  // 🎬 Slow-Mo Clip: spielt 3 Sekunden (real) um den Cue-Point bei 0.25x ab, dann Stopp
+  // 🎬 Slow-Mo Clip: spielt 1.5 Sekunden Videoinhalt um den Cue-Point bei 0.25x ab
+  // Fenster: -0.5s (exzentrische Phase / Vorbereitung) bis +1.0s (konzentrische Auswirkung)
+  // Biomechanische Logik: Die -0.5s zeigen WANN die Kontrolle verloren geht,
+  // die +1.0s zeigen die Auswirkung auf die nachfolgende Bewegungsphase.
   const handleSlowMoClip = (cue: VaganovaCuePoint) => {
     const vid = videoRef.current;
     if (!vid) return;
 
-    const startAt = Math.max(0, cue.timeSeconds - 0.5); // 0.5s vor dem Cue-Point
-    const endAt = cue.timeSeconds + 2.5;                // 3s Video-Fenster insgesamt
+    const startAt = Math.max(0, cue.timeSeconds - 0.5);  // 0.5s vor dem Cue-Point
+    const endAt   = cue.timeSeconds + 1.0;                // 1.0s nach dem Cue-Point (1.5s gesamt)
 
     if (slowMoTimerRef.current) clearTimeout(slowMoTimerRef.current);
 
@@ -667,22 +729,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     vid.play();
     setIsPlaying(true);
 
-    // Auto-Stopp nach 3 Echtzeit-Sekunden (= 12s Videoinhalt)
-    slowMoTimerRef.current = setTimeout(() => {
-      vid.pause();
-      setIsPlaying(false);
-      vid.playbackRate = 1;
-      setPlaybackSpeed(1);
-    }, 3000);
-
-    // Oder sofort stoppen wenn Video-Zeitmarke erreicht
+    // Stopp via timeupdate (präziser als setTimeout)
     const onTimeUpdate = () => {
       if (vid.currentTime >= endAt) {
         vid.pause();
         setIsPlaying(false);
         vid.playbackRate = 1;
         setPlaybackSpeed(1);
-        if (slowMoTimerRef.current) clearTimeout(slowMoTimerRef.current);
         vid.removeEventListener('timeupdate', onTimeUpdate);
       }
     };
@@ -803,6 +856,82 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     window.speechSynthesis.speak(utterance);
   };
 
+  // ── KI-VORSCHLAG für manuell gesetzte Marker ───────────────────────────
+  // Liest die aktuelle vaganovaAnalysis und generiert kontextsensitiven Vorschlagstext
+  const generateManualCueSuggestion = (va: typeof vaganovaAnalysis): {
+    diagnosisText: string; goalText: string; practiceText: string; headline: string; status: 'GOOD' | 'CORRECTION' | 'WARNING';
+  } => {
+    if (!va) return {
+      headline: `Beobachtungspunkt an ${motionClass.detectedPoseName}`,
+      diagnosisText: 'Dieser Frame zeigt einen manuell markierten Moment. Beschreibe hier was du siehst — was fällt dir an Haltung, Ausrichtung oder Ausdruck auf? (KI-Vorschlag: keine Live-Daten verfügbar)',
+      goalText: 'Beschreibe das angestrebte Ziel für diesen Moment.',
+      practiceText: 'Übungsvorschlag eintragen.',
+      status: 'WARNING',
+    };
+
+    // Finde den auffälligsten Messwert
+    const checks: Array<{ condition: boolean; headline: string; status: 'GOOD' | 'CORRECTION' | 'WARNING'; diag: string; goal: string; practice: string }> = [
+      {
+        condition: (va.valgusDriftL?.status === 'ERROR' || va.valgusDriftR?.status === 'ERROR'),
+        headline: 'Knie-Alignment – Außenrotation prüfen',
+        status: 'CORRECTION',
+        diag: `An diesem Frame zeigt das Knie eine mediale Deviation — die Verbindungslinie Hüfte–Knie–Zehenspitze bricht am Knie ein. Das passiert, wenn die Außenrotatoren der Hüfte die Rotation nicht aktiv halten. Gemessener Wert: ${(va.valgusDriftL?.status === 'ERROR' ? va.valgusDriftL : va.valgusDriftR)?.value?.toFixed(1) ?? '?'}°.`,
+        goal: 'Knie bleibt direkt über dem mittleren Zeh — die gerade Linie von Hüfte zu Knie zu Zehenspitze bleibt sauber. Die Rotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse.',
+        practice: 'Nur demi-plié an der Stange, sehr langsam. Im tiefsten Punkt anhalten, in den Spiegel schauen. Knie über dem 2./3. Zeh? Die Muskeln außen an der Hüfte sollen deutlich arbeiten. 10 Wdh. bewusst und langsam.',
+      },
+      {
+        condition: (va.armLineQualityL?.status === 'ERROR' || va.armLineQualityR?.status === 'ERROR'),
+        headline: 'Arm-Linie – Ellbogen und Handgelenk prüfen',
+        status: 'CORRECTION',
+        diag: `Der Arm zeigt eine gebrochene Linie — meist als Knick im Ellbogen oder abgeknicktes Handgelenk sichtbar. Gemessen: ${(va.armLineQualityL?.status === 'ERROR' ? va.armLineQualityL : va.armLineQualityR)?.value?.toFixed(0) ?? '?'}° Abweichung.`,
+        goal: 'Der Arm bildet eine fließende Kurve vom Schulterblatt bis zur Fingerspitze — kein Knick, kein hochgezogenes Schulterblatt. Ellbogen liegt minimal tiefer als die Schulter.',
+        practice: 'Vor dem Spiegel ohne Musik durch alle Positionen führen. An jeder Position kurz anhalten: Ellbogen unter der Schulter? Handgelenk in der Verlängerung des Unterarms? Augen schließen, Gefühl spüren, vergleichen.',
+      },
+      {
+        condition: (va.shoulderSymmetry?.status === 'ERROR'),
+        headline: 'Schulter-Asymmetrie – Epaulement prüfen',
+        status: 'WARNING',
+        diag: `Die Schultern sind an diesem Frame nicht parallel — eine Seite ist deutlich höher. Gemessen: ${va.shoulderSymmetry?.value?.toFixed(1) ?? '?'}° Neigung. Häufig entsteht das durch Überanstrengung im oberen Trapezius.`,
+        goal: 'Schultern wie ein Tablett, das du balancierst — kein Tropfen darf herunterfallen. Schulterblätter aktiv nach unten, Nacken lang und entspannt.',
+        practice: 'Schultern hochziehen, 3 Sekunden halten, dann langsam loslassen und tiefer als normal sinken lassen — das ist die richtige Position. Täglich auch außerhalb des Tanzens üben.',
+      },
+      {
+        condition: (va.pelvicTilt?.status === 'ERROR' || va.spineTilt?.status === 'ERROR'),
+        headline: 'Becken-Achse – Neutralposition halten',
+        status: 'WARNING',
+        diag: `Beckenkippung oder Wirbelsäulenabweichung erkannt. Wert: ${va.pelvicTilt?.value?.toFixed(1) ?? va.spineTilt?.value?.toFixed(1) ?? '?'}°. Das führt zu Kompensation in der gesamten Kette.`,
+        goal: 'Becken in neutraler Mitte — nicht aktiv eingedrückt, nicht gewölbt. Wirbelsäule behält ihre natürliche S-Kurve. Energie fließt nach oben zur offenen Brust.',
+        practice: 'Hand auf Bauchnabel, Hand auf Lendenwirbel — beim langsamen Plié spüren, ob sich die Lendenwirbel mitbewegen. Sie sollen ruhig bleiben.',
+      },
+      {
+        condition: (va.shoulderSymmetry?.status === 'CORRECT' && va.shoulderElevationL?.status !== 'ERROR' && va.shoulderElevationR?.status !== 'ERROR'),
+        headline: 'Schöne Haltung – diesen Moment festhalten',
+        status: 'GOOD',
+        diag: 'An diesem Frame zeigt die Haltung — insbesondere die Schulter-Horizontallität — eine sehr gute Ausführung. Dieser Moment verdient es, als Referenz festgehalten zu werden.',
+        goal: 'Dieses Körpergefühl als persönlichen Anker-Moment speichern. Auf Abruf reproduzieren können — das ist das Trainingsziel.',
+        practice: 'Augen schließen, Körpergefühl spüren. Was passiert gerade mit den Schulterblättern, dem Nacken, dem Becken? Dieses Gefühl täglich bewusst aufrufen.',
+      },
+    ];
+
+    const match = checks.find(c => c.condition);
+    if (match) return {
+      headline: match.headline,
+      status: match.status,
+      diagnosisText: match.diag,
+      goalText: match.goal,
+      practiceText: match.practice,
+    };
+
+    // Fallback: generischer Beobachtungspunkt
+    return {
+      headline: `Beobachtungspunkt – ${motionClass.detectedPoseName}`,
+      status: 'WARNING',
+      diagnosisText: 'Manuell markierter Frame. Beschreibe hier deine Beobachtung — was fällt dir an diesem Moment auf?',
+      goalText: 'Ziel für die’Korrektur oder das Lob hier eintragen.',
+      practiceText: 'Übungshinweis oder Hausaufgabe für die Schülerin.',
+    };
+  };
+
   // TEACHER CRUD: Add Cue-Point at current video playback position
   const handleAddCuePointAtCurrentFrame = () => {
     if (!videoRef.current) return;
@@ -811,18 +940,38 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     const secs = (timeSec % 60).toFixed(3).padStart(6, '0');
     const timecodeStr = `0${mins}:${secs}`;
 
+    // KI generiert Vorschlagstext basierend auf aktuellem Frame
+    const suggestion = generateManualCueSuggestion(vaganovaAnalysis);
+
     const updated = vaganovaPreAnalyzer.addCuePoint(selectedDevVideoUrl, {
       timeSeconds: timeSec,
       timecodeStr,
-      poseName: `${motionClass.detectedPoseName} Marker`,
-      status: 'WARNING',  // Neu hinzugefügte Notizen zunächst als "besprechungswürdig"
-      scorePercent: 85,
-      headline: `Lehrernotiz an ${timecodeStr}`,
-      cueMetaphor: 'Korrekturhinweis von Nicole eingeben...',
-      jointFocusId: selectedJointId || 'pelvis_core'
+      poseName: motionClass.detectedPoseName,
+      status: suggestion.status,
+      scorePercent: 80,
+      headline: suggestion.headline,
+      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+      jointFocusId: selectedJointId || 'pelvis_core',
+      diagnosisText: suggestion.diagnosisText,
+      goalText: suggestion.goalText,
+      practiceText: suggestion.practiceText,
     });
 
     setCuePoints(updated);
+    // Direkt in den Edit-Modus für den neuen Cue springen
+    const newCue = updated[updated.length - 1];
+    if (newCue) {
+      setEditingCueId(newCue.id);
+      setEditForm({
+        poseName: newCue.poseName,
+        headline: newCue.headline,
+        cueMetaphor: newCue.cueMetaphor ?? '',
+        status: newCue.status as 'GOOD' | 'CORRECTION' | 'WARNING',
+        diagnosisText: suggestion.diagnosisText,
+        goalText: suggestion.goalText,
+        practiceText: suggestion.practiceText,
+      });
+    }
   };
 
   // TEACHER CRUD: Start Editing
@@ -833,7 +982,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       poseName: cue.poseName,
       headline: cue.headline,
       cueMetaphor: cue.cueMetaphor,
-      status: (cue.status === 'CORRECTION' || cue.status === 'WARNING') ? cue.status : 'GOOD'
+      status: (cue.status === 'CORRECTION' || cue.status === 'WARNING') ? cue.status : 'GOOD',
+      diagnosisText: cue.diagnosisText ?? '',
+      goalText: cue.goalText ?? '',
+      practiceText: cue.practiceText ?? '',
     });
   };
 
@@ -844,7 +996,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       poseName: editForm.poseName,
       headline: editForm.headline,
       cueMetaphor: editForm.cueMetaphor,
-      status: editForm.status
+      status: editForm.status,
+      diagnosisText: editForm.diagnosisText || undefined,
+      goalText: editForm.goalText || undefined,
+      practiceText: editForm.practiceText || undefined,
     });
     setCuePoints(updated);
     setEditingCueId(null);
@@ -947,17 +1102,56 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       finalize(merge, ctx);
     }
 
-    function finalize(merge: HTMLCanvasElement, _ctx: CanvasRenderingContext2D) {
-      const dataUrl = merge.toDataURL('image/png');
+    function finalize(merge: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
+      // 5. Caption bar below image (if captionDraft is set)
+      const caption = captionDraft.trim();
+      let finalCanvas = merge;
+      if (caption) {
+        const PADDING = 14;
+        const FONT_SIZE = 13;
+        const LINE_HEIGHT = 18;
+        // Measure and wrap text
+        const tmpCtx = document.createElement('canvas').getContext('2d')!;
+        tmpCtx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        const maxW = W - PADDING * 2;
+        const words = caption.split(' ');
+        const lines: string[] = [];
+        let cur = '';
+        words.forEach(w => {
+          const test = cur ? `${cur} ${w}` : w;
+          if (tmpCtx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+          else cur = test;
+        });
+        if (cur) lines.push(cur);
+        const barH = lines.length * LINE_HEIGHT + PADDING * 2;
+        const total = document.createElement('canvas');
+        total.width = W;
+        total.height = H + barH;
+        const tc = total.getContext('2d')!;
+        tc.drawImage(merge, 0, 0);
+        // Dark caption bar
+        tc.fillStyle = 'rgba(8,4,18,0.97)';
+        tc.fillRect(0, H, W, barH);
+        // Top border line
+        tc.fillStyle = 'rgba(168,129,189,0.5)';
+        tc.fillRect(0, H, W, 1);
+        // Caption text
+        tc.fillStyle = 'rgba(220,215,235,0.9)';
+        tc.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        tc.textBaseline = 'top';
+        lines.forEach((line, i) => tc.fillText(line, PADDING, H + PADDING + i * LINE_HEIGHT));
+        finalCanvas = total;
+      }
 
-      // Thumbnail (30% scale)
-      const thumbW = Math.round(W * 0.3);
-      const thumbH = Math.round(H * 0.3);
+      const dataUrl = finalCanvas.toDataURL('image/png');
+      // Thumbnail (30% scale of FULL height incl. caption)
+      const thumbW = Math.round(finalCanvas.width * 0.3);
+      const thumbH = Math.round(finalCanvas.height * 0.3);
       const thumbCanvas = document.createElement('canvas');
       thumbCanvas.width = thumbW;
       thumbCanvas.height = thumbH;
       const tctx = thumbCanvas.getContext('2d');
-      tctx?.drawImage(merge, 0, 0, thumbW, thumbH);
+      tctx?.drawImage(finalCanvas, 0, 0, thumbW, thumbH);
       const thumbnailUrl = thumbCanvas.toDataURL('image/png');
 
       const timeSec = video!.currentTime;
@@ -971,6 +1165,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         timecodeStr,
         dataUrl,
         thumbnailUrl,
+        caption: captionDraft.trim() || undefined,
         studentName: (document.querySelector('.monolith-card select, select') as HTMLSelectElement | null)?.value ?? undefined,
         createdAt: Date.now(),
         note: '',
@@ -989,6 +1184,47 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Update note on a saved annotation
   const handleUpdateNote = (id: string, note: string) => {
     setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, note } : e));
+  };
+
+  // KI-Vorschlag für bestehende leere TEACHER_CREATED Cues generieren
+  const handleApplyKiSuggestion = (cueId: string) => {
+    const suggestion = generateManualCueSuggestion(vaganovaAnalysis);
+    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+      headline: suggestion.headline,
+      status: suggestion.status,
+      diagnosisText: suggestion.diagnosisText,
+      goalText: suggestion.goalText,
+      practiceText: suggestion.practiceText,
+      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+    });
+    setCuePoints(updated);
+    // Direkt in Edit-Modus
+    setEditingCueId(cueId);
+    setEditForm({
+      poseName: updated.find(c => c.id === cueId)?.poseName ?? '',
+      headline: suggestion.headline,
+      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+      status: suggestion.status,
+      diagnosisText: suggestion.diagnosisText,
+      goalText: suggestion.goalText,
+      practiceText: suggestion.practiceText,
+    });
+  };
+
+  // Update caption on a saved annotation
+  const handleUpdateCaption = (id: string, caption: string) => {
+    setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, caption } : e));
+  };
+
+  // Inline-Edit für TEACHER_CREATED Cues: speichert ein einzelnes Feld on-blur
+  const handleInlineCueEdit = (cueId: string, field: Partial<VaganovaCuePoint>) => {
+    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, field);
+    setCuePoints(updated);
+  };
+
+  // Update the dataUrl of an annotation (after lightbox burn-in)
+  const handleUpdateDataUrl = (id: string, dataUrl: string) => {
+    setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, dataUrl } : e));
   };
 
   // Open lightbox at a specific entry index
@@ -1158,12 +1394,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
       {/* 🖼 ANNOTATION LIGHTBOX */}
       {lightboxOpen && annotationEntries.length > 0 && (
-        <AnnotationLightbox
+      <AnnotationLightbox
           entries={annotationEntries}
           currentIndex={lightboxIndex}
           onClose={() => setLightboxOpen(false)}
           onNavigate={setLightboxIndex}
           onUpdateNote={handleUpdateNote}
+          onUpdateCaption={handleUpdateCaption}
+          onUpdateDataUrl={handleUpdateDataUrl}
           onSeekTo={t => {
             if (videoRef.current) {
               videoRef.current.currentTime = t;
@@ -1243,24 +1481,32 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             <Upload size={12} /> Upload
           </button>
 
-          {/* ⚡ Scan-Status Indicator (ersetzt den manuellen Button) */}
-          {isPreIndexing && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              background: 'rgba(48,209,88,0.12)',
-              border: '1px solid rgba(48,209,88,0.3)',
-              borderRadius: '10px', padding: '5px 12px',
-              fontSize: '10px', fontWeight: 700, color: '#30d158'
-            }}>
-              <span style={{
-                width: '7px', height: '7px', borderRadius: '50%',
-                background: '#30d158',
-                animation: 'pulse 1s ease-in-out infinite',
-                flexShrink: 0
-              }} />
-              Skelett-Analyse {indexingProgress}%
-            </div>
-          )}
+          {/* Re-Scan Button – gleicher Style wie Upload, nur grün */}
+          <button
+            onClick={() => !isPreIndexing && triggerPreIndexingScan()}
+            title="Analyse neu starten"
+            disabled={isPreIndexing}
+            style={{
+              background: isPreIndexing ? 'rgba(48,209,88,0.06)' : 'rgba(48,209,88,0.12)',
+              color: isPreIndexing ? 'rgba(48,209,88,0.4)' : '#30d158',
+              border: `1px solid ${isPreIndexing ? 'rgba(48,209,88,0.15)' : 'rgba(48,209,88,0.35)'}`,
+              padding: '6px 14px',
+              borderRadius: '10px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: isPreIndexing ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              transition: 'all 0.18s ease'
+            }}
+          >
+            {isPreIndexing ? (
+              <><span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#30d158', animation: 'pulse 1s ease-in-out infinite', flexShrink: 0 }} /> Analyse {indexingProgress}%</>
+            ) : (
+              <><RefreshCw size={12} /> Analyse</>
+            )}
+          </button>
         </div>
 
         {/* Mitte: Overlay-Toggles – modernes Chip-Design */}
@@ -1268,9 +1514,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* CoG Lot */}
           <button
             onClick={() => setShowCoG(!showCoG)}
-            title="CoG – Schwerpunkt-Lot anzeigen
-↑ zeigt ob der Körperschwerpunkt
-  über der Standfläche liegt"
+            title="Schwerpunkt-Lot: zeigt ob der Körperschwerpunkt über der Standfläche liegt"
             style={{
               background: showCoG ? 'rgba(48,209,88,0.18)' : 'transparent',
               color: showCoG ? '#30d158' : 'rgba(255,255,255,0.45)',
@@ -1290,9 +1534,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* Trajektorien */}
           <button
             onClick={() => setShowMotionTrails(!showMotionTrails)}
-            title="Trajektorien – Bewegungspfade
-↑ zeigt Gelenk-Bewegungsspuren
-  der letzten Frames"
+            title="Trajektorien: zeigt Gelenk-Bewegungsspuren der letzten Frames"
             style={{
               background: showMotionTrails ? 'rgba(192,132,252,0.18)' : 'transparent',
               color: showMotionTrails ? '#c084fc' : 'rgba(255,255,255,0.45)',
@@ -1312,9 +1554,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* AR-Winkel */}
           <button
             onClick={() => setShowAngleArcs(!showAngleArcs)}
-            title="Winkel – Gelenk-Winkelbögen
-↑ visuelle Bogen-Darstellung
-  der gemessenen Winkel"
+            title="Winkel-Bögen: visuelle Darstellung der gemessenen Gelenkwinkel"
             style={{
               background: showAngleArcs ? 'rgba(255,214,10,0.15)' : 'transparent',
               color: showAngleArcs ? '#ffd60a' : 'rgba(255,255,255,0.45)',
@@ -1600,14 +1840,28 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* KI-Analyse Progress Overlay */}
                 {isPreIndexing && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', background: 'rgba(5,4,7,0.88)', zIndex: 40, backdropFilter: 'blur(4px)' }}>
-                    <Zap size={32} color="#30d158" style={{ filter: 'drop-shadow(0 0 8px #30d158)' }} />
-                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '0.5px' }}>
-                      ⚡ KI-Analyse: {indexingStatusStr}
-                    </div>
-                    <div style={{ width: '240px', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${indexingProgress}%`, background: 'linear-gradient(90deg, #30d158, #a881bd)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
-                    </div>
-                    <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.55)' }}>Alle Frames werden analysiert – dauert ca. 30 Sekunden</span>
+                    {loadedFromCache ? (
+                      /* ── Cache HIT: instant confirmation ── */
+                      <>
+                        <div style={{ fontSize: '28px', lineHeight: 1 }}>💾</div>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: '#30d158', letterSpacing: '0.5px' }}>
+                          Aus Cache geladen
+                        </div>
+                        <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)' }}>{indexingStatusStr}</span>
+                      </>
+                    ) : (
+                      /* ── Cache MISS: normal progress ── */
+                      <>
+                        <Zap size={32} color="#30d158" style={{ filter: 'drop-shadow(0 0 8px #30d158)' }} />
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: '#ffffff', letterSpacing: '0.5px' }}>
+                          ⚡ Analyse: {indexingStatusStr}
+                        </div>
+                        <div style={{ width: '240px', height: '5px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${indexingProgress}%`, background: 'linear-gradient(90deg, #30d158, #a881bd)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
+                        </div>
+                        <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.55)' }}>Wird analysiert &amp; für nächste Sitzung gespeichert…</span>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1709,6 +1963,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               alignItems: 'center',
               gap: '4px',
               padding: !isPlaying ? '10px 6px' : '0',
+              position: 'relative',
+              zIndex: 10001, // above joint popover (9999)
             }}>
               {/* Pause indicator */}
               <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'center' }}>
@@ -1813,17 +2069,174 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 }}
               >🦴</button>
 
-              {/* Save PNG */}
-              <button
-                onClick={handleSaveAnnotation}
-                title="Als PNG speichern"
-                style={{
-                  width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                  background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
-                  color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 0 8px rgba(168,129,189,0.5)',
-                }}
-              ><ImageDown size={14} /></button>
+              {/* Save PNG – opens caption panel first */}
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setCaptionPanelOpen(v => !v)}
+                  title={captionPanelOpen ? 'Caption-Panel schliessen' : 'PNG mit Bildunterschrift speichern'}
+                  style={{
+                    width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
+                    background: captionPanelOpen
+                      ? 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)'
+                      : 'linear-gradient(135deg, rgba(168,129,189,0.3) 0%, rgba(139,90,139,0.3) 100%)',
+                    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: captionPanelOpen ? '0 0 12px rgba(168,129,189,0.7)' : '0 0 8px rgba(168,129,189,0.3)',
+                    transition: 'all 0.2s ease',
+                  }}
+                ><ImageDown size={14} /></button>
+
+                {/* Caption Selector Panel */}
+                {captionPanelOpen && (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      right: '356px',
+                      bottom: '120px',
+                      width: '300px',
+                      maxHeight: '55vh',
+                      overflowY: 'auto',
+                      background: 'rgba(8,4,18,0.97)',
+                      backdropFilter: 'blur(24px)',
+                      WebkitBackdropFilter: 'blur(24px)',
+                      border: '1px solid rgba(168,129,189,0.4)',
+                      borderLeft: '3px solid #a881bd',
+                      borderRadius: '14px',
+                      boxShadow: '0 8px 40px rgba(0,0,0,0.9)',
+                      zIndex: 10002,
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px',
+                      scrollbarWidth: 'thin' as const,
+                      scrollbarColor: 'rgba(168,129,189,0.4) rgba(255,255,255,0.03)',
+                    }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {/* Panel Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 800, color: '#a881bd', textTransform: 'uppercase', letterSpacing: '0.7px' }}>
+                        📋 Bildunterschrift wählen
+                      </div>
+                      <button
+                        onClick={() => setCaptionPanelOpen(false)}
+                        style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', padding: '2px' }}
+                      ><X size={12} /></button>
+                    </div>
+
+                    {/* Caption draft textarea */}
+                    <div>
+                      <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.4)', marginBottom: '4px' }}>Vorschau / Eingabe:</div>
+                      <textarea
+                        value={captionDraft}
+                        onChange={e => setCaptionDraft(e.target.value)}
+                        placeholder="Bildunterschrift eingeben oder unten Felder anklicken..."
+                        rows={3}
+                        style={{
+                          width: '100%', resize: 'vertical', boxSizing: 'border-box',
+                          background: 'rgba(168,129,189,0.08)',
+                          border: '1px solid rgba(168,129,189,0.3)',
+                          borderRadius: '8px', padding: '7px 9px',
+                          color: 'rgba(255,255,255,0.85)', fontSize: '11px', lineHeight: 1.5,
+                          fontFamily: 'Inter, sans-serif', outline: 'none',
+                        }}
+                      />
+                      {captionDraft && (
+                        <button
+                          onClick={() => setCaptionDraft('')}
+                          style={{ marginTop: '3px', background: 'none', border: 'none', fontSize: '9px', color: 'rgba(255,69,58,0.6)', cursor: 'pointer', padding: 0 }}
+                        >✕ Leeren</button>
+                      )}
+                    </div>
+
+                    {/* Cue point field buttons – NUR der nächste Cue zum aktuellen Frame */}
+                    {(() => {
+                      const currentSec = videoRef.current?.currentTime ?? 0;
+                      // Finde den Cue der dem aktuellen Frame am nächsten ist
+                      const nearest = cuePoints
+                        .filter(c => Math.abs(c.timeSeconds - currentSec) < 10) // max 10s Abstand
+                        .sort((a, b) => Math.abs(a.timeSeconds - currentSec) - Math.abs(b.timeSeconds - currentSec))[0];
+
+                      if (!nearest) return (
+                        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', textAlign: 'center', padding: '8px 0' }}>
+                          Kein Cue-Point in der Nähe.<br />
+                          <span style={{ fontSize: '9px' }}>Im Cue-Manager auf einen Frame springen, dann hier öffnen.</span>
+                        </div>
+                      );
+
+                      const fields: Array<{ label: string; text: string }> = [
+                        nearest.headline && { label: 'Überschrift', text: nearest.headline },
+                        (nearest.diagnosisText || nearest.kiNote) && { label: 'Was & Warum', text: (nearest.diagnosisText || nearest.kiNote)! },
+                        nearest.goalText && { label: 'Ziel', text: nearest.goalText },
+                        nearest.practiceText && { label: 'Übung', text: nearest.practiceText },
+                        nearest.cueMetaphor && nearest.cueMetaphor !== '(KI-Vorschlag — durch Nicole editierbar)' && { label: 'Metapher', text: nearest.cueMetaphor },
+                      ].filter(Boolean) as Array<{ label: string; text: string }>;
+
+                      const cueColor = nearest.status === 'GOOD' ? '#30d158' : nearest.status === 'CORRECTION' ? '#ff453a' : '#ffd60a';
+                      const distSec = Math.abs(nearest.timeSeconds - currentSec);
+
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                            Aus Cue-Point einfügen:
+                          </div>
+                          <div style={{ background: `${cueColor}0d`, border: `1px solid ${cueColor}30`, borderRadius: '9px', padding: '8px 10px' }}>
+                            {/* Cue-Kontext */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                              <div style={{ fontSize: '10px', fontWeight: 800, color: cueColor, lineHeight: 1.2 }}>
+                                {nearest.timecodeStr} · {nearest.headline}
+                              </div>
+                              {distSec > 0.1 && (
+                                <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.3)' }}>~{distSec.toFixed(1)}s</span>
+                              )}
+                            </div>
+                            {/* Feld-Buttons */}
+                            {fields.length > 0 ? (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                                {fields.map(({ label, text }) => (
+                                  <button
+                                    key={label}
+                                    onClick={() => setCaptionDraft(prev => prev ? `${prev}\n${text}` : text)}
+                                    title={text.slice(0, 100)}
+                                    style={{
+                                      background: 'rgba(168,129,189,0.18)',
+                                      border: '1px solid rgba(168,129,189,0.35)',
+                                      borderRadius: '6px', padding: '3px 9px',
+                                      fontSize: '10px', fontWeight: 700, color: '#c084fc',
+                                      cursor: 'pointer', transition: 'all 0.15s ease',
+                                    }}
+                                  >+ {label}</button>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic' }}>
+                                Cue hat noch keinen Text (KI-Vorschlag im Cue-Manager generieren).
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.2)', textAlign: 'center' }}>
+                            Anderen Cue wählen: Im Cue-Manager Frame anspringen, dann hier neu öffnen.
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Action: save PNG */}
+                    <button
+                      onClick={() => { handleSaveAnnotation(); setCaptionPanelOpen(false); }}
+                      style={{
+                        width: '100%', padding: '9px', borderRadius: '9px', border: 'none', cursor: 'pointer',
+                        background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)',
+                        color: '#fff', fontSize: '12px', fontWeight: 800,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                        boxShadow: '0 0 12px rgba(168,129,189,0.5)',
+                      }}
+                    >
+                      <ImageDown size={13} />
+                      PNG speichern{captionDraft.trim() ? ' mit Bildunterschrift' : ''}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Clear */}
               <button
@@ -2065,68 +2478,156 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             </button>
           </div>
 
-          {/* KI-ANALYSE-REPORT (erscheint nach Pre-Scan automatisch) */}
-          {analysisReport && (
-            <div style={{
-              background: 'rgba(168,129,189,0.07)',
-              border: '1px solid rgba(168,129,189,0.25)',
-              borderRadius: '10px',
-              padding: '10px 12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px'
-            }}>
-              {/* Report-Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ fontSize: '10px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px' }}>
-                  🤖 KI-ANALYSE-REPORT
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {analysisReport.strengths.length > 0 && (
-                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#30d158', background: 'rgba(48,209,88,0.12)', padding: '2px 7px', borderRadius: '6px' }}>
-                      ✅ {analysisReport.strengths.length} Stärke{analysisReport.strengths.length > 1 ? 'n' : ''}
-                    </span>
-                  )}
-                  {analysisReport.corrections.length > 0 && (
-                    <span style={{ fontSize: '9px', fontWeight: 700, color: '#ff453a', background: 'rgba(255,69,58,0.12)', padding: '2px 7px', borderRadius: '6px' }}>
-                      ⚠️ {analysisReport.corrections.length} Korrektur{analysisReport.corrections.length > 1 ? 'en' : ''}
-                    </span>
-                  )}
-                </div>
-              </div>
+          {/* ── GESAMT-ZUSAMMENFASSUNG AKKORDION ────────────────────── */}
+          {analysisReport && (() => {
+            const nStrong = analysisReport.strengths.length;
+            const nCorr   = analysisReport.corrections.length;
 
-              {/* Stärken */}
-              {analysisReport.strengths.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#30d158', marginBottom: '3px' }}>STÄRKEN</div>
-                  {analysisReport.strengths.map((s, i) => (
-                    <div key={i} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                      <span>• {s.label}</span>
-                      <span style={{ color: '#30d158', fontWeight: 700 }}>{s.value}</span>
+            // ─ Fließtext aus Report-Daten generieren ────────────────
+            const strengthNames = analysisReport.strengths.map(s => s.label).join(', ');
+            const corrNames = analysisReport.corrections.map(c => c.label).join(', ');
+
+            const summaryTexts: Record<number, React.ReactNode> = {
+              // Tab 0 – Was & Warum (Nicole-Sicht, pädagogisch)
+              0: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '11.5px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.65 }}>
+                  {nStrong > 0 && (
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 800, color: '#30d158', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Was läuft gut</div>
+                      <p style={{ margin: 0 }}>
+                        In dieser Sequenz zeigt die Schülerin in {nStrong} Bereichen solide Qualität: 
+                        <strong style={{ color: 'rgba(255,255,255,0.95)' }}>{strengthNames}</strong>.
+                        Das sind tragfähige Grundlagen, auf die weitere Arbeit aufgebaut werden kann.
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Korrekturen */}
-              {analysisReport.corrections.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '9px', fontWeight: 700, color: '#ff453a', marginBottom: '3px' }}>KORREKTUREN</div>
-                  {analysisReport.corrections.map((c, i) => (
-                    <div key={i} style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-                      <span>• {c.label}</span>
-                      <span style={{ color: '#ff453a', fontWeight: 700, fontFamily: 'monospace' }}>{c.timecode} · {c.value}</span>
+                  )}
+                  {nCorr > 0 && (
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 800, color: '#ff9f0a', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Wo mehr Aufmerksamkeit nötig ist</div>
+                      <p style={{ margin: 0 }}>
+                        Auffällig sind {nCorr} wiederkehrende Muster: <strong style={{ color: 'rgba(255,255,255,0.95)' }}>{corrNames}</strong>.
+                        Diese treten nicht einmalig auf, sondern zeigen sich sequenzbegleitend —
+                        das deutet auf strukturelle Ursachen hin, die durch gezielte Übungen adressiert werden sollten.
+                      </p>
                     </div>
-                  ))}
+                  )}
+                  <div>
+                    <div style={{ fontSize: '9px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Gesamteindruck</div>
+                    <p style={{ margin: 0 }}>
+                      Die Analyse umfasst {analysisReport.framesAnalyzed} Frames über {analysisReport.durationSec.toFixed(1)} Sekunden.
+                      Die Details zu jedem Moment sind in den Cue Points unterhalb dokumentiert.
+                    </p>
+                  </div>
                 </div>
-              )}
+              ),
+              // Tab 1 – Ziel & Üben (Hausaufgaben / Fokus)
+              1: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '11.5px', color: 'rgba(255,255,255,0.85)', lineHeight: 1.65 }}>
+                  <div>
+                    <div style={{ fontSize: '9px', fontWeight: 800, color: 'rgba(48,209,88,0.8)', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Primärziel dieser Einheit</div>
+                    <p style={{ margin: 0 }}>
+                      {nCorr > 0
+                        ? `Stabilisierung der schwachen Bereiche — insbesondere ${analysisReport.corrections[0]?.label ?? 'der identifizierten Korrekturen'} — steht im Vordergrund der nächsten Unterrichtseinheit.`
+                        : 'Die technische Ausführung ist in dieser Sequenz durchgängig positiv. Das Ziel ist Konsolidierung und Übertrag auf schwierigere Kombinationen.'}
+                    </p>
+                  </div>
+                  {nCorr > 0 && (
+                    <div>
+                      <div style={{ fontSize: '9px', fontWeight: 800, color: 'rgba(192,132,252,0.8)', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Empfohlene Übungsschwerpunkte</div>
+                      <p style={{ margin: 0 }}>
+                        Die Cue Points enthalten spezifische Übungsanweisungen für jeden Korrekturbedarf.
+                        Übergreifend empfiehlt sich, die identifizierten Muster auch im Standspiegel-Training
+                        und in der Hausaufgabenroutine zu adressieren.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ),
+              // Tab 2 – Technik (Nicole intern)
+              2: (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '11.5px', color: 'rgba(255,255,255,0.82)', lineHeight: 1.65 }}>
+                  <div style={{ fontSize: '9px', fontWeight: 800, color: 'rgba(255,214,10,0.75)', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>Forensische Gesamt-Einschätzung · Nur für Nicole</div>
+                  <p style={{ margin: 0 }}>
+                    {nStrong > 0 && `Positive biomechanische Marker: ${strengthNames}. `}
+                    {nCorr > 0
+                      ? `Korrekturbedarf bei ${corrNames}. Die Timing- und Winkeldetails der einzelnen Momente sind in den Cue Points vollständig dokumentiert.`
+                      : 'Alle gemessenen Parameter liegen im akzeptablen Bereich.'}
+                  </p>
+                  <p style={{ margin: 0, fontSize: '10.5px', color: 'rgba(255,255,255,0.45)' }}>
+                    Basis: {analysisReport.framesAnalyzed} Frames · {analysisReport.durationSec.toFixed(1)}s ·
+                    {nStrong} Stärke{nStrong !== 1 ? 'n' : ''} · {nCorr} Korrektur{nCorr !== 1 ? 'en' : ''}
+                  </p>
+                </div>
+              ),
+            };
 
-              {/* Footer */}
-              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.3)', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '5px' }}>
-                {analysisReport.framesAnalyzed} Frames analysiert · {analysisReport.durationSec.toFixed(1)}s Video
+            const TAB_LABELS = ['Was & Warum', 'Ziel & Üben', 'Technik'];
+            const tabBtnStyle = (active: boolean, idx: number): React.CSSProperties => ({
+              flex: 1, padding: '5px 4px', fontSize: '9.5px', fontWeight: 700,
+              border: 'none', borderRadius: '6px', cursor: 'pointer',
+              letterSpacing: '0.2px', transition: 'all 0.15s ease',
+              background: active
+                ? (idx === 2 ? 'rgba(255,214,10,0.15)' : 'rgba(192,132,252,0.2)')
+                : 'rgba(255,255,255,0.05)',
+              color: active
+                ? (idx === 2 ? '#ffd60a' : '#d0a0ff')
+                : 'rgba(255,255,255,0.38)',
+              boxShadow: active ? `0 0 0 1px ${idx === 2 ? 'rgba(255,214,10,0.3)' : 'rgba(192,132,252,0.25)'}` : 'none',
+            });
+
+            return (
+              <div style={{
+                background: 'rgba(168,129,189,0.07)',
+                border: '1px solid rgba(168,129,189,0.22)',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                flexShrink: 0,
+              }}>
+                {/* ─ ACCORDION HEADER ─ */}
+                <div
+                  onClick={() => setSummaryOpen(o => !o)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '10px 12px', cursor: 'pointer', userSelect: 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                    <span style={{
+                      fontSize: '9px', color: '#a881bd',
+                      transform: summaryOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                      transition: 'transform 0.2s ease',
+                      display: 'inline-block',
+                    }}>▶</span>
+                    <span style={{ fontSize: '10px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.4px' }}>
+                      GESAMTZUSAMMENFASSUNG
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '5px' }}>
+                    {nStrong > 0 && <span style={{ fontSize: '8px', fontWeight: 700, color: '#30d158', background: 'rgba(48,209,88,0.1)', padding: '2px 6px', borderRadius: '5px' }}>{nStrong} Stärke{nStrong !== 1 ? 'n' : ''}</span>}
+                    {nCorr > 0   && <span style={{ fontSize: '8px', fontWeight: 700, color: '#ff9f0a', background: 'rgba(255,159,10,0.1)',  padding: '2px 6px', borderRadius: '5px' }}>{nCorr} Korrektur{nCorr !== 1 ? 'en' : ''}</span>}
+                  </div>
+                </div>
+
+                {/* ─ ACCORDION BODY ─ */}
+                {summaryOpen && (
+                  <div style={{ padding: '0 12px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.1)' }}>
+                    {/* Tab-Bar */}
+                    <div style={{ display: 'flex', gap: '3px', margin: '10px 0' }}>
+                      {TAB_LABELS.map((label, i) => (
+                        <button key={i}
+                          onClick={(e) => { e.stopPropagation(); setSummaryTab(i); }}
+                          style={tabBtnStyle(summaryTab === i, i)}
+                        >{label}</button>
+                      ))}
+                    </div>
+                    {/* Tab Content */}
+                    {summaryTexts[summaryTab]}
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
+
 
           {/* Cue Points List */}
           <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px', minHeight: 0, flex: 1 }}>
@@ -2213,6 +2714,33 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
                     />
 
+                    <div style={{ fontSize: '8px', fontWeight: 800, color: '#ff453a', letterSpacing: '0.5px', marginTop: '4px' }}>📍 WAS PASSIERT / WARUM</div>
+                    <textarea
+                      value={editForm.diagnosisText}
+                      onChange={e => setEditForm({ ...editForm, diagnosisText: e.target.value })}
+                      placeholder="Was ist falsch und warum? (kein Fachjargon...)"
+                      rows={2}
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,69,58,0.3)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
+                    <div style={{ fontSize: '8px', fontWeight: 800, color: '#30d158', letterSpacing: '0.5px' }}>✦ WIE ES SEIN SOLL</div>
+                    <textarea
+                      value={editForm.goalText}
+                      onChange={e => setEditForm({ ...editForm, goalText: e.target.value })}
+                      placeholder="Wie sieht es richtig aus?"
+                      rows={2}
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(48,209,88,0.3)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
+                    <div style={{ fontSize: '8px', fontWeight: 800, color: '#c084fc', letterSpacing: '0.5px' }}>🎯 ÜBEN & VERBESSERN</div>
+                    <textarea
+                      value={editForm.practiceText}
+                      onChange={e => setEditForm({ ...editForm, practiceText: e.target.value })}
+                      placeholder="Was konkret üben? Wie verbessern?"
+                      rows={2}
+                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(192,132,252,0.3)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                    />
+
                     <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <button
                         onClick={() => setEditForm({ ...editForm, status: 'GOOD' })}
@@ -2250,10 +2778,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 <div
                   key={cue.id}
                   style={{
-                    background: isSelected ? 'rgba(192, 132, 252, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                    background: isSelected ? 'rgba(192, 132, 252, 0.18)' : cue.dataSource === 'TEACHER_CREATED' ? 'rgba(245,158,11,0.04)' : 'rgba(255, 255, 255, 0.03)',
                     border: isSelected
                       ? '1px solid #c084fc'
-                      : `1px solid ${cueBorderColor(cue.status)}`,
+                      : cue.dataSource === 'TEACHER_CREATED'
+                        ? '1px solid rgba(245,158,11,0.35)'
+                        : `1px solid ${cueBorderColor(cue.status)}`,
+                    borderLeft: cue.dataSource === 'TEACHER_CREATED' && !isSelected ? '3px solid rgba(245,158,11,0.5)' : undefined,
                     borderRadius: '10px',
                     overflow: 'hidden',
                     flexShrink: 0,
@@ -2328,32 +2859,182 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     <span>{cue.headline}</span>
                   </div>
 
-                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', background: 'rgba(0,0,0,0.4)', padding: '8px 10px', borderRadius: '8px', marginTop: '2px' }}>
-                    💡 "{cue.cueMetaphor}"
-                  </div>
 
-                  {/* KI-Note + Referenzbild (nur bei KI_AUTO Cue-Points) */}
-                  {cue.dataSource === 'KI_AUTO' && cue.kiNote && (
-                    <div style={{
-                      background: 'rgba(168,129,189,0.07)',
-                      border: '1px solid rgba(168,129,189,0.18)',
-                      borderRadius: '7px', padding: '7px 10px',
-                      marginTop: '2px',
-                      display: 'flex', flexDirection: 'column', gap: '4px'
-                    }}>
-                      <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        🤖 KI-ANALYSE
-                        {cue.referenceImageKey && (
-                          <span style={{ fontSize: '8px', color: 'rgba(192,132,252,0.6)', fontWeight: 600 }}>
-                            · {cue.referenceImageKey.replace(/_/g, ' ')}
-                          </span>
+                  {/* ── 3-REITER PÄDAGOGIK ── */}
+                  {(() => {
+                    const diagContent = cue.diagnosisText || cue.kiNote || '';
+                    const activeTab = getCueTab(cue.id);
+                    const TAB_LABELS = ['Was & Warum', 'Ziel & Üben', 'Technik'];
+                    const tabBtnStyle = (active: boolean, idx: number): React.CSSProperties => ({
+                      flex: 1, padding: '5px 4px', fontSize: '9.5px', fontWeight: 700,
+                      border: 'none', borderRadius: '6px', cursor: 'pointer',
+                      letterSpacing: '0.2px', transition: 'all 0.15s ease',
+                      background: active
+                        ? (idx === 2 ? 'rgba(255,214,10,0.15)' : 'rgba(192,132,252,0.2)')
+                        : 'rgba(255,255,255,0.05)',
+                      color: active
+                        ? (idx === 2 ? '#ffd60a' : '#d0a0ff')
+                        : 'rgba(255,255,255,0.38)',
+                      boxShadow: active ? `0 0 0 1px ${idx === 2 ? 'rgba(255,214,10,0.3)' : 'rgba(192,132,252,0.25)'}` : 'none',
+                    });
+                    const sectionLabel = (text: string, color: string) => (
+                      <div style={{ fontSize: '9px', fontWeight: 800, color, letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '5px' }}>{text}</div>
+                    );
+                    const bodyText = (text: string) => (
+                      <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.88)', lineHeight: 1.6 }}>{text}</div>
+                    );
+                    // Inline-editierbare Textarea für TEACHER_CREATED: sieht identisch aus wie bodyText,
+                    // beim Fokus erscheint ein subtiler lila Rahmen; Höhe passt sich automatisch an
+                    const autoH = (el: HTMLTextAreaElement | null) => {
+                      if (!el) return;
+                      el.style.height = 'auto';
+                      el.style.height = `${el.scrollHeight}px`;
+                    };
+                    const inlineEdit = (value: string | undefined, field: keyof VaganovaCuePoint, placeholder: string) => (
+                      <textarea
+                        key={`${cue.id}-${field}-${value?.slice(0, 20)}`}
+                        defaultValue={value ?? ''}
+                        placeholder={placeholder}
+                        ref={el => autoH(el)}
+                        onInput={e => autoH(e.currentTarget)}
+                        onBlur={e => handleInlineCueEdit(cue.id, { [field]: e.target.value || undefined })}
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          width: '100%', boxSizing: 'border-box',
+                          resize: 'none', overflow: 'hidden',
+                          background: 'transparent',
+                          border: '1px solid transparent',
+                          borderRadius: '6px', padding: '2px 4px',
+                          color: 'rgba(255,255,255,0.88)', fontSize: '11.5px', lineHeight: 1.6,
+                          fontFamily: 'Inter, system-ui, sans-serif',
+                          outline: 'none',
+                          transition: 'border-color 0.15s ease',
+                          display: 'block',
+                        }}
+                        onFocus={e => { e.target.style.borderColor = 'rgba(192,132,252,0.35)'; autoH(e.target); }}
+                        onBlurCapture={e => (e.target.style.borderColor = 'transparent')}
+                      />
+                    );
+                    const emptyHint = () => (
+                      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>— noch nicht ausgefüllt —</div>
+                    );
+                    const quoteBlock = (text?: string) => text ? (
+                      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.6)', fontStyle: 'italic', borderLeft: '2px solid rgba(192,132,252,0.35)', paddingLeft: '10px', marginTop: '8px', lineHeight: 1.55 }}>{text}</div>
+                    ) : null;
+
+                    return (
+                      <div style={{ marginTop: '4px' }}>
+                        {/* Tab-Bar */}
+                        <div style={{ display: 'flex', gap: '3px', marginBottom: '10px' }}>
+                          {TAB_LABELS.map((label, i) => (
+                            <button key={i} onClick={(e) => { e.stopPropagation(); setCueTab(cue.id, i); }}
+                              style={tabBtnStyle(activeTab === i, i)}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Tab 0 – Was & Warum */}
+                        {activeTab === 0 && (
+                          <div>
+                            {cue.dataSource === 'TEACHER_CREATED'
+                              // TEACHER: inline-editierbares Textfeld (sieht wie KI-Body aus)
+                              ? inlineEdit(diagContent || undefined, 'diagnosisText', 'Was passiert und warum? Beschreibung eintragen...')
+                              // KI: read-only
+                              : (diagContent
+                                  ? bodyText(diagContent)
+                                  : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                      <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', fontStyle: 'italic', lineHeight: 1.6 }}>
+                                        Noch kein Inhalt für diesen Marker.
+                                      </div>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleApplyKiSuggestion(cue.id); }}
+                                        style={{
+                                          display: 'flex', alignItems: 'center', gap: '6px',
+                                          background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(245,158,11,0.08) 100%)',
+                                          border: '1px solid rgba(245,158,11,0.4)',
+                                          borderRadius: '8px', padding: '7px 10px',
+                                          color: '#f59e0b', fontSize: '10px', fontWeight: 800,
+                                          cursor: 'pointer', width: '100%', justifyContent: 'center',
+                                        }}
+                                      >
+                                        <Sparkles size={11} />
+                                        KI-Vorschlag für diesen Frame generieren
+                                      </button>
+                                    </div>
+                                  )
+                              )}
+                            {quoteBlock(cue.diagnosisMetaphor)}
+                          </div>
+                        )}
+
+                        {/* Tab 1 – Ziel & Üben */}
+                        {activeTab === 1 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div>
+                              {sectionLabel('Wie es sein soll', 'rgba(48,209,88,0.75)')}
+                              {cue.dataSource === 'TEACHER_CREATED'
+                                ? inlineEdit(cue.goalText, 'goalText', 'Ziel & Soll-Zustand eintragen...')
+                                : (cue.goalText ? bodyText(cue.goalText) : emptyHint())}
+                            </div>
+                            <div>
+                              {sectionLabel('Üben & verbessern', 'rgba(192,132,252,0.75)')}
+                              {cue.dataSource === 'TEACHER_CREATED'
+                                ? inlineEdit(cue.practiceText, 'practiceText', 'Konkrete Übung eintragen...')
+                                : (cue.practiceText ? bodyText(cue.practiceText) : emptyHint())}
+                            </div>
+                            {/* Metapher inline editierbar für Teacher */}
+                            {cue.dataSource === 'TEACHER_CREATED' ? (
+                              <div>
+                                {sectionLabel('Metapher / Bild', 'rgba(192,132,252,0.4)')}
+                                {inlineEdit(
+                                  cue.cueMetaphor && cue.cueMetaphor !== '(KI-Vorschlag — durch Nicole editierbar)' ? cue.cueMetaphor : undefined,
+                                  'cueMetaphor',
+                                  '"Metapher oder Bild für die Schülerin..."'
+                                )}
+                              </div>
+                            ) : quoteBlock(cue.cueMetaphor)}
+                          </div>
+                        )}
+
+                        {/* Tab 2 – Technik */}
+                        {activeTab === 2 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {sectionLabel('Forensische Technik-Analyse', 'rgba(255,214,10,0.7)')}
+                            {cue.dataSource === 'TEACHER_CREATED' ? (
+                              // TEACHER: inline-editierbares Feld
+                              inlineEdit(cue.technicalAnalysis, 'technicalAnalysis', 'Technische Details, Beobachtungen, Notizen für fortgeschrittene Analyse...')
+                            ) : cue.technicalAnalysis ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                {cue.technicalAnalysis.split('\n\n').map((block, i) => {
+                                  const lines = block.split('\n');
+                                  const heading = lines[0];
+                                  const body = lines.slice(1).join('\n').trim();
+                                  return (
+                                    <div key={i}>
+                                      <div style={{ fontSize: '9px', fontWeight: 800, color: i === 0 ? '#ffd60a' : i === 1 ? 'rgba(255,255,255,0.45)' : i === 2 ? '#c084fc' : i === 3 ? '#ff9f0a' : '#30d158', letterSpacing: '0.6px', textTransform: 'uppercase', marginBottom: '4px' }}>
+                                        {heading}
+                                      </div>
+                                      <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.82)', lineHeight: 1.65 }}>
+                                        {body}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.2)', fontStyle: 'italic' }}>
+                                — Noch keine forensische Analyse verfügbar. KI-Analyse durchführen oder manuell ergänzen. —
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
-                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.45 }}>
-                        {cue.kiNote}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
+
+
 
                   {/* ── PROVENANCE: KI-Vorschlag Review-Buttons (PROJECT_DECISION 2026-08-10) ── */}
                   {cue.provenance === 'ki_suggestion' && (

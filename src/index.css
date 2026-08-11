@@ -60,7 +60,7 @@ html, body, #root {
   border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 20px 16px;
   z-index: 100;
 }
@@ -181,3 +181,54 @@ html, body, #root {
   }
 }
 
+
+/* ─── Custom Tooltip System ─────────────────────────────────────────────────
+   Uses [title] attribute via ::after pseudo-element (bubble only, no arrow).
+   Works on any element with title="..." — no JS or React changes needed.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+[title]:not([title=""]) {
+  position: relative;
+}
+
+[title]:not([title=""])::after {
+  content: attr(title);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(20, 16, 30, 0.94);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(168, 129, 189, 0.22);
+  color: rgba(220, 215, 235, 0.92);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: 'Inter', system-ui, sans-serif;
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 9999;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.45);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[title]:not([title=""]):hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Variant: tooltip öffnet nach unten (für Elemente am oberen Rand) */
+.tooltip-below[title]:not([title=""])::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translateX(-50%) translateY(-4px);
+}
+.tooltip-below[title]:not([title=""]):hover::after {
+  transform: translateX(-50%) translateY(0);
+}

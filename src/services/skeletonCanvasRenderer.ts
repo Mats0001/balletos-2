@@ -10,7 +10,9 @@ import { ReconstructedSkeleton, KinematicPoint } from './vaganova3DKinematics';
 import { vaganovaKineticAI } from './vaganovaKineticAI';
 import { vaganovaArmAnalyzer, ArmPositionResult, ElbowAnalysis, EpaulementResult } from './vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer, SickleWingResult, WeightDistributionResult } from './vaganovaFootAnalyzer';
+import { VaganovaFullAnalysis } from './vaganovaAngleCalculator';
 import { TEACHER_AMPEL_COLORS, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
+import { TeacherOverlayPacket, heuristicColor, heuristicDash } from '../types/teacherHeuristic';
 
 // ─── ANATOMISCHE FARBPALETTE (Berater 2026-08-10 – Sprint 1) ───
 // Farben kodieren Körperregionen, KEIN Status-Urteil.
@@ -39,13 +41,20 @@ export interface CanvasRenderOptions {
   showAngleArcs: boolean;
   selectedJointId: string;
   isPlie: boolean;
-  vaganovaAnalysis: any; // From vaganovaAngleCalculator
+  /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
+  vaganovaAnalysis: VaganovaFullAnalysis | null;
   /** Darstellungsmodus:
-   * 'lehrer-ampel' – Grün/Rot/Gelb aus Rohwerten (Nicole-Unterrichtshilfe, nicht validiert)
+   * 'lehrer-ampel' – Farben aus TeacherOverlayPacket (Nicole, nicht validiert)
    * 'anatomisch'   – Farbe nach Körperregion, kein Urteil
    * 'lehrbuch'     – monochromes Weiß, maximale Klarheit
    */
   overlayMode?: 'lehrer-ampel' | 'anatomisch' | 'lehrbuch';
+  /**
+   * Lehrer-Ampel Packet – MUSS gesetzt sein wenn overlayMode === 'lehrer-ampel'.
+   * Der Renderer berechnet KEINE Heuristik selbst.
+   * Fehlt das Packet im Lehrer-Ampel-Modus → alle Bereiche neutral/blocked.
+   */
+  overlayPacket?: TeacherOverlayPacket;
 }
 
 /**
@@ -265,6 +274,8 @@ export function renderSkeletonToCanvas(
   // dass es sich um nicht-validierte Rohdaten handelt.
   // 'anatomisch' und 'lehrbuch' enthalten KEINE Urteils-Farben.
   const mode = opts.overlayMode ?? 'anatomisch';
+  // Packet aus opts – fehlt es im Lehrer-Modus, alles blocked
+  const pkt = opts.overlayPacket;
 
   // Status → Farbe (nur aktiv in 'lehrer-ampel'-Modus)
   // WICHTIG: undefined/not_measurable = NEUTRAL (niemals automatisch Grün!)
@@ -282,50 +293,31 @@ export function renderSkeletonToCanvas(
   };
 
   /**
-   * Lehrer-Ampel Bein-Heuristik (experimentell).
-   * Ableitung aus Roh-Messwerten ohne die Epistemologie zu verändern.
-   * knieFlexion (research_observation) + valgusDrift (individual_baseline)
-   * werden KOMBINIERT in eine pädagogische Einschätzung.
-   * Kein validiertes Scoring – nur KI-Vorschlag für Nicole.
+   * Holt Farbe aus TeacherOverlayPacket für einen Körperbereich.
+   * Renderer berechnet KEINE Heuristik – nur Farb-Lookup.
+   * Fehlt das Packet → NEUTRAL.
    */
-  const teacherLegStatus = (side: 'L' | 'R'): 'CORRECT' | 'WARNING' | 'ERROR' | 'NEUTRAL' => {
-    if (mode !== 'lehrer-ampel') return 'NEUTRAL';
-    const va = opts.vaganovaAnalysis;
-    if (!va) return 'NEUTRAL';
-
-    const knee = side === 'L' ? va.knieFlexionL : va.knieFlexionR;
-    const valgus = side === 'L' ? va.valgusDriftL : va.valgusDriftR;
-
-    // Kein Basiswert vorhanden: neutral
-    if (!knee && !valgus) return 'NEUTRAL';
-
-    let score = 0; // 0=NEUTRAL, 1=CORRECT, 2=WARNING, 3=ERROR
-
-    // Knieflexion-Heuristik:
-    // Vaganova Demi-Plié: 60–90° → CORRECT; Grand-Plié: ~135° → CORRECT
-    // Gerades Standbein: ≥165° → CORRECT; <120° ohne Plié-Kontext → WARNING
-    if (knee && knee.measurement_class === 'research_observation') {
-      const kv = Math.abs(knee.value);
-      if (kv >= 165) score = Math.max(score, 1);        // Gerades Standbein
-      else if (kv >= 60 && kv <= 145) score = Math.max(score, 1); // Plié-Bereich
-      else if (kv < 40 || kv > 165) score = Math.max(score, 2);  // auffällig
+  const packetColor = (key: keyof TeacherOverlayPacket): string => {
+    if (mode !== 'lehrer-ampel' || !pkt) return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
+    const state = pkt[key];
+    if (typeof state !== 'string') return TEACHER_AMPEL_COLORS.NEUTRAL;
+    // Only heuristic state strings go through heuristicColor
+    if (state === 'heuristic_match' || state === 'heuristic_attention' || state === 'heuristic_strong_attention' || state === 'blocked') {
+      return heuristicColor(state);
     }
-
-    // Valgus-Drift-Heuristik (Delta zur Baseline):
-    // |delta| < 5° → CORRECT; 5–10° → WARNING; >10° → ERROR
-    if (valgus && valgus.measurement_class === 'individual_baseline') {
-      const dv = Math.abs(valgus.value);
-      if (dv < 5)       score = Math.max(score, 1);
-      else if (dv < 10) score = Math.max(score, 2);
-      else              score = Math.max(score, 3);
-    }
-
-    if (score === 0) return 'NEUTRAL';
-    if (score === 1) return 'CORRECT';
-    if (score === 2) return 'WARNING';
-    return 'ERROR';
+    return TEACHER_AMPEL_COLORS.NEUTRAL;
   };
 
+  /** Strich-Muster für blockierte Bereiche */
+  const packetDash = (key: keyof TeacherOverlayPacket): number[] => {
+    if (mode !== 'lehrer-ampel' || !pkt) return [];
+    const state = pkt[key];
+    if (typeof state !== 'string') return [5, 4];
+    if (state === 'heuristic_match' || state === 'heuristic_attention' || state === 'heuristic_strong_attention' || state === 'blocked') {
+      return heuristicDash(state);
+    }
+    return [];
+  };
 
   // Knochen-Farbe nach Region und Modus
   const boneColor = (regional: string): string =>
@@ -378,21 +370,30 @@ export function renderSkeletonToCanvas(
 
   // ─── CoG & PLUMB VECTOR ───
   if (opts.showCoG) {
-    const cogC = mode === 'lehrer-ampel' ? '#30d158' : COLOR_COG;
-    drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 2.5, sx, sy, [4, 4]);
-    drawCircle(ctx, cog.x, cog.y, 10, mode === 'lehrer-ampel' ? 'rgba(48,209,88,0.25)' : 'rgba(167,139,250,0.25)', sx, sy, cogC, 3);
+    // FIX 2026-08-11: CoG war auto-grün im Lehrer-Modus (Issue 1.1)
+    // Jetzt: Farbe kommt aus TeacherOverlayPacket.cog
+    // 'blocked' → grau (fehlende Evidenz ist KEIN positiver Befund)
+    const cogC = mode === 'lehrer-ampel'
+      ? packetColor('cog')
+      : COLOR_COG;
+    const cogDash = mode === 'lehrer-ampel' ? packetDash('cog') : [];
+    drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 2.5, sx, sy, cogDash);
+    drawCircle(ctx, cog.x, cog.y, 10,
+      mode === 'lehrer-ampel' ? (cogC + '25').slice(0, 9) : 'rgba(167,139,250,0.25)',
+      sx, sy, cogC, 3);
     drawCircle(ctx, cog.x, cog.y, 3, '#ffffff', sx, sy);
   }
 
   // ─── WINKEL-BÖGEN (Turnout) ───
   if (opts.showAngleArcs) {
     const avgS = (sx + sy) / 2;
-    const turnoutPairs: Array<[KinematicPoint, string]> = [
+    const va = opts.vaganovaAnalysis;
+    const turnoutPairs: Array<[KinematicPoint, 'turnoutL' | 'turnoutR']> = [
       [ankleL, 'turnoutL'],
       [ankleR, 'turnoutR'],
     ];
     for (const [anklePoint, turnoutKey] of turnoutPairs) {
-      const turnoutVal = opts.vaganovaAnalysis?.[turnoutKey];
+      const turnoutVal = va?.[turnoutKey];
       const turnoutConf = turnoutVal?.confidence ?? 0.7;
       const tColor = mode === 'lehrer-ampel'
         ? statusColor(turnoutVal?.status)
@@ -486,10 +487,16 @@ export function renderSkeletonToCanvas(
   drawLine(ctx, shoulderL.x - 15, shoulderL.y, shoulderR.x + 15, shoulderR.y, COLOR_EPAULEMENT, 1.5, sx, sy, [6, 3]);
 
   // ─── TORSO RAHMEN ───
+  // FIX 2026-08-11: Torso-Seitenlinien reagieren jetzt auf TeacherOverlayPacket.torsoAlignment
+  // Vorher: boneColor(COLOR_SPINE) ignorierte den Lehrer-Ampel-Modus komplett (Issue 1.2)
+  const torsoAlignC = mode === 'lehrer-ampel'
+    ? packetColor('torsoAlignment')
+    : boneColor(COLOR_SPINE);
+  const torsoDash = mode === 'lehrer-ampel' ? packetDash('torsoAlignment') : [];
   const torsoConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
   ctx.globalAlpha = confidenceAlpha(torsoConf) * 0.75;
-  drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, boneColor(COLOR_SPINE), 2.5, sx, sy);
-  drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, boneColor(COLOR_SPINE), 2.5, sx, sy);
+  drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, torsoAlignC, 2.5, sx, sy, torsoDash);
+  drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, torsoAlignC, 2.5, sx, sy, torsoDash);
   // Becken-Leiste
   const pelvisConf = opts.vaganovaAnalysis?.pelvicTilt?.confidence;
   const pelvisC = mode === 'lehrer-ampel'
@@ -499,22 +506,21 @@ export function renderSkeletonToCanvas(
   drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── BEINE (indigo / status im Lehrer-Ampel-Modus) ───
-  // Valgus-Ringe bleiben entfernt (Richtungsfehler abs()). Status zeigt nur Beinfarbe.
-  const legLS = teacherLegStatus('L');
-  const legRS = teacherLegStatus('R');
-  const legLColor = (legLS === 'NEUTRAL') ? TEACHER_AMPEL_COLORS.NEUTRAL : TEACHER_AMPEL_COLORS[legLS];
-  const legRColor = (legRS === 'NEUTRAL') ? TEACHER_AMPEL_COLORS.NEUTRAL : TEACHER_AMPEL_COLORS[legRS];
-  const legLC = mode === 'lehrer-ampel' ? legLColor : boneColor(COLOR_LEG);
-  const legRC = mode === 'lehrer-ampel' ? legRColor : boneColor(COLOR_LEG);
-  // Confidence für Opacity: bevorzuge knieFlexion, Fallback auf valgusDrift
+  // ─── BEINE (aus TeacherOverlayPacket) ───
+  // FIX 2026-08-11: teacherLegStatus() wurde aus dem Renderer entfernt.
+  // Bein-Status kommt jetzt ausschließlich aus TeacherOverlayPacket.
+  const legLC = mode === 'lehrer-ampel' ? packetColor('legL') : boneColor(COLOR_LEG);
+  const legRC = mode === 'lehrer-ampel' ? packetColor('legR') : boneColor(COLOR_LEG);
+  const legLDash = mode === 'lehrer-ampel' ? packetDash('legL') : [];
+  const legRDash = mode === 'lehrer-ampel' ? packetDash('legR') : [];
+  // Confidence für Opacity
   const legLConf = opts.vaganovaAnalysis?.knieFlexionL?.confidence ?? opts.vaganovaAnalysis?.valgusDriftL?.confidence;
   const legRConf = opts.vaganovaAnalysis?.knieFlexionR?.confidence ?? opts.vaganovaAnalysis?.valgusDriftR?.confidence;
 
   // Linkes Bein
   ctx.globalAlpha = confidenceAlpha(legLConf);
-  drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy);
-  drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy);
+  drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy, legLDash);
+  drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy, legLDash);
   const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
   drawCircle(ctx, kneeL.x, kneeL.y, kneeRSize,
     opts.selectedJointId === 'right_knee' ? selColor : (mode === 'lehrer-ampel' ? legLC : COLOR_JOINT), sx, sy);
@@ -522,36 +528,27 @@ export function renderSkeletonToCanvas(
 
   // Rechtes Bein
   ctx.globalAlpha = confidenceAlpha(legRConf);
-  drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy);
-  drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy);
+  drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy, legRDash);
+  drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy, legRDash);
   const kneeLSize = opts.selectedJointId === 'left_knee' ? 11 : 8.5;
   drawCircle(ctx, kneeR.x, kneeR.y, kneeLSize,
     opts.selectedJointId === 'left_knee' ? selColor : (mode === 'lehrer-ampel' ? legRC : COLOR_JOINT), sx, sy);
   ctx.globalAlpha = 1.0;
 
-  // ─── FUß-DOTS ───
-  if (footL && footAlignment.left && footAlignment.left.type !== 'NEUTRAL') {
-    const fc = mode === 'lehrer-ampel'
-      ? (footAlignment.left.status === 'ERROR' ? '#ff453a' : '#ffd60a')
-      : boneColor(COLOR_LEG);
-    drawCircle(ctx, ankleL.x, ankleL.y, 8, fc, sx, sy);
+  // ─── FUß-DOTS (aus TeacherOverlayPacket) ───
+  // FIX 2026-08-11: Fuß-Dots kommen jetzt aus Packet, nicht mehr direkt aus FootAnalyzer (Issue 1.3)
+  // footL/footR = 'blocked' → kein Dot (fehlende Evidenz = kein Urteil)
+  const footLC = mode === 'lehrer-ampel' ? packetColor('footL') : boneColor(COLOR_LEG);
+  const footRC = mode === 'lehrer-ampel' ? packetColor('footR') : boneColor(COLOR_LEG);
+  if (footL && mode === 'lehrer-ampel' && pkt?.footL !== 'blocked') {
+    drawCircle(ctx, ankleL.x, ankleL.y, 8, footLC, sx, sy, footLC, 2);
   }
-  if (footR && footAlignment.right && footAlignment.right.type !== 'NEUTRAL') {
-    const fc = mode === 'lehrer-ampel'
-      ? (footAlignment.right.status === 'ERROR' ? '#ff453a' : '#ffd60a')
-      : boneColor(COLOR_LEG);
-    drawCircle(ctx, ankleR.x, ankleR.y, 8, fc, sx, sy);
+  if (footR && mode === 'lehrer-ampel' && pkt?.footR !== 'blocked') {
+    drawCircle(ctx, ankleR.x, ankleR.y, 8, footRC, sx, sy, footRC, 2);
   }
 
   // ─── SCHWERPUNKT-DOT ───
-  if (weightDist.status !== 'CORRECT') {
-    const wc = mode === 'lehrer-ampel'
-      ? (weightDist.status === 'ERROR' ? '#ff453a' : '#ffd60a')
-      : COLOR_COG;
-    ctx.globalAlpha = 0.65;
-    drawCircle(ctx, cog.x, cog.y, 10,
-      mode === 'lehrer-ampel' ? 'rgba(255,100,100,0.25)' : 'rgba(167,139,250,0.35)',
-      sx, sy, wc, 2.5);
-    ctx.globalAlpha = 1.0;
-  }
+  // FIX 2026-08-11: WeightDist-Status wird nicht mehr direkt gerendet
+  // CoG-Packet (projected_torso_center_proxy) kommt aus overlayPacket.cog (bereits oben gerendert)
+  // Dieser separate WeightDist-Dot wurde entfernt – Doppeldarstellung vermieden
 }

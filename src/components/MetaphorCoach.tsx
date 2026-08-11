@@ -82,6 +82,28 @@ export const MetaphorCoach: React.FC<Props> = ({
           description: 'Nutze das grüne Theraband für kontrollierte Außendrehung aus dem Hüftgelenk im Liegen.',
           metaphorTip: 'Fokus auf Gluteus Medius Ansteuerung.'
         }
+       ]
+    },
+    ERWACHSENE: {
+      exerciseId: 'plie_1',
+      ageGroup: 'ERWACHSENE',
+      whatWentWell: [
+        'Gute Körperspannung und aufrechte Haltung im Oberkörper',
+        'Stabile Beckenachse während der Abwärtsbewegung'
+      ],
+      whatToImprove: [
+        'En-dehors-Rotation noch konsequenter aus der Hüfte führen, nicht aus dem Knie'
+      ],
+      nicoleSpeechPrompt: '📌 "Stell dir vor, deine Oberschenkel drehen sich nach außen während die Knie direkt über den zweiten Zeh zeigen."',
+      studentFocus: 'Hüftrotation und Knielführung in der 1. Position',
+      homeTasks: [
+        {
+          id: 'h_erw',
+          title: 'Hip Rotator Strengthening (Clamshell)',
+          duration: '5 Min.',
+          description: 'Seitenlage, Hüfte gestreckt: Knie öffnen und schließen ohne Becken zu kippen.',
+          metaphorTip: 'Breite, stabile Hips sind die Basis für echten Turnout.'
+        }
       ]
     },
     MASTERCLASS: {
@@ -132,11 +154,12 @@ export const MetaphorCoach: React.FC<Props> = ({
       {/* Age Group Mauve Control Bar */}
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <div className="floating-dock" style={{ display: 'flex', gap: '4px', padding: '4px' }}>
-          {(['MINIS', 'KIDS', 'TEENS', 'MASTERCLASS'] as AgeGroup[]).map(group => {
+          {(['MINIS', 'KIDS', 'TEENS', 'ERWACHSENE', 'MASTERCLASS'] as AgeGroup[]).map(group => {
             const labels: Record<AgeGroup, string> = {
               MINIS: 'Minis (3-5 J.)',
               KIDS: 'Kids (6-10 J.)',
               TEENS: 'Teens (11-15 J.)',
+              ERWACHSENE: 'Fortgeschrittene',
               MASTERCLASS: 'Masterclass (Profi)'
             };
             const isSelected = selectedAgeGroup === group;

@@ -58,6 +58,15 @@ export interface VaganovaCuePoint {
     generatedAt: string;        // ISO 8601
     policyVersion: string;      // BUILD_POLICY.policyVersion zum Zeitpunkt der Generierung
   };
+
+  /** Pädagogische Texte – KI-Vorschläge, von Nicole editierbar */
+  diagnosisText?: string;     // Was passiert & warum (sofort verständlich, kein Fachjargon)
+  diagnosisMetaphor?: string; // Bildhafte Erklärung zu Tab 1 (Was & Warum)
+  goalText?: string;          // Wie es richtig aussehen soll
+  practiceText?: string;      // Was konkret üben & verbessern
+
+  /** Forensische Technik-Analyse für Nicole (Nur-Lehrer-Ansicht) */
+  technicalAnalysis?: string; // Vollanalyse: Metriken, Gesamtbild, kinematische Kette, Differenzialdiagnose, Sofort-Fokus
 }
 
 export interface AutoAnalysisReport {
@@ -80,23 +89,31 @@ const DEMO_FIXTURES: Record<string, VaganovaCuePoint[]> = {
       timecodeStr: '00:00.800',
       poseName: 'Grand Plié 2. Position (Ansatz)',
       status: 'GOOD',
-      headline: 'Perfekte Beckenaufrichtung (Vaganova 2. Pos)',
-      cueMetaphor: '"Lendenwirbel lang und neutral wie eine Perlenkette halten."',
+      headline: 'Schöne Beckenaufrichtung – Körpermitte stabil',
+      cueMetaphor: '"Stell dir vor, deine Wirbelsäule ist eine aufgefädelte Perlenkette – lang, leicht, kein Wirbel hängt durch."',
       jointFocusId: 'pelvis_core',
       isDemoFixture: true,
       dataSource: 'DEMO_FIXTURE',
+      diagnosisMetaphor: '"Stell dir vor, du hast ein Wasserlas auf dem Steißbein — es darf weder nach vorne noch nach hinten kippen."',
+      diagnosisText: 'Das Becken ist hier schön neutral gehalten — weder nach vorne gekippt noch hinten verklemmt. Das ist in der 2. Position gar nicht selbstverständlich, weil die breite Beinstellung viele Schüler dazu verführt, das Becken zu kippen. Hier passiert das nicht. Lendenwirbelsäule behält ihre natürliche Kurve, der Oberkörper liegt ruhig darüber. Schultern, Becken und Standfläche sind gut übereinandergestapelt — das gibt der ganzen Bewegung Stabilität und Eleganz.',
+      goalText: 'Das Becken bleibt in dieser neutralen Mitte — nicht aktiv hineindrücken, nicht durch Anspannung einspannen. Die Wirbelsäule fühlt sich lang und leicht an. Diese Beckenposition als "Heimgefühl" etablieren, nicht als erzwungene Haltung. Wenn das sitzt, kann die Energie nach oben fließen: offene Brust, ruhige Schultern.',
+      practiceText: 'Leg eine Hand auf den Bauchnabel, eine auf die Lendenwirbel — beim langsamen Plié spüren, ob sich die Lendenwirbel mitbewegen. Sie sollen ruhig bleiben. Sobald du das Gefühl kennst, lass die Hände weg und vertrau dem Körpergefühl. Hilfreich: Im Spiegel von der Seite schauen — ist die natürliche S-Kurve der Wirbelsäule noch da?',
     },
     {
       id: 'demo-2-plie-tiefpunkt',
       timeSeconds: 2.5,
       timecodeStr: '00:02.500',
-      poseName: 'Plié Tiefpunkt (Fersen am Boden)',
+      poseName: 'Plié Tiefpunkt',
       status: 'CORRECTION',
-      headline: 'Rechtes Knie – Ausrichtung über Zehenspitze prüfen',
-      cueMetaphor: '"Die Knie ziehen aktiv zurück zur hinteren Raumdiagonale."',
+      headline: 'Rechtes Knie kippt nach innen – Außenrotation halten',
+      cueMetaphor: '"Beide Knie sind wie zwei Türen, die gleichzeitig aufgehen — beide nach außen, keine fällt nach innen zu."',
       jointFocusId: 'right_knee',
       isDemoFixture: true,
       dataSource: 'DEMO_FIXTURE',
+      diagnosisMetaphor: '"Schau auf dein Knie im Spiegel: Zeigt es nach vorne über den Zeh — oder biegt es sich nach innen weg wie eine einknicke Brücke?"',
+      diagnosisText: 'Am tiefsten Punkt des Plié kippt das rechte Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Positiv: Oberkörper und linke Seite sehen sehr ordentlich aus!',
+      goalText: 'Das Knie bleibt direkt über dem mittleren Zeh — beim Plié hinunter aktiv nach außen öffnen, als würden die Knie zwei Türen aufdrücken. Die ganze Beinlinie von Hüfte bis Zehenspitze bleibt sauber in einer Ebene. Dabei die Ferse am Boden lassen — das Knie gibt nach außen nach, nicht die Ferse nach oben.',
+      practiceText: 'Erst an der Stange, nur demi-plié: im tiefsten Punkt kurz stoppen, in den Spiegel schauen — ist das Knie über dem Zeh? Dann aktiv nach außen drücken, als ob du den Boden mit den Fußsohlen auseinanderschieben willst. Fühl wie die Muskeln außen an der Hüfte arbeiten. 10 Wiederholungen täglich, langsam. Erst wenn das sicher sitzt, kommt das Grand Plié dazu. Das ist ein Kraft-Thema, kein Talent-Thema.',
     },
   ],
 };
@@ -274,12 +291,16 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
       timecodeStr: fmtTime(timeSec),
       poseName: 'Knie-Alignment (KI erkannt)',
       status: 'CORRECTION',
-      headline: `Knie-Einfallen ${worstKnee.value.toFixed(1)}° – maximale Abweichung`,
-      cueMetaphor: '"Die Knie zeigen aktiv nach außen – wie zwei Scheinwerfer, die seitlich leuchten."',
+      headline: `Knie kippt nach innen – ${worstKnee.value.toFixed(1)}° an diesem Moment`,
+      cueMetaphor: '"Stell dir vor, deine Knie sind zwei Scheinwerfer – beide zeigen gleichzeitig nach außen in den Raum."',
       jointFocusId: 'left_knee',
       dataSource: 'KI_AUTO',
-      kiNote: `Maximale Knieachsen-Abweichung von ${worstKnee.value.toFixed(1)}° an diesem Frame. Vaganova-Standard: Knie exakt über Zehen, in der Verlängerung des Fußes.`,
+      diagnosisMetaphor: '"Das Knie ist wie eine Türangel — wenn sie locker wird, fällt die Tür nach innen. Hier gibt die Hüft-Angel kurz nach."',
+      kiNote: `An diesem Frame kippt das Knie ${worstKnee.value.toFixed(1)}° nach innen — gut sichtbar, wenn man auf die Verbindungslinie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie zusammen. Das passiert, wenn die Außenrotation aus der Hüfte nicht aktiv genug gehalten wird. Sehr häufig beim Plié und gut trainierbar. Der Rest der Haltung sieht solide aus — das hier ist ein gezieltes Kraft-Thema, kein allgemeines Problem.`,
+      goalText: 'Das Knie bleibt vom ersten Moment des Pliés bis zum tiefsten Punkt direkt über dem mittleren Zeh — die gedachte Linie von Hüfte zu Knie zu Zehenspitze bleibt eine gerade Linie. Die Außenrotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse oder ein Kippen des Fußes. Im Ergebnis öffnen sich die Knie wie Türen gleichmäßig nach außen, bleiben dabei stabil und kontrolliert. Das ist kein ästhetisches Ziel, sondern eine Frage der Gelenk-Gesundheit — langfristig schützt diese Ausrichtung das Kniegelenk.',
+      practiceText: 'Täglich an der Stange: Nur demi-plié, sehr langsam. Im tiefsten Punkt kurz anhalten und in den Spiegel schauen — ist das Knie über dem zweiten oder dritten Zeh? Wenn nicht: kurz aktiv nach außen drücken, ohne die Ferse zu heben. Die Muskeln außen an der Hüfte sollen dabei deutlich arbeiten — das ist der richtige Muskel. 10 Wiederholungen, bewusst und langsam. Erst wenn das im demi-plié sicher sitzt, kommt das grand plié dazu. Dieser Fehler ist ein reines Kraft-Thema und korrigiert sich mit gezieltem Training in wenigen Wochen vollständig.',
       referenceImageKey: 'plie_knie_korrekt',
+      technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${worstKnee.value.toFixed(1)}° mediale Deviation (Knie-Valgus) am Tiefpunkt des Plié. Sollwert: 0° — Patella lotrecht über 2. und 3. Zehe. Abweichung: ${worstKnee.value.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nOberkörper und Carré bleiben in diesem Frame stabil — der Fehler ist auf die untere Extremität isoliert. Das Fußlängsgewölbe ist mit hoher Wahrscheinlichkeit kollabiert (Pronation / "Rolling in") — dieser Fußfehler geht dem Knie-Einknicken voraus und ist der eigentliche Auslöser. Im Slow-Mo prüfen: An welchem Punkt im Plié beginnt das Gewölbe einzubrechen?\n\nKINEMATISCHE KETTE\nDas Knie selbst ist nicht der Verursacher. Die Kausalkette: Mangelnde Außenrotation (En-dehors) im Hüftgelenk → Hüfte überträgt die Torsion ans Knie → Knie weicht medial aus → Fuß proniert als Endkompensation. Die tiefen Außenrotatoren (M. piriformis, Mm. gemelli, M. gluteus maximus) und M. tibialis posterior (Fußgewölbe) sind die Schlüsselmuskeln. Wenn diese Gruppe ermüdet oder strukturell schwach ist, bricht die gesamte Kette zusammen.\n\nDIFFERENZIALDIAGNOSE\nPrimär Kraftdefizit (80%): Pelvitrochanteräre Muskulatur hält im tiefen Plié nicht mehr durch. Sekundär Koordination (20%): Aufmerksamkeit auf Rotation geht beim Absenken verloren. Im Slow-Mo prüfen: Passiert das Einknicken im ersten Drittel des Plié (Kraft) oder erst am Tiefpunkt (Ermüdung)? Das bestimmt den Trainingsansatz.\n\nSOFORT-FOKUS\nRotation tief aus dem Hüftgelenk aktivieren — nicht das Knie manuell nach außen drücken. Gewicht bewusst auf die Fußaußenkante (kleiner Zeh) verlagern, Gewölbe aufrichten. Taktiler Hinweis: Druck am Trochanter major nach außen-oben, nicht am Knie direkt.`,
     });
     corrections.push({ label: 'Knie-Einfallen', timecode: fmtTime(timeSec), value: `${worstKnee.value.toFixed(1)}°` });
   }
@@ -292,12 +313,16 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
       timecodeStr: fmtTime(timeSec),
       poseName: 'Arm-Linienführung (KI erkannt)',
       status: 'CORRECTION',
-      headline: `Arm-Linie ${worstArm.value.toFixed(0)}° Abweichung`,
-      cueMetaphor: '"Der Arm ist eine gerade Linie vom Schulterblatt bis zur Fingerspitze – kein Knick im Handgelenk."',
+      headline: `Arm-Linie ${worstArm.value.toFixed(0)}° – Ellbogen oder Handgelenk prüfen`,
+      cueMetaphor: '"Der Arm fließt wie ein Fluss – vom Schulterblatt bis zur Fingerspitze, ohne Staustufe dazwischen."',
       jointFocusId: 'left_elbow',
       dataSource: 'KI_AUTO',
-      kiNote: `Arm-Winkel weicht ${worstArm.value.toFixed(0)}° vom Vaganova-Ideal ab. Ellbogen leicht nach hinten-unten rotieren, Handgelenk verlängern.`,
+      diagnosisMetaphor: '"Stell dir einen Gartenschlauch vor: Wenn du ihn irgendwo abknickst, fließt das Wasser nicht mehr durch. Genau das passiert hier mit der Energie im Arm."',
+      kiNote: `Der Arm verliert hier die durchfließende Linie vom Schulterblatt bis zur Fingerspitze — meist als leichter Knick im Ellbogen (zu hoch oder zu tief) oder als abgeknicktes Handgelenk sichtbar. Von der Seite betrachtet wirkt der Arm dann nicht fließend, sondern ein bisschen gebrochen. ${worstArm.value.toFixed(0)}° Abweichung an diesem Frame. Das ist eine Frage der Körperwahrnehmung — wenn man einmal fühlt, wie sich der "durchfließende" Arm anfühlt, korrigiert sich das oft sehr schnell.`,
+      goalText: 'Der Arm bildet eine fließende, leicht gerundete Kurve vom Schulterblatt bis zur Fingerspitze — kein spitzer Knick im Ellbogen, kein abgeknicktes Handgelenk, kein hochgezogenes Schulterblatt. Die Position des Ellbogens ist dabei entscheidend: Er liegt geringfügig tiefer als die Schulter, die Innenseite des Ellbogens zeigt leicht zur Decke. Das Handgelenk ist eine natürliche Verlängerung des Unterarms, nicht abgeknickt oder überstreckt. Diese weiche Linie gibt dem Port de bras seine Ausdruckskraft.',
+      practiceText: 'Vor dem Spiegel ohne Musik: Den Arm langsam durch alle Positionen führen (1., 2., 3.) und dabei gezielt auf den Ellbogen achten. An jeder Position kurz anhalten: Ist der Ellbogen tiefer als die Schulter? Zeigt die Arminnenseite zur Decke? Dann das Handgelenk: Liegt es in der Verlängerung des Unterarms? Diese Kontrolle bewusst machen, bis sie automatisch wird. Übung: Arm in Position 1 halten, Augen schließen, Körpergefühl spüren. Augen öffnen, mit dem Spiegel vergleichen. Der Abstand zwischen Gefühl und Realität schließt sich mit der Zeit.',
       referenceImageKey: 'port_de_bras_ideal',
+      technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${worstArm.value.toFixed(0)}° Abweichung von der idealen Armlinienführung. Sollwert: <20° (weiche Allongé-Kurve, 160°–170° im Ellbogengelenk). Abweichung: ${worstArm.value.toFixed(0)}°.\n\nGESAMTBILD DIESES FRAMES\nDie Körperachse wirkt in diesem Frame insgesamt stabil. Die Schulter ist wahrscheinlich leicht eleviert (hochgezogen) — das ist fast immer mit einem Arm-Knick korreliert. Das Handgelenk nach dem Ellbogen möglicherweise überstreckt oder spannungslos ("tote Hand"). Von der Seite ist die Armlinie nicht fließend, sondern weist eine Brechung auf. Prüfen: Passiert der Knick am Ellbogen oder am Handgelenk? Das entscheidet den Korrektur-Ansatz.\n\nKINEMATISCHE KETTE\nEine gebrochene Armlinie entsteht fast immer durch fehlende Verankerung des Schulterblatts am Thorax. Wenn der untere Trapezius und M. latissimus dorsi das Schulterblatt nicht in aktiver Depression halten, übernimmt der M. deltoideus die Haltearbeit allein — Resultat: Schulter geht hoch, Ellbogen knickt ein (der Körper senkt das Gewicht durch Beugen). Zusätzlich: Fehlt die Opposition (Energie von der Schulter durch den Ellbogen bis in die Fingerspitze denken), kollabiert die Linie am schwächsten Punkt.\n\nDIFFERENZIALDIAGNOSE\nPrimär Koordination / Gewohnheit ("Posing"): Die Schülerin positioniert die Hand im Raum, statt Energie aus dem Rücken durch den Ellbogen bis in die Fingerspitzen zu denken. Selten ein Kraftproblem. Prüfen mit der Frage: Wenn Nicole einen leichten Widerstand gegen den Ellbogen gibt, richtet sich der Arm auf? Dann ist es ein Aufmerksamkeitsproblem, kein Kraftproblem.\n\nSOFORT-FOKUS\nEllbogen energetisch heben, gleichzeitig das Schulterblatt in die Gesäßtasche senken (Rückenstütze aktivieren). Verbale Korrektur: "Lass den Ellbogen den Arm führen, nicht die Hand."`,
     });
     corrections.push({ label: 'Arm-Linienführung', timecode: fmtTime(timeSec), value: `${worstArm.value.toFixed(0)}°` });
   }
@@ -311,12 +336,16 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
       timecodeStr: fmtTime(timeSec),
       poseName: 'Schulter-Horizontalität (KI erkannt)',
       status: 'GOOD',
-      headline: 'Gute Schulter-Horizontalität an diesem Frame',
-      cueMetaphor: '"Die Schultern sind eine ruhige Horizontlinie – wie ein Tablett, das man balanciert."',
+      headline: 'Schöne ruhige Schulter-Linie – genau so soll es sein',
+      cueMetaphor: '"Die Schultern sind ein Tablett, das du balancierst — kein Tropfen darf herunterfallen."',
       jointFocusId: 'shoulder_line',
       dataSource: 'KI_AUTO',
-      kiNote: 'Schultern nahezu parallel zum Boden – das ist die Vaganova-Standardposition für épaulement.',
+      diagnosisMetaphor: '"Genau so soll es aussehen: Die Schultern liegen wie Flügel, die ruhig ausgebreitet sind — weder hochgezogen noch eingefallen."',
+      kiNote: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel — die Schulterblätter sitzen aktiv nach unten, ohne Anspannung im Nacken. Das gibt der Bewegung sofort mehr Eleganz und wirkt auf alle im Raum. Das ist eine echte Stärke: diese ruhige, breite Schulter-Linie bewusst im Körpergedächtnis verankern — so soll es immer aussehen.',
+      goalText: 'Diese Schulter-Position als Referenz-Gefühl im Körpergedächtnis verankern. Hier liegt alles richtig: Die Schulterblätter sitzen breit und aktiv nach unten — nicht hochgezogen, nicht zusammengekniffen. Der Nacken ist lang und frei. Die horizontale Schulterlinie gibt der gesamten Oberkörperhaltung Würde und Ruhe. Dieses Gefühl kennen und auf Abruf reproduzieren können — das ist das Ziel.',
+      practiceText: 'Diesen Frame nutzen als persönliche Referenz. Bewusst im Körper spüren: Was passiert gerade mit den Schulterblättern? Wo liegt die Spannung? Dieses Körpergefühl als "Anker" speichern. Übung: Schultern hochziehen, drei Sekunden halten, dann langsam loslassen und tiefer sinken lassen als normal — das ist die richtige Position. Mehrmals täglich, auch ohne Tanzen: beim Sitzen, beim Gehen. Diese Schulterposition soll zur Normalstellung werden, nicht zur bewussten Anspannung.',
       referenceImageKey: 'epaulement_ideal',
+      technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${(bestShoulder.value).toFixed(0)}° Schulter-Symmetriewert (180° = perfekte Horizontalität). Abweichung: nahe 0°. Das ist der beste gemessene Frame in dieser Aufnahme — als persönlicher Referenz-Frame speichern.\n\nGESAMTBILD DIESES FRAMES\nExzellente Gesamthaltung: Schulterblätter sitzen aktiv in Depression auf dem Thorax — kein Hochziehen, kein Zusammenkneifen. Das Hals-Nacken-Dreieck ist lang und spannungsfrei. Das Épaulement wird korrekt aus der Brustwirbelsäule (BWS) initiiert, nicht aus den Schultergelenken. Diesen Frame als Referenz speichern — er zeigt das Optimum dieser Schülerin.\n\nKINEMATISCHE KETTE\nEine perfekte Schulter-Horizontalität in der Dynamik beweist exzellente Kernstabilität (Core). Das Becken ist in diesem Moment neutral platziert, die Wirbelsäule rotiert frei als zentrale Achse, ohne dass der Schultergürtel asymmetrisch kompensieren muss. Das Zusammenspiel von tiefer Bauchmuskulatur, Multifidus und unterem Trapezius funktioniert hier einwandfrei.\n\nDIFFERENZIALDIAGNOSE\nKeine Fehlerquelle — das ist eine bestätigte Stärke. Gute intermuskuläre Koordination zwischen Rumpf- und Schultergürtelmuskulatur. Prüfen: Ist diese Qualität konsistent über die gesamte Aufnahme, oder ist das ein singulärer Hochpunkt? Wenn konsistent: Als gelerntes Muster dokumentieren.\n\nSOFORT-FOKUS\nLob mit konkreter somatischer Aufgabe: "Merk dir das Gefühl des weiten Schlüsselbeins in dieser Pose — das ist dein persönlicher Anker-Moment." Auf Abruf reproduzieren können ist das Trainingsziel.`,
     });
     strengths.push({ label: 'Schulter-Horizontalität', value: `${(bestShoulder.value).toFixed(0)}%` });
   }

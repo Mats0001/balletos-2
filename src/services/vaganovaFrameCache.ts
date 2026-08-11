@@ -1,5 +1,6 @@
 import { PoseLandmark, realMediaPipePose, PoseResultsData } from './realMediaPipePose';
 import { FrameEntry, findBracketingFrames, interpolateFrame } from './frameInterpolator';
+import { vaganovaIdbCache } from './vaganovaIdbCache';
 
 const MAX_CACHED_VIDEOS = 3; // LRU eviction after 3 videos
 
@@ -13,6 +14,8 @@ interface CachedVideo {
 export class VaganovaFrameCacheService {
   private cache: Map<string, CachedVideo> = new Map();
   private isPreIndexingMap: Map<string, boolean> = new Map();
+  /** Maps videoUrl → idb cache key (set when we know the key, i.e. after IDB lookup or scan). */
+  private idbKeyMap: Map<string, string> = new Map();
 
   /**
    * Detect the actual FPS of the video.
@@ -26,21 +29,41 @@ export class VaganovaFrameCacheService {
 
   /**
    * Pre-indexes video frames via off-screen canvas.
-   * Now samples at the VIDEO's native FPS instead of hardcoded 20.
+   * Checks IndexedDB first — if hit, loads instantly and skips the expensive scan.
+   * After a full scan, persists results to IndexedDB for future sessions.
+   *
+   * @param idbKey  Stable cache key (`vaganova_v1_${filename}_${size}`).
+   *                Call `vaganovaIdbCache.buildKey(url, file?)` to construct it.
    */
   public async preIndexVideo(
     videoUrl: string,
     videoEl: HTMLVideoElement,
-    onProgress?: (percent: number, step: number, total: number) => void
+    onProgress?: (percent: number, step: number, total: number, fromCache?: boolean) => void,
+    idbKey?: string
   ): Promise<void> {
     if (this.isPreIndexingMap.get(videoUrl)) return;
     this.isPreIndexingMap.set(videoUrl, true);
 
-    // LRU eviction: remove oldest if at capacity
-    this.evictOldest(videoUrl);
+    // ─── IDB Cache Lookup ────────────────────────────────────────────────────
+    const key = idbKey ?? vaganovaIdbCache.buildKey(videoUrl);
+    this.idbKeyMap.set(videoUrl, key);
 
-    // Remove any existing cache for this video
-    this.cache.delete(videoUrl);
+    const cached = await vaganovaIdbCache.load(key);
+    if (cached) {
+      // Cache HIT — populate in-memory cache, skip the scan entirely
+      this.evictOldest(videoUrl);
+      this.cache.set(videoUrl, {
+        frames: cached.frames,
+        fps: cached.fps,
+        duration: cached.duration,
+        lastAccessedAt: Date.now(),
+      });
+      this.isPreIndexingMap.set(videoUrl, false);
+      if (onProgress) onProgress(100, cached.frames.length, cached.frames.length, true);
+      return;
+    }
+
+    // ─── Cache MISS — run full scan ──────────────────────────────────────────
 
     const duration = videoEl.duration || 5.0;
     const fps = this.detectVideoFps(videoEl);
@@ -59,7 +82,9 @@ export class VaganovaFrameCacheService {
     canvas.height = videoEl.videoHeight || 480;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    let lastValidLandmarks: PoseLandmark[] | null = null;
+    // FAIL-CLOSED (Berater 2026-08-11): no_pose frames sind echte Lücken.
+    // Kein Carry-Forward – fehlende Evidenz wird als fehlend dargestellt.
+    // Frames ohne valide Pose werden übersprungen (kein Entry für diesen Timestamp).
 
     for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
       const timeSec = frameIdx * stepSec;
@@ -109,9 +134,8 @@ export class VaganovaFrameCacheService {
         };
 
         const wasmTimeout = setTimeout(() => {
-          if (lastValidLandmarks) {
-            frames.push({ timeMs, landmarks: lastValidLandmarks });
-          }
+          // FAIL-CLOSED: Timeout = no_pose → Frame überspringen
+          // Kein Carry-Forward mit lastValidLandmarks (Berater 2026-08-11)
           complete();
         }, 500);
 
@@ -127,14 +151,12 @@ export class VaganovaFrameCacheService {
             });
 
             if (isInRange) {
-              lastValidLandmarks = data.landmarks;
               frames.push({ timeMs, landmarks: data.landmarks });
-            } else if (lastValidLandmarks) {
-              frames.push({ timeMs, landmarks: lastValidLandmarks });
             }
-          } else if (lastValidLandmarks) {
-            frames.push({ timeMs, landmarks: lastValidLandmarks });
+            // FAIL-CLOSED: Garbage oder kein Pose → Frame überspringen
+            // (kein Carry-Forward, kein Entry für diesen Timestamp)
           }
+          // FAIL-CLOSED: Kein Landmark-Set → Frame überspringen
           complete();
         }).catch(() => {
           clearTimeout(wasmTimeout);
@@ -166,7 +188,10 @@ export class VaganovaFrameCacheService {
     });
 
     this.isPreIndexingMap.set(videoUrl, false);
-    if (onProgress) onProgress(100, totalFrames, totalFrames);
+    if (onProgress) onProgress(100, totalFrames, totalFrames, false);
+
+    // ─── Persist to IDB (non-blocking, fire-and-forget) ──────────────────────
+    vaganovaIdbCache.save(key, frames, fps, duration).catch(() => {});
   }
 
   /**
@@ -196,6 +221,11 @@ export class VaganovaFrameCacheService {
   public hasCache(videoUrl: string): boolean {
     const cached = this.cache.get(videoUrl);
     return !!cached && cached.frames.length > 10;
+  }
+
+  /** Returns the IDB key used for this video (for UI display). */
+  public getIdbKey(videoUrl: string): string | undefined {
+    return this.idbKeyMap.get(videoUrl);
   }
 
   /** Returns all cached frames for a video (for post-scan analysis). */
