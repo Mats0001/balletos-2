@@ -173,6 +173,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     } catch { return []; }
   });
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pen');
+  const [isAnnotationModeActive, setIsAnnotationModeActive] = useState<boolean>(false);
   const [drawingColor, setDrawingColor] = useState<string>('#ff453a');
   const [drawingLineWidth, setDrawingLineWidth] = useState<number>(3);
   const [saveWithSkeleton, setSaveWithSkeleton] = useState<boolean>(true);
@@ -967,17 +968,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
     };
 
-    // Bone segments: [fromLandmark, toLandmark, representativeLandmark (for popover)]
+    // Bone segments: [fromLandmark, toLandmark, representativeLandmark (for popover), jointFocusOverride?]
     // representativeLandmark = the joint that is most pedagogically relevant for this bone
-    const BONE_SEGMENTS: Array<[number, number, number]> = [
+    const BONE_SEGMENTS: Array<[number, number, number, string?]> = [
       [11, 12, 11],  // Schulterleiste → linke Schulter
       [11, 13, 13],  // L Oberarm → L Ellbogen
       [13, 15, 15],  // L Unterarm → L Handgelenk
       [12, 14, 14],  // R Oberarm → R Ellbogen
       [14, 16, 16],  // R Unterarm → R Handgelenk
       [23, 24, 23],  // Beckenleiste → L Hüfte
-      [11, 23, 23],  // L Rumpf → L Hüfte
-      [12, 24, 24],  // R Rumpf → R Hüfte
+      [11, 23, 23, 'spine_center'],  // L Rumpf → L Hüfte
+      [12, 24, 24, 'spine_center'],  // R Rumpf → R Hüfte
       [23, 25, 25],  // L Oberschenkel → L Knie
       [25, 27, 25],  // L Unterschenkel → L Knie
       [27, 29, 27],  // L Fuß → L Knöchel
@@ -1000,11 +1001,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (dist < minDist) { minDist = dist; nearestIdx = idx; }
     });
 
+    let boneJointOverride: string | undefined;
+
     // 2️⃣ Bone segment hit-test (20px tolerance) – only if no joint was closer
     if (nearestIdx < 0) {
       const SEG_TOLERANCE = 20;
       let bestSegDist = SEG_TOLERANCE;
-      for (const [fromIdx, toIdx, repIdx] of BONE_SEGMENTS) {
+      for (const [fromIdx, toIdx, repIdx, overrideId] of BONE_SEGMENTS) {
         const a = lm[fromIdx]; const b = lm[toIdx];
         if (!a || !b) continue;
         if ((a.visibility ?? 1) < 0.3 || (b.visibility ?? 1) < 0.3) continue;
@@ -1014,6 +1017,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         if (d < bestSegDist && getJointKnowledge(repIdx)) {
           bestSegDist = d;
           nearestIdx = repIdx;
+          boneJointOverride = overrideId;
         }
       }
     }
@@ -1052,7 +1056,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         32: 'right_knee',         // right toe → leg context
       };
 
-      const mappedJointId = LANDMARK_TO_JOINT_ID[nearestIdx];
+      const mappedJointId = boneJointOverride || LANDMARK_TO_JOINT_ID[nearestIdx];
       if (mappedJointId) {
         setSelectedJointId(mappedJointId);
 
@@ -1315,6 +1319,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setZoomLevel(1);
         setPanOffset({ x: 0, y: 0 });
         setSelectedJointId('');
+        setIsAnnotationModeActive(false);
       }
     }
   };
@@ -2267,7 +2272,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               transform: `scale(${zoomLevel}) translate(${panOffset.x}%, ${panOffset.y}%)`,
               transformOrigin: 'center center',
               transition: isDraggingRef.current ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-              cursor: zoomLevel > 1 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
+              cursor: (!isPlaying && isAnnotationModeActive) ? 'crosshair' : (zoomLevel > 1 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default'),
             }}
               onClick={(e) => {
                 // Suppress click if the user was dragging (moved > 5px)
@@ -2281,7 +2286,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               onMouseDown={(e) => {
                 // Always record start position (for click-vs-drag detection)
                 dragStartRef.current = { x: e.clientX, y: e.clientY, panX: panOffset.x, panY: panOffset.y };
-                if (zoomLevel <= 1) return;
+                if (zoomLevel <= 1 || (!isPlaying && isAnnotationModeActive)) return;
                 isDraggingRef.current = true;
                 e.preventDefault();
               }}
@@ -2402,7 +2407,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     ref={annotationCanvasRef}
                     width={overlayBounds.width}
                     height={overlayBounds.height}
-                    isActive={!isPlaying}
+                    isActive={!isPlaying && isAnnotationModeActive}
                     tool={drawingTool}
                     color={drawingColor}
                     lineWidth={drawingLineWidth}
@@ -2486,7 +2491,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             }}>
               {/* Pause indicator */}
               <div style={{ fontSize: '8px', fontWeight: 800, color: '#a881bd', letterSpacing: '0.5px', marginBottom: '4px', textAlign: 'center' }}>
-                ✏️
+                {isAnnotationModeActive ? '✏️' : '🤚'}
               </div>
 
               {/* Tool buttons */}
@@ -2498,14 +2503,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               ] as const).map(({ tool: t, icon, label }) => (
                 <button
                   key={t}
-                  onClick={() => setDrawingTool(t)}
+                  onClick={() => {
+                    if (drawingTool === t && isAnnotationModeActive) {
+                      setIsAnnotationModeActive(false);
+                    } else {
+                      setDrawingTool(t);
+                      setIsAnnotationModeActive(true);
+                    }
+                  }}
                   title={label}
                   style={{
                     width: '36px', height: '36px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                    background: drawingTool === t ? 'rgba(192,132,252,0.3)' : 'rgba(255,255,255,0.06)',
-                    color: drawingTool === t ? '#c084fc' : 'rgba(255,255,255,0.5)',
+                    background: drawingTool === t && isAnnotationModeActive ? 'rgba(192,132,252,0.3)' : 'rgba(255,255,255,0.06)',
+                    color: drawingTool === t && isAnnotationModeActive ? '#c084fc' : 'rgba(255,255,255,0.5)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: drawingTool === t ? '0 0 0 1px rgba(192,132,252,0.5)' : 'none',
+                    boxShadow: drawingTool === t && isAnnotationModeActive ? '0 0 0 1px rgba(192,132,252,0.5)' : 'none',
                     transition: 'all 0.15s ease',
                   }}
                 >{icon}</button>
