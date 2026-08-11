@@ -87,17 +87,43 @@ export interface TeacherOverlayPacket {
   /** Kopf-/Hals-Ausrichtung */
   head: TeacherHeuristicState;
 
-  // ── Provenienz ──────────────────────────────────────────────────────
-  /** Policy-Version für Audit */
-  policyVersion: string;
+  // ── Provenienz (Berater-Briefing 2026-08-11, Pflichtfelder) ────────
+
+  /** Stabile Video-ID */
+  sourceVideoId: string;
+
+  /** PTS des Frames (Sekunden) */
+  sourcePts: number;
+
+  /** Monotone Frame-Sequenznummer (-1 bei Tier B) */
+  frameSequence: number;
 
   /** Stream-Epoch: Ungültig wenn Clip wechselt */
   streamEpoch: number;
 
-  /**
-   * Timestamp des Frames, für den dieser Packet gilt (Sekunden).
-   * Renderer-Snapshot ist ungültig wenn videoTime abweicht.
-   */
+  /** Geometry-Hash: `${videoWidth}x${videoHeight}` */
+  geometryId: string;
+
+  /** Modellversion (z.B. MediaPipe Pose Landmarker) */
+  modelVersion: string;
+
+  /** Version der Heuristik-Engine */
+  heuristicVersion: string;
+
+  /** Policy-Version für Audit */
+  policyVersion: string;
+
+  /** Quelle der Heuristik */
+  heuristicSource: 'engine' | 'manual';
+
+  /** Gründe warum einzelne Bereiche blocked sind (Debugging) */
+  blockReasons: string[];
+
+  /** Referenzen auf verwendete Beobachtungen (IDs) */
+  observationRefs: string[];
+
+  // ── Compat (wird in Phase 2 entfernt) ──────────────────────────────
+  /** @deprecated Nutze sourcePts stattdessen */
   framePtsSeconds: number;
 }
 
@@ -143,7 +169,12 @@ export function heuristicDash(state: TeacherHeuristicState): number[] {
  * Erstellt ein vollständig blockiertes Overlay-Packet.
  * Wird verwendet wenn keine Pose-Daten verfügbar sind (no_pose, Timeout etc.)
  */
-export function createBlockedPacket(framePtsSeconds: number, streamEpoch: number): TeacherOverlayPacket {
+export function createBlockedPacket(
+  framePtsSeconds: number,
+  streamEpoch: number,
+  sourceVideoId: string = '',
+  blockReasons: string[] = ['no_pose_data'],
+): TeacherOverlayPacket {
   return {
     torsoAlignment: 'blocked',
     spine: 'blocked',
@@ -157,8 +188,17 @@ export function createBlockedPacket(framePtsSeconds: number, streamEpoch: number
     footR: 'blocked',
     cog: 'blocked',
     head: 'blocked',
-    policyVersion: '0.2.0-teacher-ampel',
+    sourceVideoId,
+    sourcePts: framePtsSeconds,
+    frameSequence: -1,
     streamEpoch,
+    geometryId: '0x0',
+    modelVersion: 'mediapipe-pose-landmarker-full-v0.3',
+    heuristicVersion: '0.3.0',
+    policyVersion: '0.3.0-teacher-ampel',
+    heuristicSource: 'engine',
+    blockReasons,
+    observationRefs: [],
     framePtsSeconds,
   };
 }

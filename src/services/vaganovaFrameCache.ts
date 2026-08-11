@@ -4,11 +4,19 @@ import { vaganovaIdbCache } from './vaganovaIdbCache';
 
 const MAX_CACHED_VIDEOS = 3; // LRU eviction after 3 videos
 
+/**
+ * Frame-Ergebnis-Typ (Berater 2026-08-11):
+ * no_pose, Timeout und Inferenzfehler als UNTERSCHIEDLICHE Ergebnisse.
+ */
+export type FrameResultType = 'valid' | 'no_pose' | 'timeout' | 'inference_error' | 'out_of_range';
+
 interface CachedVideo {
   frames: FrameEntry[];
   fps: number;
   duration: number;
   lastAccessedAt: number;
+  /** Qualitätsstatistik: Wie viele Frames pro Typ */
+  resultCounts?: Record<FrameResultType, number>;
 }
 
 export class VaganovaFrameCacheService {
@@ -19,12 +27,29 @@ export class VaganovaFrameCacheService {
 
   /**
    * Detect the actual FPS of the video.
-   * Most ballet videos are 30fps, some 25fps or 60fps.
+   * Berater 2026-08-11: Die hartcodierte 30-fps-Annahme als Zeitquelle entfernen.
+   * Versucht zuerst Metadaten, dann konservativen Fallback.
+   * NICHT raten oder fest auf 30 setzen.
    */
-  private detectVideoFps(_videoEl: HTMLVideoElement): number {
-    // Safe default for most video content
-    // In future: use requestVideoFrameCallback to measure actual frame rate
-    return 30;
+  private detectVideoFps(videoEl: HTMLVideoElement): number {
+    // Methode 1: WebKitDecodedFrameCount (Safari)
+    const vAny = videoEl as unknown as Record<string, unknown>;
+    if (typeof vAny['webkitDecodedFrameCount'] === 'number' && videoEl.duration > 0) {
+      const decoded = vAny['webkitDecodedFrameCount'] as number;
+      if (decoded > 10) {
+        const fps = Math.round(decoded / videoEl.duration);
+        if (fps >= 15 && fps <= 120) return fps;
+      }
+    }
+
+    // Methode 2: Heuristik aus Video-Dimensionen (4K → wahrscheinlich 30fps, 1080p → 25/30/60)
+    // Das ist KEINE sichere Erkennung, nur ein besserer Default als blindes 30.
+    // Der FramePump (Schritt 3) wird rVFC für echte Frame-Timing-Daten nutzen.
+    const w = videoEl.videoWidth;
+    if (w >= 3840) return 30;      // 4K Videos typischerweise 30fps
+    if (w >= 1920) return 30;      // 1080p: 30fps als konservativer Default
+    if (w >= 1280) return 25;      // 720p: könnte 25fps (PAL) sein
+    return 24;                     // Konservativster Default
   }
 
   /**

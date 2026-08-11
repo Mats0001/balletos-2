@@ -246,26 +246,53 @@ export class TeacherHeuristicEngine {
     sk: ReconstructedSkeleton | null,
     framePtsSeconds: number,
     streamEpoch: number,
+    sourceVideoId: string = '',
   ): TeacherOverlayPacket {
     if (!BUILD_POLICY.allowExperimentalTeacherTrafficLight || !va || !sk) {
-      return createBlockedPacket(framePtsSeconds, streamEpoch);
+      return createBlockedPacket(framePtsSeconds, streamEpoch, sourceVideoId,
+        !va ? ['no_vaganova_analysis'] : !sk ? ['no_skeleton'] : ['policy_disabled']);
+    }
+
+    // Sammle blockReasons für Debugging
+    const blockReasons: string[] = [];
+    const observationRefs: string[] = [];
+
+    const torsoAlignment = computeTorsoAlignment(va);
+    const spine     = computeSpine(va);
+    const shoulder  = computeShoulder(va);
+    const pelvis    = computePelvis(va);
+    const armL      = computeArm(va, 'L');
+    const armR      = computeArm(va, 'R');
+    const legL      = computeLeg(va, 'L');
+    const legR      = computeLeg(va, 'R');
+    const footL     = computeFoot(sk, 'L');
+    const footR     = computeFoot(sk, 'R');
+    const cog       = computeCog(sk);
+    const head      = computeHead(va);
+
+    // Sammle blocked-Bereiche für Debugging
+    const results = { torsoAlignment, spine, shoulder, pelvis, armL, armR, legL, legR, footL, footR, cog, head };
+    for (const [key, val] of Object.entries(results)) {
+      if (val === 'blocked') blockReasons.push(`${key}_blocked`);
     }
 
     return {
-      torsoAlignment: computeTorsoAlignment(va),
-      spine:     computeSpine(va),
-      shoulder:  computeShoulder(va),
-      pelvis:    computePelvis(va),
-      armL:      computeArm(va, 'L'),
-      armR:      computeArm(va, 'R'),
-      legL:      computeLeg(va, 'L'),
-      legR:      computeLeg(va, 'R'),
-      footL:     computeFoot(sk, 'L'),
-      footR:     computeFoot(sk, 'R'),
-      cog:       computeCog(sk),
-      head:      computeHead(va),
-      policyVersion: BUILD_POLICY.policyVersion,
+      torsoAlignment, spine, shoulder, pelvis,
+      armL, armR, legL, legR,
+      footL, footR, cog, head,
+      // Provenienz
+      sourceVideoId,
+      sourcePts: framePtsSeconds,
+      frameSequence: -1, // Wird in Schritt 3 (FramePump) korrekt befüllt
       streamEpoch,
+      geometryId: '0x0', // Wird in Schritt 3 (FrameGeometry) korrekt befüllt
+      modelVersion: 'mediapipe-pose-landmarker-full-v0.3',
+      heuristicVersion: '0.3.0',
+      policyVersion: BUILD_POLICY.policyVersion,
+      heuristicSource: 'engine',
+      blockReasons,
+      observationRefs,
+      // Compat
       framePtsSeconds,
     };
   }
