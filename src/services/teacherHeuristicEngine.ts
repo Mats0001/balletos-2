@@ -69,17 +69,26 @@ function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
   const nonBlocked = states.filter(s => s !== 'blocked');
   if (nonBlocked.length === 0) return 'blocked';
 
+  // Mehrheits-Voting statt pessimistisch:
+  // score: match=0, attention=1, strong_attention=2
+  const scoreMap: Record<string, number> = {
+    'heuristic_match': 0,
+    'heuristic_attention': 1,
+    'heuristic_strong_attention': 2,
+  };
   const order: TeacherHeuristicState[] = [
     'heuristic_match',
     'heuristic_attention',
     'heuristic_strong_attention',
   ];
-  let worst = 0;
-  for (const s of nonBlocked) {
-    const idx = order.indexOf(s);
-    if (idx > worst) worst = idx;
-  }
-  return order[worst];
+
+  const totalScore = nonBlocked.reduce((sum, s) => sum + (scoreMap[s] ?? 0), 0);
+  const avg = totalScore / nonBlocked.length;
+
+  // avg < 0.5 → match, < 1.5 → attention, >= 1.5 → strong_attention
+  if (avg < 0.5) return order[0];
+  if (avg < 1.5) return order[1];
+  return order[2];
 }
 
 // ─── EINZEL-HEURISTIKEN ─────────────────────────────────────────────────────
@@ -107,8 +116,10 @@ function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  if (deg <= 4)  return 'heuristic_match';
-  if (deg <= 10) return 'heuristic_attention';
+  // Vaganova pelvis in 2D-Projektion liest HÖHER als klinisch,
+  // besonders im Plié. Schwellenwerte bewusst weiter als Spine/Shoulder.
+  if (deg <= 6)  return 'heuristic_match';
+  if (deg <= 14) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
