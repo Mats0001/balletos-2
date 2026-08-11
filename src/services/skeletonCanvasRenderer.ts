@@ -521,18 +521,18 @@ export function renderSkeletonToCanvas(
   ctx.globalAlpha = confidenceAlpha(legLConf);
   drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy, legLDash);
   drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy, legLDash);
-  const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
-  drawCircle(ctx, kneeL.x, kneeL.y, kneeRSize,
-    opts.selectedJointId === 'right_knee' ? selColor : (mode === 'lehrer-ampel' ? legLC : COLOR_JOINT), sx, sy);
+  const kneeLSize = opts.selectedJointId === 'left_knee' ? 9 : 6.5;
+  drawCircle(ctx, kneeL.x, kneeL.y, kneeLSize,
+    opts.selectedJointId === 'left_knee' ? selColor : (mode === 'lehrer-ampel' ? legLC : COLOR_JOINT), sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Rechtes Bein
   ctx.globalAlpha = confidenceAlpha(legRConf);
   drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy, legRDash);
   drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy, legRDash);
-  const kneeLSize = opts.selectedJointId === 'left_knee' ? 11 : 8.5;
-  drawCircle(ctx, kneeR.x, kneeR.y, kneeLSize,
-    opts.selectedJointId === 'left_knee' ? selColor : (mode === 'lehrer-ampel' ? legRC : COLOR_JOINT), sx, sy);
+  const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
+  drawCircle(ctx, kneeR.x, kneeR.y, kneeRSize,
+    opts.selectedJointId === 'right_knee' ? selColor : (mode === 'lehrer-ampel' ? legRC : COLOR_JOINT), sx, sy);
   ctx.globalAlpha = 1.0;
 
   // ─── FUß-DOTS (aus TeacherOverlayPacket) ───
