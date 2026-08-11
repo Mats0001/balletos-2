@@ -778,45 +778,56 @@ export function renderSkeletonToCanvas(
 
     switch (opts.selectedJointId) {
       case 'left_knee': {
-        // Korrekte Referenz: Gerade Linie Hüfte → Knöchel
-        // (Knie soll auf dieser Linie liegen = über dem 2./3. Zeh)
-        drawIdealLine(pelvisL.x, pelvisL.y, ankleL.x, ankleL.y);
-        drawIdealLabel('Ideal', (ankleL.x + 18) * sx, ((pelvisL.y + ankleL.y) / 2) * sy);
+        // VAGANOVA/IADMS REFERENZ: Knie soll über dem 2./3. Metatarsal projizieren
+        // Proxy: Mittelpunkt Knöchel↔Zeh ≈ 2. Metatarsal-Kopf
+        // Vertikale Referenz von dort nach oben = "hier soll das Knie sein"
+        const targetLX = footL ? (ankleL.x + footL.x) / 2 : ankleL.x;
+        drawIdealLine(targetLX, kneeL.y - 20, targetLX, ankleL.y + 15);
+        // Fuß-Markierung: kleiner Punkt am Referenzpunkt
+        drawCircle(ctx, targetLX, ankleL.y + 5, 5, 'none', sx, sy, IDEAL_COLOR, 2.5);
+        drawIdealLabel('Knie→Fuß', (targetLX + 18) * sx, ((kneeL.y + ankleL.y) / 2) * sy);
         break;
       }
       case 'right_knee': {
-        drawIdealLine(pelvisR.x, pelvisR.y, ankleR.x, ankleR.y);
-        drawIdealLabel('Ideal', (ankleR.x + 18) * sx, ((pelvisR.y + ankleR.y) / 2) * sy);
+        const targetRX = footR ? (ankleR.x + footR.x) / 2 : ankleR.x;
+        drawIdealLine(targetRX, kneeR.y - 20, targetRX, ankleR.y + 15);
+        drawCircle(ctx, targetRX, ankleR.y + 5, 5, 'none', sx, sy, IDEAL_COLOR, 2.5);
+        drawIdealLabel('Knie→Fuß', (targetRX + 18) * sx, ((kneeR.y + ankleR.y) / 2) * sy);
         break;
       }
       case 'spine_center': {
-        // IDEAL: Perfekt senkrecht vom Becken nach oben
-        // pelvisCenter.x ist der Fixpunkt → Kopf SOLL direkt darüber sein
+        // APLOMB: Lotlinie vertikal bei pelvisCenter.x
+        // Kopf soll direkt darüber stehen (Vaganova Квадратност)
         drawIdealLine(pelvisCenter.x, head.y - 15, pelvisCenter.x, pelvisCenter.y + 15);
-        drawIdealLabel('Vertikal', (pelvisCenter.x + 18) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
+        drawIdealLabel('Lot', (pelvisCenter.x + 18) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
         break;
       }
       case 'pelvis_core': {
+        // BECKEN-WAAGE: ASIS-ASIS horizontal (Vaganova Quadratnost)
         const pelvisCenterY = (pelvisL.y + pelvisR.y) / 2;
         drawIdealLine(pelvisL.x - 25, pelvisCenterY, pelvisR.x + 25, pelvisCenterY);
-        drawIdealLabel('Horizontal', (pelvisR.x + 30) * sx, pelvisCenterY * sy + 5);
+        drawIdealLabel('Becken-Waage', (pelvisR.x + 30) * sx, pelvisCenterY * sy + 5);
         break;
       }
       case 'shoulder_line': {
+        // SCHULTER-WAAGE: Akromion-Akromion horizontal
         const shCenterY = (shoulderL.y + shoulderR.y) / 2;
         drawIdealLine(shoulderL.x - 25, shCenterY, shoulderR.x + 25, shCenterY);
-        drawIdealLabel('Horizontal', (shoulderR.x + 30) * sx, shCenterY * sy + 5);
+        drawIdealLabel('Schulter-Waage', (shoulderR.x + 30) * sx, shCenterY * sy + 5);
         break;
       }
       case 'left_elbow':
       case 'port_de_bras_arms': {
-        const idealElbowLY = shoulderL.y + 8;
+        // ALLONGÉ-BOGEN: Proportionaler Offset statt hardcodierter 8px
+        const armLenL = Math.abs(wristL.y - shoulderL.y);
+        const idealElbowLY = shoulderL.y + armLenL * 0.08;
         const idealElbowLX = (shoulderL.x + wristL.x) / 2;
         drawIdealLine(shoulderL.x, shoulderL.y, idealElbowLX, idealElbowLY);
         drawIdealLine(idealElbowLX, idealElbowLY, wristL.x, wristL.y);
         drawCircle(ctx, idealElbowLX, idealElbowLY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
         if (opts.selectedJointId === 'port_de_bras_arms') {
-          const idealElbowRY = shoulderR.y + 8;
+          const armLenR = Math.abs(wristR.y - shoulderR.y);
+          const idealElbowRY = shoulderR.y + armLenR * 0.08;
           const idealElbowRX = (shoulderR.x + wristR.x) / 2;
           drawIdealLine(shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY);
           drawIdealLine(idealElbowRX, idealElbowRY, wristR.x, wristR.y);
@@ -825,7 +836,9 @@ export function renderSkeletonToCanvas(
         break;
       }
       case 'head_epaulement': {
+        // KOPF-LOT: Vertikale Becken→Kopf Achse
         drawIdealLine(pelvisCenter.x, head.y - 20, pelvisCenter.x, pelvisCenter.y);
+        drawIdealLabel('Lot', (pelvisCenter.x + 18) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
         break;
       }
     }
