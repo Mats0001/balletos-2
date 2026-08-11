@@ -1,8 +1,8 @@
 # BalletOS 2.0 — Concept & Ideas Book
 
-**Status:** Living document · **Book version:** 0.1.0 · **Owner:** BalletOS product team
+**Status:** Living document · **Book version:** 0.2.0 · **Owner:** BalletOS product team
 
-**Created:** 2026-08-10 · **Last updated:** 2026-08-10
+**Created:** 2026-08-10 · **Last updated:** 2026-08-11
 **Purpose:** Preserve product and pedagogy ideas without interrupting the active engineering focus.
 
 ---
@@ -70,7 +70,7 @@ Candidates after the Skeleton foundation:
 - Cue Point Manager V2;
 - separate teacher, student, and parent views;
 - guided single-camera capture;
-- progress comparison against a valid personal baseline;
+- DecisionGate-eligible, Nicole-approved comparison cues under a comparable capture protocol, identical metric and model versions, known repeatability, and validated measurement error;
 - controlled Shadow Mode evaluation with Nicole.
 
 ### LATER — Extended platform
@@ -88,6 +88,8 @@ Candidates after the Skeleton foundation:
 ## 3. Idea lifecycle
 
 Every idea has two independent labels: a **status** and a **horizon**.
+
+`PROPOSE_ONLY` is a separate decision marker. It records that a concept is documented for exploration but is not approved for implementation, promotion into NOW, or scientific claims. Storing a `PROPOSE_ONLY` concept in the canonical Draft PR does not change that decision status.
 
 ### Status
 
@@ -117,7 +119,7 @@ An idea may move from this book into the product backlog only when all applicabl
 - What user problem does it solve?
 - Who is the primary user?
 - What is explicitly out of scope?
-- Does it alter measurement truth, scoring, safety, or only presentation?
+- Does it alter measurement values, evidence status, DecisionGate eligibility, safety claims, or only presentation?
 - What evidence or teacher review is required?
 - What dependencies and failure modes exist?
 - How will success and unintended harm be evaluated?
@@ -131,180 +133,261 @@ Promotion must be recorded in the Decision Log and linked to a dedicated issue o
 
 ## 4. Idea index
 
-| ID | Idea | Status | Horizon | Depends on |
-|---|---|---|---|---|
-| `IDEA-001` | Adaptive Coaching Profiles | `EXPLORING` | `NEXT` | DecisionGate, stable Finding model |
-| `IDEA-002` | Cue Point Manager V2 | `EXPLORING` | `NEXT` | IDEA-001, Teacher Review workflow |
-| `IDEA-003` | Three-surface deployment: iPad, mobile, Linux server | `PARKED` | `LATER` | validated local pipeline, product requirements |
+| ID | Idea | Status | Horizon | Decision marker | Depends on |
+|---|---|---|---|---|---|
+| `IDEA-001` | Adaptive Coaching Profiles | `EXPLORING` | `NEXT` | `PROPOSE_ONLY` | DecisionGate, stable Finding model |
+| `IDEA-002` | Cue Point Manager V2 | `EXPLORING` | `NEXT` | `PROPOSE_ONLY` | IDEA-001, Teacher Review workflow |
+| `IDEA-003` | Three-surface deployment: iPad, mobile, Linux server | `PARKED` | `LATER` | — | validated local pipeline, product requirements |
 
 ---
 
 ## 5. IDEA-001 — Adaptive Coaching Profiles
 
-**Status:** `EXPLORING` · **Horizon:** `NEXT` · **Entry version:** 0.1.0
+**Status:** `EXPLORING` · **Horizon:** `NEXT` · **Decision marker:** `PROPOSE_ONLY` · **Entry version:** 0.2.0
 
-**Primary users:** Nicole, students across age and training stages
-**Problem:** A technically correct system can still demotivate learners if it displays every deviation with equal intensity or predominantly red feedback.
+**Primary users:** Nicole and learners across different ages, learning stages, technique tracks, and teaching contexts
+
+**Problem:** The same technically unchanged observation may require different pedagogical sharpness, information density, prioritization, wording, and presentation. A learner-facing view should remain useful and motivating without changing measurement values, evidence status, or DecisionGate results.
+
+### Source and concept status
+
+- The open Draft PR is the `CANONICAL_PROJECT_SOURCE` for this working concept.
+- The invariants in this section are `PROJECT_DECISION` constraints.
+- The context model, presentation presets, `Finding`, `Teaching Moment`, `Context Snapshot`, `Pedagogical Feedback Selector`, `CoachingCue`, `Evidence Snapshot`, and `teacher_authored` are `PROPOSED_CONCEPT`, not existing repository contracts.
+- Feedback budgets and profile recipes are `PRODUCT_HYPOTHESIS` until tested with Nicole.
+- No claim in this section is a scientific validation.
 
 ### Core invariant
 
-> Measurement truth does not change with age, skill, temperament, or coaching mode. Only selection, density, wording, timing, and visual emphasis may change.
+> Profiles never change the unchanged measurement and evidence basis. The same source observation, evidence status, measurability, eligibility, and DecisionGate result remain identical under every profile.
 
-Proposed separation:
+Profiles may change only:
+
+- selection for a particular learner-facing release;
+- pedagogical priority;
+- wording and explanation depth;
+- information density;
+- timing and visual presentation.
+
+Profiles must never:
+
+- loosen or tighten a measurement threshold, including for beginners;
+- write into Calculator, EvidenceGate, DecisionGate, or their inputs;
+- turn an unvalidated proxy into an eligible result;
+- turn `blocked`, `not_measurable`, or missing evidence into praise or criticism;
+- suppress a teacher-relevant observation from Nicole's complete teacher view;
+- convert teacher review into a changed evidence state or gate result;
+- make medical, diagnostic, orthopaedic, injury-risk, force, pressure, or other unsupported safety claims.
+
+Proposed one-way separation:
 
 ```text
-Measurement + DecisionGate
-→ immutable technical Finding
-→ Pedagogical Feedback Selector
-→ Coaching Profile
-→ Cue Point Manager
-→ teacher / student / parent presentation
+Calculator + EvidenceGate + DecisionGate
+→ unchanged source observation
+→ context model (PROPOSED_CONCEPT)
+→ Pedagogical Feedback Selector (PROPOSED_CONCEPT)
+→ Cue Point Manager V2
+→ Nicole preview and release
+→ curated learner presentation
 ```
 
-The pedagogical layer must never:
+There is no return path from a profile or cue into measurement, evidence, or eligibility.
 
-- loosen or tighten a scientific threshold;
-- turn an unvalidated proxy into a valid score;
-- suppress a teacher-relevant finding from the teacher view;
-- convert missing evidence into praise or criticism;
-- make medical or injury-risk claims.
+### Context model — `PROPOSED_CONCEPT`
 
-### Proposed coaching profiles
+A profile is a session- or moment-specific presentation recipe. It is not a permanent learner class. The following axes remain independent:
 
-The user-facing term should be **Feedback Focus**, not measurement sharpness.
+| Context axis | Examples | May affect | Must not affect |
+|---|---|---|---|
+| Teaching context | group class, individual coaching, rehearsal, masterclass | presentation density, timing, release workflow | measurement or eligibility |
+| Learning stage | introduction, beginner, intermediate, advanced | explanation depth, cue budget | thresholds or evidence status |
+| Technique track | general technique, pointe work, repertoire, examination | relevant cue categories and teacher workflow | measurability of unsupported quantities |
+| Movement or phase | plié, port de bras, adagio, preparation, landing | pedagogical context and sequencing | the source observation |
+| Lesson goal | introduction, consolidation, repetition, preparation | cue prioritization | DecisionGate result |
+| Teacher Focus | Nicole's current teaching priority | ordering and learner release | source data or eligibility |
+| Presentation preference | concise, explained, visual, technical | wording, pace, information density | technical interpretation |
+| Protection and communication context | minor protection, readability, language register | roles, access, accessibility | scoring or tolerance |
 
-| Profile | Typical use | Student presentation |
+Age may inform communication and safeguarding, but age alone never selects a profile. Minis, children, teens, young adults, and older adults do not receive different measurement thresholds because of age.
+
+The selected axes may be captured in a versioned `Context Snapshot` (`PROPOSED_CONCEPT`) so a released cue remains traceable. Nicole must be able to select and override the context for the current class, session, clip, or moment.
+
+### Presentation presets — `PRODUCT_HYPOTHESIS`
+
+The existing profile names remain candidate presentation presets, not demographic labels:
+
+| Preset | Candidate presentation behavior | Boundary |
 |---|---|---|
-| `JOY_AND_CONFIDENCE` | young learners, anxious or very new beginners | strengths first, one next step, no red error display |
-| `BUILD_AND_PROGRESS` | beginners of any age | strength, personal progress, one or two priorities |
-| `TECHNIQUE_AND_PRECISION` | intermediate and advanced learners | selected technical detail, phase comparison, optional values |
-| `ANALYSIS_AND_EXAM` | advanced, examination, professional, teacher | full eligible findings, evidence and uncertainty |
+| `JOY_AND_CONFIDENCE` | concise language, one next step, Nicole-confirmed strength may lead | not automatically assigned to children |
+| `BUILD_AND_PROGRESS` | one primary focus, optional supporting cue, contextual explanation | no progress claim without comparison prerequisites |
+| `TECHNIQUE_AND_PRECISION` | selected technical detail and movement-phase context | no implied increase in measurement precision |
+| `ANALYSIS_AND_EXAM` | dense evidence-aware review and optional values | learner release remains curated; teacher view remains complete |
 
-These are starting hypotheses, not scientific norms. They require testing with Nicole and representative students.
+Any preset may be used for any age group when the teaching context supports it. Profile changes are presentation changes only.
 
-Age alone must not select a profile. Relevant inputs may include:
+### Nicole's teacher view versus learner view
 
-- age group;
-- training stage;
-- lesson goal;
-- learner preference;
-- confidence and frustration signals reported by the teacher;
-- teacher override for the current session.
+| Information | Nicole's complete teacher view | Curated learner view |
+|---|---|---|
+| Source observations and values | complete and unchanged, with provenance where available | only when selected, released, and explainable |
+| Evidence and measurability | complete and unchanged | neutral when blocked or not measurable |
+| DecisionGate result and eligibility | complete and unchanged | never reinterpreted by profile, wording, or color |
+| Not in current learning focus | visible and explicitly identified | hidden or explicitly shown as `not_in_current_learning_focus`; never positive |
+| Cue candidates | complete candidate set with source reference | invisible before Nicole's release |
+| Teacher observation | separate `teacher_authored` contribution | visible only when explicitly released and labelled by origin |
+| Positive Teaching Moment | explicitly confirmed by Nicole | may be positively highlighted after confirmation |
+| Next step | selected or edited by Nicole | a small number of prioritized, actionable cues |
+| Teacher traffic-light aid | teacher-only presentation aid; never evidence or scoring | not inherited; color alone never communicates evidence |
 
-### Initial feedback budget hypothesis
+Teacher review never changes measurability, eligibility, evidence status, or the DecisionGate result. Nicole may instead add a separate observation marked `teacher_authored` (`PROPOSED_CONCEPT`).
 
-| Profile | Positive/progress cues | Visible next steps per short clip |
-|---|---:|---:|
-| `JOY_AND_CONFIDENCE` | at least 2 | at most 1 |
-| `BUILD_AND_PROGRESS` | at least 1 strength + 1 progress cue | at most 2 |
-| `TECHNIQUE_AND_PRECISION` | at least 1 | at most 3 |
-| `ANALYSIS_AND_EXAM` | no fixed budget in teacher view | all eligible findings |
+### Positive feedback and limited correction focus
 
-This budget is a product hypothesis. BalletOS must not claim that a universal feedback ratio has been scientifically validated.
+1. Automatic positive evaluation remains blocked until the relevant system behavior is validated.
+2. A visible strength may initially come only from a Teaching Moment explicitly confirmed by Nicole.
+3. A criterion not yet taught or selected is `not_in_current_learning_focus`; it is not green, correct, passed, or improved.
+4. `blocked`, `not_measurable`, missing, and insufficient evidence remain neutral under every profile.
+5. As a discovery hypothesis, the learner view starts with one primary cue and at most one supporting cue. Nicole may override this for the situation.
+6. Cue limits never reduce Nicole's complete teacher view.
+7. A next step must be teacher-approved, actionable, and free from unsupported diagnosis or safety claims.
+8. Fixed green/amber/gray semantics are not canonical. Color alone must never carry evidence status.
+9. A comparison may be called a DecisionGate-eligible and Nicole-approved comparison cue only with a comparable capture protocol, identical metric and model versions, known repeatability, and validated measurement error.
 
-### Color policy hypothesis
+### Use-case coverage across groups
 
-- green: confirmed strength or valid progress;
-- blue/violet: next learning step;
-- amber: teacher-guided review;
-- gray: unvalidated, not scored, or not evaluable;
-- red: reserved for teacher-only, explicitly eligible high-priority findings.
+These are scenario refinements of IDEA-001 and IDEA-002, not separate ideas or approved implementation contracts.
 
-In the current unvalidated product phase, student-facing red technical verdicts remain disabled.
+| Group or context | Example configuration | Learner-facing outcome | Guardrail |
+|---|---|---|---|
+| Minis and children | group class, introduction stage, general technique, one Teacher Focus | one Nicole-confirmed Teaching Moment and one simple next step | no age automation, public ranking, or changed thresholds |
+| Teens | group class or coaching, individual learning stage, selectable explanation depth | few non-shaming cues with optional technical context | no persistent deficit profile |
+| Young adults | beginner through advanced, varying lesson goals | concise or detailed presentation after Nicole's selection | age determines neither profile nor eligibility |
+| Older adults | individual learning stage plus accessibility preferences | readable, appropriately paced feedback without changing the measurement basis | age is not treated as deficit or additional tolerance |
+| Beginners | beginner learning stage and narrow Teacher Focus | one primary cue; remaining criteria stay outside the current learning focus | no artificially widened thresholds |
+| Advanced learners | advanced stage with movement- or phase-specific focus | greater explanation depth and, when released, phase-specific cues | no unsupported precision from weak evidence |
+| Pointe work | pointe technique track with mandatory teacher curation | only teacher-released technique cues | no pressure, force, injury, or safety claim from unsupported data |
+| Masterclasses | temporary teaching context and session-specific Teacher Focus | only cues released for that context | no permanent profile assignment or participant ranking |
 
-### Open questions for Nicole
+### Risks and safeguards
 
-1. Which profiles match her real class groups, and where do they fail?
-2. Should learners be allowed to request more or less detail?
-3. Which metaphors work by age group, and which feel childish or unclear?
-4. How many correction points are useful in a 15-, 30-, or 60-second clip?
-5. Which findings should always remain teacher-only?
-6. What counts as meaningful progress from a teacher's perspective?
+| Risk | Safeguard |
+|---|---|
+| Profile becomes a hidden scoring parameter | one-way architecture; profile data is unavailable to Calculator, EvidenceGate, and DecisionGate |
+| Age-based stereotyping | contextual selection, no automatic age profile, Nicole override |
+| Missing or unfocused evidence appears positive | neutral states and explicit `not_in_current_learning_focus` |
+| Nicole loses the complete picture | profiles affect preview and learner release only |
+| Automatic praise looks scientifically validated | positive highlighting initially requires Nicole-confirmed Teaching Moment |
+| Too many cues overload the learner | small discovery budget with teacher override |
+| Pointe context creates unsupported safety language | prohibit diagnostic, force, pressure, injury-risk, and unmeasurable claims |
+| Context changes make output irreproducible | retain source reference and versioned Context Snapshot |
+| Minor-facing feedback is exposed inappropriately | role-based release, no ranking, no automatic parent output |
+
+### Open decisions
+
+- Decide whether the four preset names remain user-facing or become internal recipes.
+- Decide which context axes Nicole must select actively and which may be session defaults.
+- Decide whether `not_in_current_learning_focus` is usually hidden or explicitly displayed in the learner view.
+
+**Prioritized Discovery question:** What is the smallest combination of learning stage, technique track, lesson goal, and Teacher Focus Nicole needs to choose a suitable learner view reliably without relying on age-based profiles?
+
+### Smallest Discovery test with Nicole
+
+Run one 45–60 minute card-sorting session without implementation or real learner data:
+
+1. Prepare one synthetic set of technically unchanged observations with fixed evidence and DecisionGate results.
+2. Present eight context cards covering the groups above.
+3. Ask Nicole to choose learning stage, technique track, lesson goal, Teacher Focus, detail level, and cue budget for each card.
+4. Let Nicole construct the complete teacher view and the curated learner release.
+5. Repeat selected choices without displaying the learner's age label.
+
+The concept passes this first test only if the source observations remain unchanged, no age-based threshold decision appears, the two views remain clearly distinct, and blocked or unfocused information is never presented as positive.
 
 ### Exit condition from EXPLORING
 
-- profiles reviewed by Nicole;
-- terminology tested with at least one child, adult beginner, older adult, and advanced learner context;
-- student and teacher wireframes created;
-- feedback budget tested in Shadow Mode;
-- no path can alter DecisionGate output.
+- context axes and terminology reviewed by Nicole;
+- model tested with at least one child, teen, adult beginner, older adult, advanced, pointe, and masterclass scenario;
+- teacher and learner previews evaluated in Shadow Mode;
+- feedback budget treated as a tested product hypothesis rather than a universal rule;
+- architecture review confirms no profile or cue path can alter Calculator, EvidenceGate, DecisionGate, or their outputs.
 
 ---
 
 ## 6. IDEA-002 — Cue Point Manager V2
 
-**Status:** `EXPLORING` · **Horizon:** `NEXT` · **Entry version:** 0.1.0
-**Problem:** The current concept risks treating cue points as an error list instead of structured learning moments.
+**Status:** `EXPLORING` · **Horizon:** `NEXT` · **Decision marker:** `PROPOSE_ONLY` · **Entry version:** 0.2.0
+
+**Problem:** The concept risks treating cue points as an error list instead of contextual, teacher-controlled learning moments.
 
 ### Proposed role
 
-The Cue Point Manager is an editorial and teaching layer. It selects, sequences, phrases, and approves learning moments. It does not measure movement and does not decide scientific validity.
+The Cue Point Manager is an editorial and teaching layer. It selects, sequences, phrases, previews, and releases learning moments. It does not measure movement, change evidence, determine eligibility, or decide scientific validity.
 
-### Cue types
+### Connection to IDEA-001
 
-```ts
-type CueKind =
-  | 'strength'
-  | 'progress'
-  | 'next_step'
-  | 'teacher_review'
-  | 'capture_issue';
-```
+IDEA-001 supplies the selected context and presentation recipe. IDEA-002 applies them downstream of the unchanged source observation:
 
-### Conceptual CuePoint V2
+1. retain the same Finding reference, value, evidence status, measurability, and DecisionGate result;
+2. identify candidates relevant to Teacher Focus, lesson goal, movement, and technique track;
+3. propose profile-appropriate wording, explanation depth, and information density;
+4. require Nicole's preview and release for the learner-facing result.
 
-```ts
-interface CoachingCue {
-  cueId: string;
-  findingId?: string;
-  startPts: number;
-  endPts: number;
+If a Finding is not selected, it remains available in Nicole's complete view and is marked `not_in_current_learning_focus`; it is never converted into a positive result.
 
-  kind: CueKind;
-  priority: number;
-  visibility: 'teacher_only' | 'student' | 'parent';
+### Proposed concepts, not repository contracts
 
-  positiveAnchor?: string;
-  learnerAction?: string;
-  technicalExplanation?: string;
-  metaphor?: string;
+`Finding`, `CoachingCue`, `Evidence Snapshot`, `Context Snapshot`, `Teaching Moment`, `Pedagogical Feedback Selector`, and `teacher_authored` are `PROPOSED_CONCEPT` labels. The following fields are conceptual traceability needs, not an approved TypeScript interface:
 
-  coachingProfileIds: string[];
-  evidenceState: 'validated' | 'display_only' | 'unvalidated';
-  teacherReviewStatus: 'pending' | 'approved' | 'edited' | 'rejected';
-  evidenceSnapshotHash?: string;
-}
-```
+| Conceptual field | Purpose |
+|---|---|
+| source observation or Finding reference | preserves the unchanged technical source |
+| Evidence Snapshot reference | preserves evidence and eligibility provenance |
+| Context Snapshot | records the presentation context used for selection |
+| authorship | distinguishes a system candidate from `teacher_authored` content |
+| cue kind | distinguishes next step, teacher review, capture issue, or Nicole-confirmed Teaching Moment |
+| target visibility | separates teacher, learner, and any later parent release |
+| teacher review state | records pending, approved, edited, withheld, or rejected presentation |
+| source and presentation versions | supports later audit and reproducibility |
+
+### Selection, formulation, and release rules
+
+- Selection may use lesson goal, movement, technique track, Teacher Focus, and teacher-set priority only after the technical result is fixed.
+- Wording may change with the presentation preset, but must retain the same source reference and must not imply changed evidence or precision.
+- Teacher Review may approve or edit presentation, but never measurability, evidence, eligibility, or DecisionGate output.
+- A separate `teacher_authored` observation may be released if its origin remains explicit.
+- Blocked or not measurable inputs may generate a neutral capture or review cue, never a technical correction or strength.
+- A learner receives only Nicole-released cues. The complete candidate set remains available to Nicole.
+- A positive cue initially requires a Nicole-confirmed Teaching Moment; automatic positive evaluation remains blocked pending validation.
+- No fixed color vocabulary is defined. Text, labels, and provenance must carry meaning independently of color.
 
 ### Live versus replay
 
-- **Live:** at most one active teaching cue; no cascade of simultaneous corrections.
-- **Immediate replay:** curated strength, progress, and next-step moments.
-- **Teacher review:** complete technical findings and evidence state.
-- **Student release:** only teacher-approved or policy-eligible cues.
-- **Parent view:** progress and teaching focus, not raw diagnostic-style output.
+- **Live:** one active teaching cue is the current product hypothesis; no cascade of simultaneous corrections.
+- **Immediate replay:** a curated Teaching Moment and next step may be prepared for Nicole's approval.
+- **Teacher review:** complete source observations, evidence state, eligibility, context, and cue candidates.
+- **Learner release:** only explicitly released cues with neutral handling of blocked and not measurable evidence.
+- **Parent view:** remains a separate later decision and never receives raw system output automatically.
 
 ### Ranking hypothesis
 
 Cue candidates may later be ranked by:
 
-1. teacher-defined pedagogical priority;
-2. measurement and evidence quality;
-3. relevance to the current lesson goal;
-4. repetition across attempts;
-5. realistic actionability;
-6. valid progress against the learner's own baseline.
+1. Nicole's Teacher Focus;
+2. relevance to the lesson goal, movement, and technique track;
+3. unchanged evidence and DecisionGate eligibility;
+4. realistic actionability;
+5. repetition across comparable attempts;
+6. eligibility for a DecisionGate-eligible and Nicole-approved comparison cue under the documented comparison prerequisites.
 
-No ranking formula is approved yet.
+No ranking formula or automated release policy is approved.
 
 ### Dependencies
 
-- stable Finding/Decision model;
+- stable source observation and Decision model;
 - neutral display states;
 - Teacher Review Event model;
-- coaching profiles;
+- IDEA-001 context and presentation model;
 - valid per-video timestamps and cue ranges;
-- privacy model for minors and parent-facing output.
+- privacy, deletion, role, and minor-protection policy.
 
 ---
 
@@ -329,8 +412,13 @@ This idea remains parked until the same measurement contracts, provenance, and D
 |---|---|---|
 | 2026-08-10 | Skeleton Measurement Foundation is the only NOW focus. | Correct geometry, synchronization, evidence, and decision contracts are prerequisites for every later feature. |
 | 2026-08-10 | Adaptive feedback and Cue Point Manager V2 are captured as NEXT concepts, not sprint work. | Preserve the ideas without expanding the current implementation scope. |
-| 2026-08-10 | Learner profiles may change presentation, never measurement truth or scientific eligibility. | Protect both pedagogy and epistemic integrity. |
+| 2026-08-10 | Learner profiles may change presentation, never the unchanged measurement and evidence basis or scientific eligibility. | Protect both pedagogy and epistemic integrity. |
 | 2026-08-10 | No universal positive-to-correction ratio is claimed. | Feedback budgets are hypotheses that require real-world evaluation with Nicole. |
+| 2026-08-11 | `PROPOSE_ONLY` ideas are stored in the canonical Draft PR without becoming approved product scope. | Separate durable documentation from product, implementation, validation, and merge decisions. |
+| 2026-08-11 | Age alone never selects a profile; learning stage, technique track, movement, lesson goal, and Teacher Focus remain separate axes. | Avoid demographic stereotyping and hidden changes to measurement behavior. |
+| 2026-08-11 | Nicole's complete teacher view is separate from the curated learner view. | Cue limits and presentation profiles must not hide teacher-relevant source information. |
+| 2026-08-11 | Teacher Review never changes measurability, evidence, eligibility, or DecisionGate results; separate teacher content is labelled `teacher_authored`. | Preserve the source record while allowing pedagogical expertise to be added transparently. |
+| 2026-08-11 | `not_in_current_learning_focus`, blocked, and not measurable are neutral; fixed color semantics are not canonical. | Prevent missing or deferred evidence from appearing correct or positive. |
 
 ---
 
@@ -384,8 +472,11 @@ What concrete condition makes this eligible for READY_FOR_DECISION?
 
 ## 10. Maintenance rule
 
-- Add ideas through a small pull request.
+- While Draft PR #1 remains open, it is the canonical Ideas Lab working medium; update only its existing head branch and do not create a competing branch or PR.
+- Update only `docs/CONCEPT_IDEAS_BOOK.md` and explicitly approved files under `docs/ideas/`.
+- Storing a `PROPOSE_ONLY` or `PROPOSED_CONCEPT` entry in the Draft PR is not implementation, NOW, validation, or merge approval.
 - Never delete rejected ideas; preserve the rationale.
 - Review the NEXT section when a NOW exit criterion is completed, not whenever a new idea appears.
-- Move implementation detail into a dedicated specification once an idea is accepted.
+- Move implementation detail into a dedicated specification only after an idea is accepted.
 - Keep this document conceptual; do not turn it into a second backlog or a second Metric Registry.
+- Never merge from the Ideas Lab, write directly to `main`, change code, or create implementation issues.
