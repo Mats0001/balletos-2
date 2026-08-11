@@ -26,6 +26,8 @@ const COLOR_JOINT    = '#e2e8f0';   // weiss – Gelenk-Dots
 const COLOR_HEAD     = '#c084fc';   // violett – Kopf
 const COLOR_COG      = '#a78bfa';   // violett – Schwerpunkt-Lot
 const COLOR_SELECTED = '#f59e0b';   // amber – selektiertes Gelenk
+const COLOR_GLOW_CORRECTION = '#ff6b6b'; // rot-warm – Glow für Korrekturen
+const COLOR_GLOW_GOOD = '#34d399';       // grün – Glow für Stärken
 const COLOR_EPAULEMENT = '#64d2ff'; // cyan – Épaulement-Linie
 const COLOR_TRAIL_WRIST = '#c084fc'; // violett – Handgelenk-Trajektorie
 const COLOR_TRAIL_ANKLE = '#818cf8'; // indigo – Knöchel-Trajektorie
@@ -40,6 +42,10 @@ export interface CanvasRenderOptions {
   showCoG: boolean;
   showAngleArcs: boolean;
   selectedJointId: string;
+  /** When set, draws a pulsing glow ring around the selected joint */
+  glowPulsePhase?: number;
+  /** Whether the glow is for a GOOD cue (green) or CORRECTION (red-warm) */
+  glowType?: 'GOOD' | 'CORRECTION';
   isPlie: boolean;
   /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -105,6 +111,57 @@ function drawCircle(
     ctx.lineWidth = (strokeWidth || 1) * avgScale;
     ctx.stroke();
   }
+}
+
+/**
+ * Draws a pulsing glow ring around a point – used to highlight the joint
+ * that a selected cue point refers to.
+ * @param phase 0..1 pulsation phase (drives radius and alpha oscillation)
+ * @param isGood true = green glow (strength), false = warm-red glow (correction)
+ */
+function drawGlowRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number,
+  baseRadius: number,
+  phase: number,
+  isGood: boolean,
+  sx: number, sy: number
+) {
+  const avgScale = (sx + sy) / 2;
+  const pulse = 0.7 + 0.3 * Math.sin(phase * Math.PI * 2); // 0.7–1.0
+  const r = baseRadius * pulse * avgScale;
+  const color = isGood ? COLOR_GLOW_GOOD : COLOR_GLOW_CORRECTION;
+
+  ctx.save();
+
+  // Outer glow ring (large, diffuse)
+  ctx.beginPath();
+  ctx.arc(cx * sx, cy * sy, r * 1.8, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5 * avgScale;
+  ctx.globalAlpha = 0.15 + 0.1 * pulse;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 30 * avgScale;
+  ctx.stroke();
+
+  // Middle ring (sharper)
+  ctx.beginPath();
+  ctx.arc(cx * sx, cy * sy, r * 1.2, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2 * avgScale;
+  ctx.globalAlpha = 0.3 + 0.15 * pulse;
+  ctx.shadowBlur = 15 * avgScale;
+  ctx.stroke();
+
+  // Inner dot (bright center)
+  ctx.beginPath();
+  ctx.arc(cx * sx, cy * sy, r * 0.35, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.5 + 0.3 * pulse;
+  ctx.shadowBlur = 20 * avgScale;
+  ctx.fill();
+
+  ctx.restore();
 }
 
 /**
@@ -551,4 +608,59 @@ export function renderSkeletonToCanvas(
   // FIX 2026-08-11: WeightDist-Status wird nicht mehr direkt gerendet
   // CoG-Packet (projected_torso_center_proxy) kommt aus overlayPacket.cog (bereits oben gerendert)
   // Dieser separate WeightDist-Dot wurde entfernt – Doppeldarstellung vermieden
+
+  // ─── GLOW-HIGHLIGHT FÜR SELEKTIERTE CUE-POINTS ───
+  // Wenn ein Cue-Point aktiv ist, pulsiert ein Glow-Ring um die betroffene Körperregion.
+  // Das gibt der Lehrerin sofort visuelle Orientierung, WO das Problem/die Stärke liegt.
+  const selId = opts.selectedJointId;
+  const glowPhase = opts.glowPulsePhase ?? 0;
+  const isGood = opts.glowType === 'GOOD';
+
+  if (selId && selId !== '') {
+    // Map jointFocusId → skeleton point(s)
+    let glowX: number | undefined;
+    let glowY: number | undefined;
+    let glowRadius = 25; // default ring size in viewbox units
+
+    switch (selId) {
+      case 'left_knee':
+        glowX = kneeL.x; glowY = kneeL.y;
+        glowRadius = 28;
+        break;
+      case 'right_knee':
+        glowX = kneeR.x; glowY = kneeR.y;
+        glowRadius = 28;
+        break;
+      case 'left_elbow':
+        glowX = elbowL.x; glowY = elbowL.y;
+        glowRadius = 24;
+        break;
+      case 'spine_center':
+        glowX = sternum.x; glowY = sternum.y;
+        glowRadius = 30;
+        break;
+      case 'pelvis_core':
+        glowX = pelvisCenter.x; glowY = pelvisCenter.y;
+        glowRadius = 30;
+        break;
+      case 'shoulder_line':
+        glowX = (shoulderL.x + shoulderR.x) / 2;
+        glowY = (shoulderL.y + shoulderR.y) / 2;
+        glowRadius = 35;
+        break;
+      case 'head_epaulement':
+        glowX = head.x; glowY = head.y;
+        glowRadius = 26;
+        break;
+      case 'port_de_bras_arms':
+        // Glow auf beide Ellenbogen
+        drawGlowRing(ctx, elbowL.x, elbowL.y, 22, glowPhase, isGood, sx, sy);
+        drawGlowRing(ctx, elbowR.x, elbowR.y, 22, glowPhase, isGood, sx, sy);
+        break;
+    }
+
+    if (glowX !== undefined && glowY !== undefined) {
+      drawGlowRing(ctx, glowX, glowY, glowRadius, glowPhase, isGood, sx, sy);
+    }
+  }
 }

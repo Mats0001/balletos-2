@@ -61,6 +61,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
   const [selectedJointId, setSelectedJointId] = useState<string>('left_knee');
+  /** Glow type for selected cue point: 'GOOD' (green) or 'CORRECTION' (red-warm) */
+  const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -719,6 +721,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   showCoG,
                   showAngleArcs,
                   selectedJointId,
+                  glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
+                  glowType: activeCueGlowTypeRef.current,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
                   overlayMode: currentMode,
@@ -855,6 +859,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
       setSelectedFrameTime(cue.timecodeStr);
       setSelectedJointId(cue.jointFocusId);
+      activeCueGlowTypeRef.current = cue.status === 'GOOD' ? 'GOOD' : 'CORRECTION';
       vaganovaKineticAI.reset();
 
       processStaticPausedFrame();
