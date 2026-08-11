@@ -189,11 +189,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [captionPanelOpen, setCaptionPanelOpen] = useState<boolean>(false);
   const [captionDraft, setCaptionDraft] = useState<string>('');
 
-  // 🦴 Joint popover state (normalizedX/Y are 0–1 relative to canvas)
+  // 🦴 Joint popover state
+  // normalizedX/Y: 0–1 relative to canvas (used for joint clicks → arrow tracks landmark)
+  // viewportX/Y: viewport pixel coords (used for bone clicks → arrow stays at click position)
   const [jointPopover, setJointPopover] = useState<{
     landmarkIndex: number;
     normalizedX: number;
     normalizedY: number;
+    viewportX?: number;
+    viewportY?: number;
   } | null>(null);
 
   // Persist annotations to localStorage whenever they change
@@ -1065,13 +1069,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
 
     if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
-      // Popover anchor: For JOINT clicks → snap to joint position.
-      // For BONE clicks → use the actual click position (user expects arrow where they clicked).
+      // Popover anchor:
+      // JOINT clicks → normalized landmark coords (arrow tracks joint across zoom changes)
+      // BONE clicks → viewport pixel coords (arrow stays exactly where user clicked)
       const repLm = lm[nearestIdx];
       const isBoneHit = boneJointOverride !== undefined || !repLm;
       const normX = isBoneHit ? clickX / bounds.width  : repLm!.x;
       const normY = isBoneHit ? clickY / bounds.height : repLm!.y;
-      setJointPopover({ landmarkIndex: nearestIdx, normalizedX: normX, normalizedY: normY });
+      setJointPopover({
+        landmarkIndex: nearestIdx,
+        normalizedX: normX,
+        normalizedY: normY,
+        // For bone clicks: store viewport coords so arrow doesn't drift on auto-zoom
+        viewportX: isBoneHit ? e.clientX : undefined,
+        viewportY: isBoneHit ? e.clientY : undefined,
+      });
       // Pause video for better exploration
       if (videoRef.current && !videoRef.current.paused) {
         videoRef.current.pause();
@@ -2476,9 +2488,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Compute viewport coords from the skeleton canvas bounding rect
               const canvasRect = canvasRef.current?.getBoundingClientRect();
               if (!canvasRect) return null;
-              // Normalized coords × transformed rect = correct viewport position during zoom/pan
-              const vpJointX = canvasRect.left + jointPopover.normalizedX * canvasRect.width;
-              const vpJointY = canvasRect.top + jointPopover.normalizedY * canvasRect.height;
+              // Bone clicks: use stored viewport coords (stable across zoom changes)
+              // Joint clicks: compute from normalized coords × current canvas rect
+              const vpJointX = jointPopover.viewportX ?? (canvasRect.left + jointPopover.normalizedX * canvasRect.width);
+              const vpJointY = jointPopover.viewportY ?? (canvasRect.top + jointPopover.normalizedY * canvasRect.height);
               return (
                 <SkeletonJointPopover
                   knowledge={knowledge}
