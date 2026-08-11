@@ -680,6 +680,59 @@ export function renderSkeletonToCanvas(
     }
   }
 
+  // ─── GLOW-HIGHLIGHT FÜR SELEKTIERTE CUE-POINTS ───
+  // Rendering-Reihenfolge: Focus-Dim → Glow → Ideal-Overlay
+  // Glow VOR Ideal-Overlay damit Labels nicht überdeckt werden.
+  const selId = opts.selectedJointId;
+  const glowPhase = opts.glowPulsePhase ?? 0;
+  const isGood = opts.glowType === 'GOOD';
+
+  if (selId && selId !== '') {
+    let glowX: number | undefined;
+    let glowY: number | undefined;
+    let glowRadius = 25;
+
+    switch (selId) {
+      case 'left_knee':
+        glowX = kneeL.x; glowY = kneeL.y;
+        glowRadius = 28;
+        break;
+      case 'right_knee':
+        glowX = kneeR.x; glowY = kneeR.y;
+        glowRadius = 28;
+        break;
+      case 'left_elbow':
+        glowX = elbowL.x; glowY = elbowL.y;
+        glowRadius = 24;
+        break;
+      case 'spine_center':
+        glowX = sternum.x; glowY = sternum.y;
+        glowRadius = 30;
+        break;
+      case 'pelvis_core':
+        glowX = pelvisCenter.x; glowY = pelvisCenter.y;
+        glowRadius = 30;
+        break;
+      case 'shoulder_line':
+        glowX = (shoulderL.x + shoulderR.x) / 2;
+        glowY = (shoulderL.y + shoulderR.y) / 2;
+        glowRadius = 35;
+        break;
+      case 'head_epaulement':
+        glowX = head.x; glowY = head.y;
+        glowRadius = 26;
+        break;
+      case 'port_de_bras_arms':
+        drawGlowRing(ctx, elbowL.x, elbowL.y, 22, glowPhase, isGood, sx, sy);
+        drawGlowRing(ctx, elbowR.x, elbowR.y, 22, glowPhase, isGood, sx, sy);
+        break;
+    }
+
+    if (glowX !== undefined && glowY !== undefined) {
+      drawGlowRing(ctx, glowX, glowY, glowRadius, glowPhase, isGood, sx, sy);
+    }
+  }
+
   // ─── IDEAL-OVERLAY: Soll-Position als deutliche grüne Hilfslinie ───
   // Zeigt der Lehrerin/Schülerin, WIE die Position korrekt aussehen sollte.
   // Technik: dunkle Schattenlinie + helle grüne Linie für Kontrast auf jedem Hintergrund.
@@ -777,60 +830,5 @@ export function renderSkeletonToCanvas(
     }
 
     ctx.restore();
-  }
-
-  // ─── GLOW-HIGHLIGHT FÜR SELEKTIERTE CUE-POINTS ───
-  // Wenn ein Cue-Point aktiv ist, pulsiert ein Glow-Ring um die betroffene Körperregion.
-  // Das gibt der Lehrerin sofort visuelle Orientierung, WO das Problem/die Stärke liegt.
-  const selId = opts.selectedJointId;
-  const glowPhase = opts.glowPulsePhase ?? 0;
-  const isGood = opts.glowType === 'GOOD';
-
-  if (selId && selId !== '') {
-    // Map jointFocusId → skeleton point(s)
-    let glowX: number | undefined;
-    let glowY: number | undefined;
-    let glowRadius = 25; // default ring size in viewbox units
-
-    switch (selId) {
-      case 'left_knee':
-        glowX = kneeL.x; glowY = kneeL.y;
-        glowRadius = 28;
-        break;
-      case 'right_knee':
-        glowX = kneeR.x; glowY = kneeR.y;
-        glowRadius = 28;
-        break;
-      case 'left_elbow':
-        glowX = elbowL.x; glowY = elbowL.y;
-        glowRadius = 24;
-        break;
-      case 'spine_center':
-        glowX = sternum.x; glowY = sternum.y;
-        glowRadius = 30;
-        break;
-      case 'pelvis_core':
-        glowX = pelvisCenter.x; glowY = pelvisCenter.y;
-        glowRadius = 30;
-        break;
-      case 'shoulder_line':
-        glowX = (shoulderL.x + shoulderR.x) / 2;
-        glowY = (shoulderL.y + shoulderR.y) / 2;
-        glowRadius = 35;
-        break;
-      case 'head_epaulement':
-        glowX = head.x; glowY = head.y;
-        glowRadius = 26;
-        break;
-      case 'port_de_bras_arms':
-        // Glow auf beide Ellenbogen
-        drawGlowRing(ctx, elbowL.x, elbowL.y, 22, glowPhase, isGood, sx, sy);
-        drawGlowRing(ctx, elbowR.x, elbowR.y, 22, glowPhase, isGood, sx, sy);
-        break;
-    }
-
-    if (glowX !== undefined && glowY !== undefined) {
-      drawGlowRing(ctx, glowX, glowY, glowRadius, glowPhase, isGood, sx, sy);
-    }
   }
 }
