@@ -118,8 +118,7 @@ function drawCircle(
 /**
  * Draws a pulsing radial gradient glow around a point – used to highlight
  * the joint that a selected cue point refers to.
- * Instead of thin rings, this creates a soft luminous spotlight effect
- * with a bright center fading to transparent at the edges.
+ * Creates a soft luminous spotlight effect visible even on bright backgrounds.
  * @param phase 0..1 pulsation phase (drives radius and alpha oscillation)
  * @param isGood true = green glow (strength), false = warm-red glow (correction)
  */
@@ -132,28 +131,38 @@ function drawGlowRing(
   sx: number, sy: number
 ) {
   const avgScale = (sx + sy) / 2;
-  // Breathing pulse: radius oscillates between 85% and 115%
+  // Breathing pulse: radius oscillates ±15%
   const pulse = 0.85 + 0.15 * Math.sin(phase * Math.PI * 2);
-  const r = baseRadius * 1.6 * pulse * avgScale; // larger radius for visible halo
+  // AGGRESSIVE: 3x multiplier for clearly visible halo (was 1.6x)
+  const r = baseRadius * 3.0 * pulse * avgScale;
   const pxX = cx * sx;
   const pxY = cy * sy;
 
   // Parse base color into RGB for gradient stops
   const baseColor = isGood ? COLOR_GLOW_GOOD : COLOR_GLOW_CORRECTION;
-  // COLOR_GLOW_GOOD = '#34d399', COLOR_GLOW_CORRECTION = '#ff6b6b'
   const rr = parseInt(baseColor.slice(1, 3), 16);
   const gg = parseInt(baseColor.slice(3, 5), 16);
   const bb = parseInt(baseColor.slice(5, 7), 16);
 
   ctx.save();
 
-  // Create radial gradient: bright center → transparent edges
+  // Layer 1: Dark backdrop for contrast on bright backgrounds
+  const bgGrad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, r * 0.85);
+  bgGrad.addColorStop(0,   'rgba(0,0,0,0.25)');
+  bgGrad.addColorStop(0.5, 'rgba(0,0,0,0.12)');
+  bgGrad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(pxX, pxY, r * 0.85, 0, Math.PI * 2);
+  ctx.fillStyle = bgGrad;
+  ctx.fill();
+
+  // Layer 2: Main colored glow — LARGE and BRIGHT
   const grad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, r);
-  const centerAlpha = 0.35 + 0.15 * pulse;  // 0.35–0.50
-  const midAlpha = 0.18 + 0.07 * pulse;     // 0.18–0.25
+  const centerAlpha = 0.65 + 0.15 * pulse;  // 0.65–0.80 (was 0.35–0.50)
+  const midAlpha = 0.35 + 0.10 * pulse;     // 0.35–0.45 (was 0.18–0.25)
   grad.addColorStop(0,    `rgba(${rr},${gg},${bb},${centerAlpha})`);
-  grad.addColorStop(0.3,  `rgba(${rr},${gg},${bb},${midAlpha})`);
-  grad.addColorStop(0.65, `rgba(${rr},${gg},${bb},0.06)`);
+  grad.addColorStop(0.25, `rgba(${rr},${gg},${bb},${midAlpha})`);
+  grad.addColorStop(0.55, `rgba(${rr},${gg},${bb},0.12)`);
   grad.addColorStop(1,    `rgba(${rr},${gg},${bb},0)`);
 
   ctx.beginPath();
@@ -161,12 +170,12 @@ function drawGlowRing(
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Bright core dot for sharp visual anchor
-  const coreR = baseRadius * 0.3 * avgScale;
+  // Layer 3: Bright core dot for sharp visual anchor
+  const coreR = baseRadius * 0.6 * avgScale; // was 0.3
   const coreGrad = ctx.createRadialGradient(pxX, pxY, 0, pxX, pxY, coreR);
-  const coreAlpha = 0.6 + 0.25 * pulse; // 0.6–0.85
+  const coreAlpha = 0.85 + 0.15 * pulse; // 0.85–1.0 (was 0.6–0.85)
   coreGrad.addColorStop(0,   `rgba(${rr},${gg},${bb},${coreAlpha})`);
-  coreGrad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${coreAlpha * 0.4})`);
+  coreGrad.addColorStop(0.5, `rgba(${rr},${gg},${bb},${coreAlpha * 0.5})`);
   coreGrad.addColorStop(1,   `rgba(${rr},${gg},${bb},0)`);
   ctx.beginPath();
   ctx.arc(pxX, pxY, coreR, 0, Math.PI * 2);
@@ -621,13 +630,44 @@ export function renderSkeletonToCanvas(
   // CoG-Packet (projected_torso_center_proxy) kommt aus overlayPacket.cog (bereits oben gerendert)
   // Dieser separate WeightDist-Dot wurde entfernt – Doppeldarstellung vermieden
 
-  // ─── IDEAL-OVERLAY: Soll-Position als gestrichelte grüne Hilfslinie ───
+  // ─── IDEAL-OVERLAY: Soll-Position als deutliche grüne Hilfslinie ───
   // Zeigt der Lehrerin/Schülerin, WIE die Position korrekt aussehen sollte.
-  // Nur sichtbar wenn showIdealOverlay === true und ein Joint selektiert ist.
-  const IDEAL_COLOR = '#22c55e';      // kräftiges grün (statt smaragd – besser sichtbar)
-  const IDEAL_DASH = [12, 8];          // größere Striche für bessere Sichtbarkeit
-  const IDEAL_WIDTH = 3.5;             // dicker für Kontrast
-  const IDEAL_ALPHA = 0.85;            // hohe Opacity
+  // Technik: dunkle Schattenlinie + helle grüne Linie für Kontrast auf jedem Hintergrund.
+  const IDEAL_COLOR = '#22c55e';       // kräftiges grün
+  const IDEAL_SHADOW = 'rgba(0,0,0,0.6)'; // dunkler Schatten dahinter
+  const IDEAL_DASH = [14, 8];          // große gestrichelte Muster
+  const IDEAL_WIDTH = 4.5;             // dick
+  const IDEAL_SHADOW_WIDTH = 8;        // Schatten noch dicker
+  const IDEAL_ALPHA = 0.95;
+
+  /** Helper: zeichnet Label mit dunklem Hintergrund-Chip */
+  const drawIdealLabel = (text: string, x: number, y: number) => {
+    const avgS = (sx + sy) / 2;
+    const fontSize = Math.max(14, 16 * avgS);
+    ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+    const metrics = ctx.measureText(text);
+    const pad = 5 * avgS;
+    // Background pill
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    const rx = x - pad;
+    const ry = y - fontSize * 0.8;
+    const rw = metrics.width + pad * 2;
+    const rh = fontSize + pad;
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, rw, rh, 4 * avgS);
+    ctx.fill();
+    // Text
+    ctx.fillStyle = IDEAL_COLOR;
+    ctx.fillText(text, x, y);
+  };
+
+  /** Helper: zeichnet Linie mit dunklem Schatten für Kontrast */
+  const drawIdealLine = (x1: number, y1: number, x2: number, y2: number) => {
+    // Shadow layer (thick, dark)
+    drawLine(ctx, x1, y1, x2, y2, IDEAL_SHADOW, IDEAL_SHADOW_WIDTH, sx, sy, IDEAL_DASH);
+    // Bright green layer on top
+    drawLine(ctx, x1, y1, x2, y2, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+  };
 
   if (opts.showIdealOverlay && opts.selectedJointId && opts.selectedJointId !== '') {
     ctx.save();
@@ -635,76 +675,55 @@ export function renderSkeletonToCanvas(
 
     switch (opts.selectedJointId) {
       case 'left_knee': {
-        // Ideale Beinlinie: gerade Linie von Hüfte (pelvisL) durch Knie zum Knöchel
-        // Die grüne Linie zeigt die korrekte Ausrichtung (Knie über 2./3. Zeh)
-        drawLine(ctx, pelvisL.x, pelvisL.y, pelvisL.x, ankleL.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        // Pfeilspitze am Knie zeigt "hier soll es sein"
-        const idealKneeLY = pelvisL.y + (ankleL.y - pelvisL.y) * 0.45; // ~45% = typische Knieposition
-        drawCircle(ctx, pelvisL.x, idealKneeLY, 10, 'none', sx, sy, IDEAL_COLOR, 2);
-        // Label
-        ctx.font = `${12 * ((sx + sy) / 2)}px Inter, sans-serif`;
-        ctx.fillStyle = IDEAL_COLOR;
-        ctx.fillText('Ideal', (pelvisL.x + 14) * sx, idealKneeLY * sy + 4);
+        drawIdealLine(pelvisL.x, pelvisL.y, pelvisL.x, ankleL.y);
+        const idealKneeLY = pelvisL.y + (ankleL.y - pelvisL.y) * 0.45;
+        drawCircle(ctx, pelvisL.x, idealKneeLY, 13, 'none', sx, sy, IDEAL_COLOR, 3);
+        drawIdealLabel('Ideal', (pelvisL.x + 18) * sx, idealKneeLY * sy + 5);
         break;
       }
       case 'right_knee': {
-        drawLine(ctx, pelvisR.x, pelvisR.y, pelvisR.x, ankleR.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        drawIdealLine(pelvisR.x, pelvisR.y, pelvisR.x, ankleR.y);
         const idealKneeRY = pelvisR.y + (ankleR.y - pelvisR.y) * 0.45;
-        drawCircle(ctx, pelvisR.x, idealKneeRY, 10, 'none', sx, sy, IDEAL_COLOR, 2);
-        ctx.font = `${12 * ((sx + sy) / 2)}px Inter, sans-serif`;
-        ctx.fillStyle = IDEAL_COLOR;
-        ctx.fillText('Ideal', (pelvisR.x + 14) * sx, idealKneeRY * sy + 4);
+        drawCircle(ctx, pelvisR.x, idealKneeRY, 13, 'none', sx, sy, IDEAL_COLOR, 3);
+        drawIdealLabel('Ideal', (pelvisR.x + 18) * sx, idealKneeRY * sy + 5);
         break;
       }
       case 'spine_center': {
-        // Ideale Wirbelsäule: perfekt vertikal vom Kopf zum Becken
         const centerX = (head.x + pelvisCenter.x) / 2;
-        drawLine(ctx, centerX, head.y - 15, centerX, pelvisCenter.y + 15, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
-        ctx.fillStyle = IDEAL_COLOR;
-        ctx.fillText('Vertikal', (centerX + 12) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
+        drawIdealLine(centerX, head.y - 15, centerX, pelvisCenter.y + 15);
+        drawIdealLabel('Vertikal', (centerX + 15) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
         break;
       }
       case 'pelvis_core': {
-        // Ideales Becken: perfekt horizontal
         const pelvisCenterY = (pelvisL.y + pelvisR.y) / 2;
-        drawLine(ctx, pelvisL.x - 20, pelvisCenterY, pelvisR.x + 20, pelvisCenterY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
-        ctx.fillStyle = IDEAL_COLOR;
-        ctx.fillText('Horizontal', (pelvisR.x + 24) * sx, pelvisCenterY * sy + 4);
+        drawIdealLine(pelvisL.x - 25, pelvisCenterY, pelvisR.x + 25, pelvisCenterY);
+        drawIdealLabel('Horizontal', (pelvisR.x + 30) * sx, pelvisCenterY * sy + 5);
         break;
       }
       case 'shoulder_line': {
-        // Ideale Schulterlinie: perfekt horizontal
         const shCenterY = (shoulderL.y + shoulderR.y) / 2;
-        drawLine(ctx, shoulderL.x - 20, shCenterY, shoulderR.x + 20, shCenterY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
-        ctx.fillStyle = IDEAL_COLOR;
-        ctx.fillText('Horizontal', (shoulderR.x + 24) * sx, shCenterY * sy + 4);
+        drawIdealLine(shoulderL.x - 25, shCenterY, shoulderR.x + 25, shCenterY);
+        drawIdealLabel('Horizontal', (shoulderR.x + 30) * sx, shCenterY * sy + 5);
         break;
       }
       case 'left_elbow':
       case 'port_de_bras_arms': {
-        // Ideale Armlinie: sanfte Kurve von Schulter über Ellbogen zum Handgelenk
-        // Gezeichnet als gestrichelte Linie vom Schulterblatt zur Fingerspitze
-        // mit dem Ellbogen leicht tiefer als die Schulter
-        const idealElbowLY = shoulderL.y + 8; // Ellbogen leicht tiefer
+        const idealElbowLY = shoulderL.y + 8;
         const idealElbowLX = (shoulderL.x + wristL.x) / 2;
-        drawLine(ctx, shoulderL.x, shoulderL.y, idealElbowLX, idealElbowLY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        drawLine(ctx, idealElbowLX, idealElbowLY, wristL.x, wristL.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-        drawCircle(ctx, idealElbowLX, idealElbowLY, 8, 'none', sx, sy, IDEAL_COLOR, 2);
+        drawIdealLine(shoulderL.x, shoulderL.y, idealElbowLX, idealElbowLY);
+        drawIdealLine(idealElbowLX, idealElbowLY, wristL.x, wristL.y);
+        drawCircle(ctx, idealElbowLX, idealElbowLY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
         if (opts.selectedJointId === 'port_de_bras_arms') {
           const idealElbowRY = shoulderR.y + 8;
           const idealElbowRX = (shoulderR.x + wristR.x) / 2;
-          drawLine(ctx, shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-          drawLine(ctx, idealElbowRX, idealElbowRY, wristR.x, wristR.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
-          drawCircle(ctx, idealElbowRX, idealElbowRY, 8, 'none', sx, sy, IDEAL_COLOR, 2);
+          drawIdealLine(shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY);
+          drawIdealLine(idealElbowRX, idealElbowRY, wristR.x, wristR.y);
+          drawCircle(ctx, idealElbowRX, idealElbowRY, 10, 'none', sx, sy, IDEAL_COLOR, 3);
         }
         break;
       }
       case 'head_epaulement': {
-        // Ideale Kopfposition: vertikal über dem Becken-Zentrum
-        drawLine(ctx, pelvisCenter.x, head.y - 20, pelvisCenter.x, pelvisCenter.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        drawIdealLine(pelvisCenter.x, head.y - 20, pelvisCenter.x, pelvisCenter.y);
         break;
       }
     }
