@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical } from 'lucide-react';
+import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2 } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
 import { JetztWichtigInspector } from './JetztWichtigInspector';
@@ -1732,6 +1732,27 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     color: drawingTool === t ? '#c084fc' : 'rgba(255,255,255,0.5)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     boxShadow: drawingTool === t ? '0 0 0 1px rgba(192,132,252,0.5)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >{icon}</button>
+              ))}
+
+              {/* Undo / Redo */}
+              {[
+                { label: 'Rückgängig', icon: <Undo2 size={14} />, action: () => annotationCanvasRef.current?.undo(), enabled: annotationCanvasRef.current?.canUndo() ?? false },
+                { label: 'Wiederholen', icon: <Redo2 size={14} />, action: () => annotationCanvasRef.current?.redo(), enabled: annotationCanvasRef.current?.canRedo() ?? false },
+              ].map(({ label, icon, action, enabled }) => (
+                <button
+                  key={label}
+                  onClick={action}
+                  title={label}
+                  style={{
+                    width: '36px', height: '36px', borderRadius: '8px', border: 'none',
+                    cursor: enabled ? 'pointer' : 'not-allowed',
+                    background: 'rgba(255,255,255,0.06)',
+                    color: enabled ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.2)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: enabled ? 1 : 0.35,
                     transition: 'all 0.15s ease',
                   }}
                 >{icon}</button>

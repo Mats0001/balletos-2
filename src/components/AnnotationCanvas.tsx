@@ -10,6 +10,10 @@ export interface AnnotationCanvasHandle {
   clear: () => void;
   getDataUrl: () => string | null;
   hasStrokes: () => boolean;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
 interface Props {
@@ -36,6 +40,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
     // ── Source of truth lives in refs – no stale closure risk ──────────────
     const strokesRef = useRef<Stroke[]>([]);
+    const redoStackRef = useRef<Stroke[]>([]);
     const currentPointsRef = useRef<Point[]>([]);
     const isDrawing = useRef(false);
 
@@ -47,10 +52,27 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     useImperativeHandle(ref, () => ({
       clear: () => {
         strokesRef.current = [];
+        redoStackRef.current = [];
         currentPointsRef.current = [];
         isDrawing.current = false;
         forceRender();
       },
+      undo: () => {
+        if (strokesRef.current.length === 0) return;
+        const last = strokesRef.current[strokesRef.current.length - 1];
+        strokesRef.current = strokesRef.current.slice(0, -1);
+        redoStackRef.current = [...redoStackRef.current, last];
+        forceRender();
+      },
+      redo: () => {
+        if (redoStackRef.current.length === 0) return;
+        const next = redoStackRef.current[redoStackRef.current.length - 1];
+        redoStackRef.current = redoStackRef.current.slice(0, -1);
+        strokesRef.current = [...strokesRef.current, next];
+        forceRender();
+      },
+      canUndo: () => strokesRef.current.length > 0,
+      canRedo: () => redoStackRef.current.length > 0,
       getDataUrl: () => canvasRef.current?.toDataURL('image/png') ?? null,
       hasStrokes: () => strokesRef.current.length > 0,
     }), [forceRender]);
@@ -144,6 +166,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         points: [...currentPointsRef.current], // defensive copy
       };
       strokesRef.current = [...strokesRef.current, finishedStroke];
+      redoStackRef.current = []; // new stroke clears redo history
 
       // Reset live stroke
       isDrawing.current = false;
