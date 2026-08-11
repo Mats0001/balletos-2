@@ -78,6 +78,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isAutoCrop, setIsAutoCrop] = useState<boolean>(false);
+  // Drag-to-pan: track mouse drag for panning when zoomed
+  const isDraggingRef = useRef<boolean>(false);
+  const dragStartRef = useRef<{ x: number; y: number; panX: number; panY: number }>({ x: 0, y: 0, panX: 0, panY: 0 });
 
   // Video Library State
   const [videoList, setVideoList] = useState<StoredVideoItem[]>(videoStore.getAllVideos());
@@ -2182,9 +2185,33 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               background: '#050407',
               transform: `scale(${zoomLevel}) translate(${panOffset.x}%, ${panOffset.y}%)`,
               transformOrigin: 'center center',
-              transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+              transition: isDraggingRef.current ? 'none' : 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+              cursor: zoomLevel > 1 ? (isDraggingRef.current ? 'grabbing' : 'grab') : 'default',
             }}
               onClick={!isPlaying ? handleSkeletonClick : undefined}
+              onMouseDown={(e) => {
+                if (zoomLevel <= 1) return;
+                isDraggingRef.current = true;
+                dragStartRef.current = { x: e.clientX, y: e.clientY, panX: panOffset.x, panY: panOffset.y };
+                e.preventDefault();
+              }}
+              onMouseMove={(e) => {
+                if (!isDraggingRef.current) return;
+                const dx = e.clientX - dragStartRef.current.x;
+                const dy = e.clientY - dragStartRef.current.y;
+                // Convert pixel drag to % offset (scaled by container size and zoom)
+                const container = videoContainerRef.current;
+                if (!container) return;
+                const rect = container.getBoundingClientRect();
+                const pctX = (dx / (rect.width / zoomLevel)) * 100;
+                const pctY = (dy / (rect.height / zoomLevel)) * 100;
+                setPanOffset({
+                  x: dragStartRef.current.panX + pctX,
+                  y: dragStartRef.current.panY + pctY,
+                });
+              }}
+              onMouseUp={() => { isDraggingRef.current = false; }}
+              onMouseLeave={() => { isDraggingRef.current = false; }}
             >
 
                 <video

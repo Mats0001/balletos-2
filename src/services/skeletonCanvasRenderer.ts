@@ -664,13 +664,13 @@ export function renderSkeletonToCanvas(
 
       ctx.save();
       // Pure radial gradient vignette – NO hard circle edge
-      // Clear center → gradual darken → dark edges
-      const vigGrad = ctx.createRadialGradient(pxX, pxY, pxR * 0.4, pxX, pxY, maxDist * 0.6);
+      // Clear center → strong darken → very dark edges
+      const vigGrad = ctx.createRadialGradient(pxX, pxY, pxR * 0.3, pxX, pxY, maxDist * 0.55);
       vigGrad.addColorStop(0,    'rgba(0,0,0,0)');       // clear center
-      vigGrad.addColorStop(0.25, 'rgba(0,0,0,0)');       // still clear
-      vigGrad.addColorStop(0.45, 'rgba(0,0,0,0.15)');    // gentle darken
-      vigGrad.addColorStop(0.65, 'rgba(0,0,0,0.35)');    // medium
-      vigGrad.addColorStop(1,    'rgba(0,0,0,0.50)');    // dark edges
+      vigGrad.addColorStop(0.18, 'rgba(0,0,0,0)');       // still clear (smaller area)
+      vigGrad.addColorStop(0.35, 'rgba(0,0,0,0.25)');    // start darken earlier
+      vigGrad.addColorStop(0.55, 'rgba(0,0,0,0.50)');    // strong mid
+      vigGrad.addColorStop(1,    'rgba(0,0,0,0.70)');    // very dark edges
       ctx.beginPath();
       ctx.rect(0, 0, canvasW, canvasH);
       ctx.fillStyle = vigGrad;
