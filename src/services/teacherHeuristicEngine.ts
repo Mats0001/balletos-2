@@ -172,12 +172,22 @@ function computeLeg(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristic
     // Nur extreme Überbeugung (<30°) ist besorgniserregend
     if (kv >= 30) score = Math.max(score, 1) as 0|1|2|3;
     else          score = Math.max(score, 2) as 0|1|2|3;
-  }
 
-  if (vEligible && valgus) {
+    // ⚠️ GUARD: Bei gestrecktem Bein (>150°) ist die Valgus-Messung
+    // unzuverlässig! 2D-Projektion erzeugt 29-35° Phantom-Drift.
+    // Valgus nur bei gebeugtem Knie (<150°) bewerten.
+    if (kv > 150 && vEligible) {
+      // Valgus bei Streckung → ignorieren, score bleibt bei knee-score
+    } else if (vEligible && valgus) {
+      const dv = Math.abs(valgus.value);
+      // Schwellen für 2D-Projektion (seitliche Kamera)
+      if (dv < 12)      score = Math.max(score, 1) as 0|1|2|3;
+      else if (dv < 20) score = Math.max(score, 2) as 0|1|2|3;
+      else              score = Math.max(score, 3) as 0|1|2|3;
+    }
+  } else if (vEligible && valgus) {
+    // Kein Knie-Daten → Valgus trotzdem bewerten (Fallback)
     const dv = Math.abs(valgus.value);
-    // FIX 2026-08-11: Schwellen großzügig für 2D-Projektion
-    // Seitliche Kamera erzeugt 10-15° scheinbare Drift bei korrekter Technik
     if (dv < 12)      score = Math.max(score, 1) as 0|1|2|3;
     else if (dv < 20) score = Math.max(score, 2) as 0|1|2|3;
     else              score = Math.max(score, 3) as 0|1|2|3;
@@ -189,10 +199,11 @@ function computeLeg(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristic
   const now = Date.now();
   if (now - _legLastLog > 2000) {
     _legLastLog = now;
-    const kv = knee ? Math.abs(knee.value).toFixed(1) : 'N/A';
-    const dv = valgus ? Math.abs(valgus.value).toFixed(1) : 'N/A';
+    const kvVal = knee ? Math.abs(knee.value).toFixed(1) : 'N/A';
+    const dvVal = valgus ? Math.abs(valgus.value).toFixed(1) : 'N/A';
+    const skipInfo = (knee && Math.abs(knee.value) > 150) ? ' [valgus SKIPPED: Bein gestreckt]' : '';
     console.log(
-      `🦵 LEG ${side}: knee=${kv}° | valgus=${dv}° → ${result}`
+      `🦵 LEG ${side}: knee=${kvVal}° | valgus=${dvVal}°${skipInfo} → ${result}`
     );
   }
 
