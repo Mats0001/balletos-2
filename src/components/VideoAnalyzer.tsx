@@ -983,8 +983,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // representativeLandmark = the joint info shown in popover
     const BONE_SEGMENTS: Array<[number, number, number, string?]> = [
       // ── HEAD / NECK ──
-      [0, 11, 0, 'spine_center'],    // Neck-L (head→L-shoulder) → spine
-      [0, 12, 0, 'spine_center'],    // Neck-R (head→R-shoulder) → spine
+      [0, 11, 100, 'spine_center'],   // Neck-L (head→L-shoulder) → Rumpf-Knowledge
+      [0, 12, 100, 'spine_center'],   // Neck-R (head→R-shoulder) → Rumpf-Knowledge
       // ── SHOULDERS ──
       [11, 12, 11],                  // Schulterleiste → linke Schulter
       // ── ARMS ──
@@ -993,8 +993,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       [12, 14, 14],  // R Oberarm → R Ellbogen
       [14, 16, 16],  // R Unterarm → R Handgelenk
       // ── TORSO / SPINE ──
-      [11, 23, 23, 'spine_center'],  // L Rumpf (Schulter→Hüfte) → Wirbelsäule
-      [12, 24, 24, 'spine_center'],  // R Rumpf (Schulter→Hüfte) → Wirbelsäule
+      [11, 23, 100, 'spine_center'],  // L Rumpf (Schulter→Hüfte) → Rumpf-Knowledge (Index 100)
+      [12, 24, 100, 'spine_center'],  // R Rumpf (Schulter→Hüfte) → Rumpf-Knowledge (Index 100)
       // ── PELVIS ──
       [23, 24, 23],                  // Beckenleiste → L Hüfte
       // ── LEGS ──

@@ -703,6 +703,7 @@ export function renderSkeletonToCanvas(
         25: kneeL, 26: kneeR, 27: ankleL, 28: ankleR,
         29: footL ?? ankleL, 30: footR ?? ankleR,  // heel → use foot or ankle fallback
         31: footL ?? ankleL, 32: footR ?? ankleR,   // toe → use foot or ankle fallback
+        100: sternum,  // synthetic spine/torso → glow on sternum
       };
       const point = LANDMARK_TO_POINT[clickedIdx];
       if (point) {

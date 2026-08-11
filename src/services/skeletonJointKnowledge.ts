@@ -173,6 +173,17 @@ export const JOINT_KNOWLEDGE: Record<number, JointKnowledge> = {
     exercise: 'Arabesque: vollständige Pointe halten, Foto von der Seite für Linienkontrolle.',
     commonMistake: 'Fuß im Arabesque nicht vollständig gestreckt.',
   },
+  // ── SYNTHETIC: Rumpf/Wirbelsäule (Index 100, beyond MediaPipe 0-32) ──
+  // Used when user clicks a TORSO BONE (shoulder→hip line), not a specific joint.
+  100: {
+    name: 'Rumpf / Wirbelsäule', nameShort: 'Rumpf', emoji: '🏛️', region: 'hip',
+    anatomyNote: 'Die Rumpfachse verbindet Schultergürtel mit Becken. Farbgebung im Lehrer-Ampel-Modus zeigt, ob die Rumpfhaltung korrekt (grün), auffällig (gelb) oder problematisch (rot) ist.',
+    vaganovaRule: 'Aplomb: Der Rumpf bildet eine senkrechte Linie (Lot) vom Scheitel durch die Hüftmitte zum Boden. Keine Vorneigung, keine Seitneigung. Im Plie bleibt der Oberkörper vertikal.',
+    howAndWhy: '"Dein Rumpf ist der Stamm eines Baumes – gerade, stabil, von innen aufgerichtet." Vorneigung verschiebt den Schwerpunkt und destabilisiert die Balance.',
+    exerciseTitle: 'Aplomb-Training an der Stange',
+    exercise: 'Stange seitlich: Demi-Plie, Oberkörper bleibt vertikal. Fingerspitzen leicht an der Stange. Rücken lang, Beckenboden aktiv. 10x, dann ohne Stange wiederholen.',
+    commonMistake: 'Oberkörper neigt sich beim Plie nach vorne oder zur Seite.',
+  },
 };
 
 export function getJointKnowledge(landmarkIndex: number): JointKnowledge | null {
