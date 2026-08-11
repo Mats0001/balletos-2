@@ -941,7 +941,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // 🦴 SKELETON JOINT CLICK – hit-test landmarks + bone segments
   // Uses generic HTMLElement so it works on the container div (events bubble from AnnotationCanvas)
   const handleSkeletonClick = (e: React.MouseEvent<HTMLElement>) => {
-    if (!isPlaying === false) return; // only when paused
+    // Allow clicking at any time — if playing, we auto-pause below on joint hit
+    // But NOT in annotation/drawing mode — those clicks are for strokes
+    if (isAnnotationModeActive) return;
     const lm = landmarksRef.current;
     const bounds = overlayBounds;
     if (!lm || !bounds) { setJointPopover(null); return; }
