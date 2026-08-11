@@ -947,13 +947,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     if (!lm || !bounds) { setJointPopover(null); return; }
 
     // Get click position relative to the canvas rect (the overlay area)
+    // CRITICAL: rect is the VISUAL bounding box (includes CSS zoom/pan transforms)
+    // but landmark coordinates are in LOGICAL canvas space. We must convert.
     const canvasEl = canvasRef.current;
     if (!canvasEl) return;
     const rect = canvasEl.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
+    // Convert from visual space → logical canvas space
+    const scaleX = bounds.width / rect.width;
+    const scaleY = bounds.height / rect.height;
+    const clickX = (e.clientX - rect.left) * scaleX;
+    const clickY = (e.clientY - rect.top) * scaleY;
 
-    // Only consider clicks that are within the overlay bounds
+    // Only consider clicks that are within the overlay bounds (now in logical space)
     if (clickX < 0 || clickY < 0 || clickX > bounds.width || clickY > bounds.height) {
       setJointPopover(null);
       return;
@@ -1083,23 +1088,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           activeCueGlowTypeRef.current = 'CORRECTION';
         }
 
-        // Auto-zoom to the clicked joint region
-        const JOINT_Y_POSITIONS: Record<string, number> = {
-          'head_epaulement':  0.15,
-          'shoulder_line':    0.25,
-          'spine_center':     0.35,
-          'port_de_bras_arms': 0.30,
-          'left_elbow':       0.30,
-          'pelvis_core':      0.45,
-          'left_knee':        0.65,
-          'right_knee':       0.65,
-        };
-        const jY = JOINT_Y_POSITIONS[mappedJointId];
-        if (jY !== undefined) {
+        // Auto-zoom to the ACTUAL clicked landmark position (not hardcoded Y)
+        const clickedLm = lm[nearestIdx];
+        if (clickedLm) {
           const autoZoom = 1.8;
-          const panY = (0.5 - jY) * 100 / autoZoom;
+          // Center the viewport on the actual joint coordinates
+          const panY = (0.5 - clickedLm.y) * 100 / autoZoom;
+          const panX = (0.5 - clickedLm.x) * 100 / autoZoom;
           setZoomLevel(autoZoom);
-          setPanOffset({ x: 0, y: panY });
+          setPanOffset({ x: panX, y: panY });
         }
 
         // Auto-enable visual overlays for full premium experience
