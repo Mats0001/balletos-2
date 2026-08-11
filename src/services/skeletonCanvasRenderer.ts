@@ -46,6 +46,8 @@ export interface CanvasRenderOptions {
   glowPulsePhase?: number;
   /** Whether the glow is for a GOOD cue (green) or CORRECTION (red-warm) */
   glowType?: 'GOOD' | 'CORRECTION';
+  /** Show ideal position overlay (green dashed guide) for selected joint */
+  showIdealOverlay?: boolean;
   isPlie: boolean;
   /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -608,6 +610,97 @@ export function renderSkeletonToCanvas(
   // FIX 2026-08-11: WeightDist-Status wird nicht mehr direkt gerendet
   // CoG-Packet (projected_torso_center_proxy) kommt aus overlayPacket.cog (bereits oben gerendert)
   // Dieser separate WeightDist-Dot wurde entfernt – Doppeldarstellung vermieden
+
+  // ─── IDEAL-OVERLAY: Soll-Position als gestrichelte grüne Hilfslinie ───
+  // Zeigt der Lehrerin/Schülerin, WIE die Position korrekt aussehen sollte.
+  // Nur sichtbar wenn showIdealOverlay === true und ein Joint selektiert ist.
+  const IDEAL_COLOR = '#34d399';      // smaragdgrün
+  const IDEAL_DASH = [8, 6];          // gestrichelt
+  const IDEAL_WIDTH = 2.5;
+  const IDEAL_ALPHA = 0.65;
+
+  if (opts.showIdealOverlay && opts.selectedJointId && opts.selectedJointId !== '') {
+    ctx.save();
+    ctx.globalAlpha = IDEAL_ALPHA;
+
+    switch (opts.selectedJointId) {
+      case 'left_knee': {
+        // Ideale Beinlinie: gerade Linie von Hüfte (pelvisL) durch Knie zum Knöchel
+        // Die grüne Linie zeigt die korrekte Ausrichtung (Knie über 2./3. Zeh)
+        drawLine(ctx, pelvisL.x, pelvisL.y, pelvisL.x, ankleL.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        // Pfeilspitze am Knie zeigt "hier soll es sein"
+        const idealKneeLY = pelvisL.y + (ankleL.y - pelvisL.y) * 0.45; // ~45% = typische Knieposition
+        drawCircle(ctx, pelvisL.x, idealKneeLY, 10, 'none', sx, sy, IDEAL_COLOR, 2);
+        // Label
+        ctx.font = `${12 * ((sx + sy) / 2)}px Inter, sans-serif`;
+        ctx.fillStyle = IDEAL_COLOR;
+        ctx.fillText('Ideal', (pelvisL.x + 14) * sx, idealKneeLY * sy + 4);
+        break;
+      }
+      case 'right_knee': {
+        drawLine(ctx, pelvisR.x, pelvisR.y, pelvisR.x, ankleR.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        const idealKneeRY = pelvisR.y + (ankleR.y - pelvisR.y) * 0.45;
+        drawCircle(ctx, pelvisR.x, idealKneeRY, 10, 'none', sx, sy, IDEAL_COLOR, 2);
+        ctx.font = `${12 * ((sx + sy) / 2)}px Inter, sans-serif`;
+        ctx.fillStyle = IDEAL_COLOR;
+        ctx.fillText('Ideal', (pelvisR.x + 14) * sx, idealKneeRY * sy + 4);
+        break;
+      }
+      case 'spine_center': {
+        // Ideale Wirbelsäule: perfekt vertikal vom Kopf zum Becken
+        const centerX = (head.x + pelvisCenter.x) / 2;
+        drawLine(ctx, centerX, head.y - 15, centerX, pelvisCenter.y + 15, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
+        ctx.fillStyle = IDEAL_COLOR;
+        ctx.fillText('Vertikal', (centerX + 12) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
+        break;
+      }
+      case 'pelvis_core': {
+        // Ideales Becken: perfekt horizontal
+        const pelvisCenterY = (pelvisL.y + pelvisR.y) / 2;
+        drawLine(ctx, pelvisL.x - 20, pelvisCenterY, pelvisR.x + 20, pelvisCenterY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
+        ctx.fillStyle = IDEAL_COLOR;
+        ctx.fillText('Horizontal', (pelvisR.x + 24) * sx, pelvisCenterY * sy + 4);
+        break;
+      }
+      case 'shoulder_line': {
+        // Ideale Schulterlinie: perfekt horizontal
+        const shCenterY = (shoulderL.y + shoulderR.y) / 2;
+        drawLine(ctx, shoulderL.x - 20, shCenterY, shoulderR.x + 20, shCenterY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        ctx.font = `${11 * ((sx + sy) / 2)}px Inter, sans-serif`;
+        ctx.fillStyle = IDEAL_COLOR;
+        ctx.fillText('Horizontal', (shoulderR.x + 24) * sx, shCenterY * sy + 4);
+        break;
+      }
+      case 'left_elbow':
+      case 'port_de_bras_arms': {
+        // Ideale Armlinie: sanfte Kurve von Schulter über Ellbogen zum Handgelenk
+        // Gezeichnet als gestrichelte Linie vom Schulterblatt zur Fingerspitze
+        // mit dem Ellbogen leicht tiefer als die Schulter
+        const idealElbowLY = shoulderL.y + 8; // Ellbogen leicht tiefer
+        const idealElbowLX = (shoulderL.x + wristL.x) / 2;
+        drawLine(ctx, shoulderL.x, shoulderL.y, idealElbowLX, idealElbowLY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        drawLine(ctx, idealElbowLX, idealElbowLY, wristL.x, wristL.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        drawCircle(ctx, idealElbowLX, idealElbowLY, 8, 'none', sx, sy, IDEAL_COLOR, 2);
+        if (opts.selectedJointId === 'port_de_bras_arms') {
+          const idealElbowRY = shoulderR.y + 8;
+          const idealElbowRX = (shoulderR.x + wristR.x) / 2;
+          drawLine(ctx, shoulderR.x, shoulderR.y, idealElbowRX, idealElbowRY, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+          drawLine(ctx, idealElbowRX, idealElbowRY, wristR.x, wristR.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+          drawCircle(ctx, idealElbowRX, idealElbowRY, 8, 'none', sx, sy, IDEAL_COLOR, 2);
+        }
+        break;
+      }
+      case 'head_epaulement': {
+        // Ideale Kopfposition: vertikal über dem Becken-Zentrum
+        drawLine(ctx, pelvisCenter.x, head.y - 20, pelvisCenter.x, pelvisCenter.y, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
+        break;
+      }
+    }
+
+    ctx.restore();
+  }
 
   // ─── GLOW-HIGHLIGHT FÜR SELEKTIERTE CUE-POINTS ───
   // Wenn ein Cue-Point aktiv ist, pulsiert ein Glow-Ring um die betroffene Körperregion.

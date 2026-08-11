@@ -63,6 +63,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [selectedJointId, setSelectedJointId] = useState<string>('left_knee');
   /** Glow type for selected cue point: 'GOOD' (green) or 'CORRECTION' (red-warm) */
   const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
+  /** Toggle: Show ideal position overlay (green dashed guide lines) */
+  const [showIdealOverlay, setShowIdealOverlay] = useState<boolean>(false);
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -723,6 +725,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   selectedJointId,
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: activeCueGlowTypeRef.current,
+                  showIdealOverlay,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
                   overlayMode: currentMode,
@@ -753,7 +756,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // FIX (Berater 2026-08-11): overlayMode removed from deps.
   // Mode is read via overlayModeRef inside the loop → no effect restart on mode switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId]);
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, showIdealOverlay]);
 
   // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
   useEffect(() => {
@@ -847,7 +850,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // This ensures no stale in-flight inference can contaminate the new frame
       framePump.bumpGeneration();
       latestPacketRef.current = null;
-      cachedAnalysisRef.current = null;
+      // NOTE: cachedAnalysisRef is intentionally NOT cleared here.
+      // The old analysis provides skeleton data for the glow animation
+      // while processStaticPausedFrame computes fresh landmarks.
+      // Once fresh landmarks arrive, the rAF loop recalculates analysis.
       stabilizedOverlayRef.current = null;
 
       videoRef.current.currentTime = cue.timeSeconds;
@@ -1829,6 +1835,27 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             }}
           >
             <Compass size={12} />
+          </button>
+
+          {/* Ideal-Overlay: Soll-Position als grüne Hilfslinie */}
+          <button
+            onClick={() => setShowIdealOverlay(!showIdealOverlay)}
+            title="Soll-Position: Zeigt grüne Hilfslinien für die ideale Haltung am selektierten Gelenk"
+            style={{
+              background: showIdealOverlay ? 'rgba(52,211,153,0.15)' : 'transparent',
+              color: showIdealOverlay ? '#34d399' : 'rgba(255,255,255,0.45)',
+              border: showIdealOverlay ? '1px solid rgba(52,211,153,0.3)' : '1px solid transparent',
+              padding: '5px 11px',
+              borderRadius: '9px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span style={{ fontSize: '13px' }}>◎</span>
+            <span>Ideal</span>
           </button>
         </div>
 
