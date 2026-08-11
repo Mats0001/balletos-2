@@ -60,7 +60,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [showOverlayMenu, setShowOverlayMenu] = useState<boolean>(false);
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
-  const [selectedJointId, setSelectedJointId] = useState<string>('left_knee');
+  const [selectedJointId, setSelectedJointId] = useState<string>('');
   /** Glow type for selected cue point: 'GOOD' (green) or 'CORRECTION' (red-warm) */
   const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
@@ -727,10 +727,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   showMotionTrails,
                   showCoG,
                   showAngleArcs,
-                  selectedJointId,
+                  selectedJointId: !isPlaying ? selectedJointId : '',
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: activeCueGlowTypeRef.current,
-                  showIdealOverlay,
+                  showIdealOverlay: !isPlaying && showIdealOverlay,
                   showFocusDim: !isPlaying && showFocusDim,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
