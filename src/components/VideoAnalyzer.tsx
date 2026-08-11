@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw, Hand } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
@@ -28,7 +27,7 @@ import { capabilityTierManager } from '../services/capabilityTier';
 import { makeNoPosePacket } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
-import { push as pushAnnotation, undo as undoAnnotation, redo as redoAnnotation, RootState } from '../store/store';
+import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
 import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeletonJointKnowledge';
 
@@ -39,11 +38,6 @@ interface VideoAnalyzerProps {
 }
 
 export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis, onSelectedCue, onExerciseChange }) => {
-  // Redux
-  const dispatch = useDispatch();
-  const reduxAnnotations = useSelector((s: RootState) => s.annotationHistory.present);
-  const canReduxUndo = useSelector((s: RootState) => s.annotationHistory.past.length > 0);
-  const canReduxRedo = useSelector((s: RootState) => s.annotationHistory.future.length > 0);
 
   // Video Controls State
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -173,15 +167,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [isCurriculumModalOpen, setIsCurriculumModalOpen] = useState<boolean>(false);
 
   // ── ANNOTATION TOOL STATE ──────────────────────────────────────────────────
-  // AnnotationEntry is imported from AnnotationLightbox (shared type)
-  const STORAGE_KEY = `balletos_annotations_${selectedDevVideoUrl.split('/').pop()}`;
+  // Per-video undo/redo via local hook (no Redux)
+  const stableVideoId = selectedDevVideoUrl.split('/').pop() ?? 'default';
+  const {
+    entries: annotationEntries,
+    push: pushAnnotations,
+    updateEntry: updateAnnotationEntry,
+    undo: undoAnnotation,
+    redo: redoAnnotation,
+    canUndo: canUndoAnnotation,
+    canRedo: canRedoAnnotation,
+  } = useUndoableAnnotations(stableVideoId);
 
-  const [annotationEntries, setAnnotationEntries] = useState<AnnotationEntry[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pen');
   const [isAnnotationModeActive, setIsAnnotationModeActive] = useState<boolean>(false);
   const [drawingColor, setDrawingColor] = useState<string>('#ff453a');
@@ -199,32 +196,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // 🦴 Joint popover state
   // normalizedX/Y: 0–1 relative to canvas (used for joint clicks → arrow tracks landmark)
-  // viewportX/Y: viewport pixel coords (used for bone clicks → arrow stays at click position)
   const [jointPopover, setJointPopover] = useState<{
     landmarkIndex: number;
     normalizedX: number;
     normalizedY: number;
   } | null>(null);
-
-  // Persist annotations to localStorage whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(annotationEntries));
-    } catch { /* quota exceeded – ignore */ }
-  }, [annotationEntries, STORAGE_KEY]);
-
-  // Redux sync: when undo/redo changes Redux state, sync back to local state
-  useEffect(() => {
-    if (reduxAnnotations.length > 0 || annotationEntries.length > 0) {
-      // Only sync if Redux actually has a different state (avoids infinite loop)
-      const reduxJson = JSON.stringify(reduxAnnotations);
-      const localJson = JSON.stringify(annotationEntries);
-      if (reduxJson !== localJson && reduxAnnotations.length > 0) {
-        setAnnotationEntries(reduxAnnotations);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reduxAnnotations]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const refVideoRef = useRef<HTMLVideoElement>(null);
@@ -1536,9 +1512,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         note: '',
       };
       const updated = [...annotationEntries, entry];
-      // Push through Redux for undo/redo support
-      dispatch(pushAnnotation(updated));
-      setAnnotationEntries(updated);
+      pushAnnotations(updated);
       // Open lightbox showing the new entry
       setLightboxIndex(updated.length - 1);
       setLightboxOpen(true);
@@ -1548,9 +1522,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Update note on a saved annotation
   const handleUpdateNote = (id: string, note: string) => {
-    const updated = annotationEntries.map(e => e.id === id ? { ...e, note } : e);
-    dispatch(pushAnnotation(updated));
-    setAnnotationEntries(updated);
+    updateAnnotationEntry(id, { note });
   };
 
   // KI-Vorschlag für bestehende leere TEACHER_CREATED Cues generieren
@@ -1580,7 +1552,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Update caption on a saved annotation
   const handleUpdateCaption = (id: string, caption: string) => {
-    setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, caption } : e));
+    updateAnnotationEntry(id, { caption });
   };
 
   // Inline-Edit für TEACHER_CREATED Cues: speichert ein einzelnes Feld on-blur
@@ -1591,7 +1563,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Update the dataUrl of an annotation (after lightbox burn-in)
   const handleUpdateDataUrl = (id: string, dataUrl: string) => {
-    setAnnotationEntries(prev => prev.map(e => e.id === id ? { ...e, dataUrl } : e));
+    updateAnnotationEntry(id, { dataUrl });
   };
 
   // Open lightbox at a specific entry index
@@ -2627,14 +2599,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   label: 'Rückgängig',
                   icon: <Undo2 size={14} />,
                   action: () => {
-                    // Prioritize canvas stroke undo, then Redux annotation undo
+                    // Prioritize canvas stroke undo, then annotation undo
                     if (annotationCanvasRef.current?.canUndo()) {
                       annotationCanvasRef.current.undo();
-                    } else if (canReduxUndo) {
-                      dispatch(undoAnnotation());
+                    } else if (canUndoAnnotation) {
+                      undoAnnotation();
                     }
                   },
-                  enabled: (annotationCanvasRef.current?.canUndo() ?? false) || canReduxUndo,
+                  enabled: (annotationCanvasRef.current?.canUndo() ?? false) || canUndoAnnotation,
                 },
                 {
                   label: 'Wiederholen',
@@ -2642,11 +2614,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   action: () => {
                     if (annotationCanvasRef.current?.canRedo()) {
                       annotationCanvasRef.current.redo();
-                    } else if (canReduxRedo) {
-                      dispatch(redoAnnotation());
+                    } else if (canRedoAnnotation) {
+                      redoAnnotation();
                     }
                   },
-                  enabled: (annotationCanvasRef.current?.canRedo() ?? false) || canReduxRedo,
+                  enabled: (annotationCanvasRef.current?.canRedo() ?? false) || canRedoAnnotation,
                 },
               ].map(({ label, icon, action, enabled }) => (
                 <button
