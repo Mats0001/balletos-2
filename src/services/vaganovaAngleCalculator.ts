@@ -212,6 +212,7 @@ export interface VaganovaFullAnalysis {
 }
 
 export class VaganovaAngleCalculator {
+  private static _lastIsoWarn = 0;
   // ─── Baseline tracking for relative valgus drift (per Asaeda 2024) ───────
   // Absolute valgus from webcam has ~19° systematic error vs Vicon.
   // We track session-start values and only report RELATIVE change.
@@ -543,7 +544,14 @@ export class VaganovaAngleCalculator {
     // P0 FIX: pixel-space dx/dy before atan2
     const dx = (shR.x - shL.x) * vw;
     const dy = (shR.y - shL.y) * vh;
-    const angleDeg = Math.abs(Math.atan2(dy, dx) * (180 / Math.PI));
+    // atan2(dy, dx) gibt den Winkel zur X-Achse (Horizontalen) zurück.
+    // Bei horizontaler Linie: ~0° oder ~±180° (je nach dx-Vorzeichen).
+    // Wir wollen die ABWEICHUNG von der Horizontalen (0-90°).
+    const rawAngle = Math.atan2(dy, dx) * (180 / Math.PI); // -180 bis +180
+    // Normalisieren: 0° und ±180° sind beide horizontal → Abweichung = 0°
+    const angleDeg = Math.abs(rawAngle) > 90
+      ? 180 - Math.abs(rawAngle)  // Winkel nahe ±180° → kleine Abweichung
+      : Math.abs(rawAngle);        // Winkel nahe 0° → kleine Abweichung
 
     const { symmetryDegCorrect, symmetryDegWarning } = VAGANOVA_NORMS.shoulder;
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
@@ -696,7 +704,8 @@ export class VaganovaAngleCalculator {
     // P0 FIX (2026-08-10): vw/vh (videoWidth/videoHeight) MUST be passed.
     // Default 1/1 is safe but produces non-isotropic angles.
     // Callers should always pass video.videoWidth and video.videoHeight.
-    if (vw === 1 && vh === 1) {
+    if (vw === 1 && vh === 1 && Date.now() - VaganovaAngleCalculator._lastIsoWarn > 10000) {
+      VaganovaAngleCalculator._lastIsoWarn = Date.now();
       console.warn('[VaganovaAngleCalculator] analyzeFullFrame called without vw/vh – angles will be non-isotropic!');
     }
     return {

@@ -21,6 +21,10 @@ import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
 import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
 import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import { TeacherOverlayPacket } from '../types/teacherHeuristic';
+import { framePump, FrameTickEvent } from '../services/framePump';
+import { overlayStabilizer } from '../services/overlayStabilizer';
+import { capabilityTierManager, CapabilityTierManager } from '../services/capabilityTier';
+import { makeNoPosePacket } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
@@ -197,9 +201,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const annotationMergeCanvasRef = useRef<HTMLCanvasElement>(null); // Off-screen merge canvas
 
-  // ── FRAME SYNC FOUNDATION (2026-08-10) ───────────────────────────────────
+  // ── FRAME SYNC FOUNDATION (2026-08-10, upgraded 2026-08-11) ──────────────
   // Each pose result is tagged with the exact video timestamp it came from.
   // Drawing only happens when the packet's mediaTimeUs matches the current frame.
+  // FramePump + Generation system replaces ad-hoc rAF loop.
   const latestPacketRef = useRef<import('../types/posePacket').PosePacket | null>(null);
   const streamEpochRef = useRef<number>(Date.now());
   const frameSeqRef = useRef<number>(0);
@@ -207,6 +212,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     inferenceMs: 0, poseAgeMs: 0, syncErrorMs: 0,
     droppedFrames: 0, skippedInferences: 0, usingRvfc: false,
   });
+  // Ref-based overlayMode so mode-switch doesn't restart the effect (Berater 2026-08-11)
+  const overlayModeRef = useRef(overlayMode);
+  useEffect(() => { overlayModeRef.current = overlayMode; }, [overlayMode]);
   // ─────────────────────────────────────────────────────────────────────────
 
   // 60fps ref-based data (bypasses React for smooth canvas drawing)
@@ -328,12 +336,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // Auto-Analyse: KI-Cue-Points aus echten Frame-Daten generieren
     const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
     if (autoCuePoints.length > 0) {
-      // Bestehende Cue-Points behalten + KI-Points ergänzen (keine Duplikate)
+      // KI-Cue-Points: alte KI_AUTO-Einträge entfernen, neue einsetzen
       setCuePoints(prev => {
-        const existingIds = new Set(prev.map(p => p.id));
-        const newPoints = autoCuePoints.filter(p => !existingIds.has(p.id));
-        const merged = [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
-        // ⚠️ Sofort in localStorage persistieren, sonst verliert addCuePoint() die KI-Cues
+        const nonKi = prev.filter(p => p.dataSource !== 'KI_AUTO');
+        const merged = [...nonKi, ...autoCuePoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
         vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
         return merged;
       });
@@ -375,10 +381,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
         if (autoCuePoints.length > 0) {
           setCuePoints(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const newPoints = autoCuePoints.filter(p => !existingIds.has(p.id));
-            if (newPoints.length === 0) return prev; // Keine neuen → kein Re-render
-            const merged = [...prev, ...newPoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
+            const nonKi = prev.filter(p => p.dataSource !== 'KI_AUTO');
+            const merged = [...nonKi, ...autoCuePoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
             vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
             return merged;
           });
@@ -421,6 +425,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       frameSeqRef.current = 0;
       streamEpochRef.current = Date.now();
       vaganovaPoseEngine.reset();
+      realMediaPipePose.reset(); // FIX: Clear MediaPipe temporal tracking on source change
+      framePump.reset(); // Bump generation + stop any running pump
+      overlayStabilizer.reset();
+      capabilityTierManager.resetSession();
       // Clear canvas immediately
       const canvas = canvasRef.current;
       if (canvas) {
@@ -430,10 +438,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     };
     resetPoseState(); // Always reset on effect restart (video change)
 
-    // Seek handler – clears stale skeleton immediately
+    // Seek handler – clears stale skeleton immediately + bumps generation
+    // ARCHITEKTUR-VERTRAG (Berater 2026-08-11):
+    //   – Seek löscht alle alten Pakete und erhöht die Generation
+    //   – Pre-seek in-flight inference wird durch Generation-Check verworfen
     const handleSeeked = () => {
+      framePump.bumpGeneration(); // Invalidates all in-flight callbacks
       latestPacketRef.current = null;
       cachedAnalysisRef.current = null;
+      landmarksRef.current = null;
       vaganovaPoseEngine.reset();
       const canvas = canvasRef.current;
       if (canvas) {
@@ -489,16 +502,23 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             // Timeout guard: if isProcessingRef was stuck >500ms, force-reset
             isProcessingRef.current = true;
             processingStartTimeRef.current = inferenceStartMs;
-            // Capture the mediaTimeUs for THIS frame so we can tag the result
+            // Capture the mediaTimeUs AND generation for THIS frame so we can tag the result
             const capturedMediaTimeUs = currentMediaTimeUs;
             const capturedEpoch = streamEpochRef.current;
             const capturedSeq = frameSeqRef.current++;
+            const capturedGeneration = framePump.generation;
 
             realMediaPipePose.processFrame(v, (data: PoseResultsData) => {
               isProcessingRef.current = false;
               const inferenceEndMs = performance.now();
 
               if (!isActive) return; // Effect cleaned up – discard
+
+              // Generation gate: discard if seek/source-change happened since inference started
+              if (capturedGeneration !== framePump.generation) {
+                debugHudRef.current.droppedFrames++;
+                return; // Stale: generation changed during inference
+              }
 
               if (data.landmarks && data.landmarks.length >= 33) {
                 // ── FRAME SYNC: Single smoothing only (MediaPipe smoothLandmarks already active)
@@ -540,8 +560,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   setIsEngineReady(true);
                 }
               } else {
-                // no_pose result – clear stale skeleton
-                latestPacketRef.current = null;
+                // no_pose result – proper provenance tracking (Berater 2026-08-11)
+                latestPacketRef.current = makeNoPosePacket(
+                  capturedEpoch, capturedSeq, capturedMediaTimeUs
+                );
                 landmarksRef.current = null;
               }
             }).catch(() => { isProcessingRef.current = false; });
@@ -619,15 +641,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               if (c) {
                 // Compute TeacherOverlayPacket from fresh analysis
                 // (Engine is stateless — no re-render triggered)
-                const overlayPacket: TeacherOverlayPacket | undefined =
-                  overlayMode === 'lehrer-ampel'
-                    ? teacherHeuristicEngine.compute(
-                        c.vagAn,
-                        c.sk,
-                        v.currentTime,
-                        streamEpochRef.current,
-                      )
-                    : undefined;
+                // Read mode from ref (not state) to avoid effect restart on mode switch
+                const currentMode = overlayModeRef.current;
+                let overlayPacket: TeacherOverlayPacket | undefined;
+                if (currentMode === 'lehrer-ampel') {
+                  const tier = capabilityTierManager.getTier();
+                  if (CapabilityTierManager.canOutputColors(tier)) {
+                    const rawPacket = teacherHeuristicEngine.compute(
+                      c.vagAn,
+                      c.sk,
+                      v.currentTime,
+                      streamEpochRef.current,
+                    );
+                    // Stabilize: hysteresis + blocked→sofort
+                    overlayPacket = overlayStabilizer.stabilize(
+                      rawPacket, framePump.generation
+                    );
+                  }
+                  // Tier C: no colors → overlayPacket stays undefined → renderer uses NEUTRAL
+                }
 
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: showSkeleton,
@@ -637,7 +669,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   selectedJointId,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
-                  overlayMode,
+                  overlayMode: currentMode,
                   overlayPacket,
                 }, v.videoWidth, v.videoHeight);
               }
@@ -661,7 +693,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (animId) cancelAnimationFrame(animId);
       videoRef.current?.removeEventListener('seeked', handleSeeked);
     };
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, overlayMode]);
+  // FIX (Berater 2026-08-11): overlayMode removed from deps.
+  // Mode is read via overlayModeRef inside the loop → no effect restart on mode switch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId]);
 
   // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
   useEffect(() => {
@@ -1373,7 +1408,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     selectedFrameTime,
     detectedLandmarks,
     selectedJointId,
-    false // P0-FIX (Berater 2026-08-10): teacherConfirmed NIEMALS hart als true – immer false bis explizite Bestätigung
+    false, // P0-FIX (Berater 2026-08-10): teacherConfirmed NIEMALS hart als true – immer false bis explizite Bestätigung
+    videoEl?.videoWidth || 1,
+    videoEl?.videoHeight || 1
   );
 
   const inspectorData: JetztWichtigInspectorData = {

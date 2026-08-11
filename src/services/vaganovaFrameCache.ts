@@ -9,6 +9,10 @@ interface CachedVideo {
   fps: number;
   duration: number;
   lastAccessedAt: number;
+  /** Video intrinsic pixel width (for isotropic angle calculations). */
+  vw: number;
+  /** Video intrinsic pixel height (for isotropic angle calculations). */
+  vh: number;
 }
 
 export class VaganovaFrameCacheService {
@@ -57,6 +61,8 @@ export class VaganovaFrameCacheService {
         fps: cached.fps,
         duration: cached.duration,
         lastAccessedAt: Date.now(),
+        vw: cached.vw ?? 640,
+        vh: cached.vh ?? 480,
       });
       this.isPreIndexingMap.set(videoUrl, false);
       if (onProgress) onProgress(100, cached.frames.length, cached.frames.length, true);
@@ -180,18 +186,23 @@ export class VaganovaFrameCacheService {
     // Sort frames by time (should already be sorted, but guarantee it)
     frames.sort((a, b) => a.timeMs - b.timeMs);
 
+    const scanVw = videoEl.videoWidth || 640;
+    const scanVh = videoEl.videoHeight || 480;
+
     this.cache.set(videoUrl, {
       frames,
       fps,
       duration,
-      lastAccessedAt: Date.now()
+      lastAccessedAt: Date.now(),
+      vw: scanVw,
+      vh: scanVh,
     });
 
     this.isPreIndexingMap.set(videoUrl, false);
     if (onProgress) onProgress(100, totalFrames, totalFrames, false);
 
     // ─── Persist to IDB (non-blocking, fire-and-forget) ──────────────────────
-    vaganovaIdbCache.save(key, frames, fps, duration).catch(() => {});
+    vaganovaIdbCache.save(key, frames, fps, duration, scanVw, scanVh).catch(() => {});
   }
 
   /**
@@ -231,6 +242,12 @@ export class VaganovaFrameCacheService {
   /** Returns all cached frames for a video (for post-scan analysis). */
   public getFrames(videoUrl: string): FrameEntry[] {
     return this.cache.get(videoUrl)?.frames ?? [];
+  }
+
+  /** Returns video pixel dimensions for isotropic angle calculations. */
+  public getVideoDimensions(videoUrl: string): { vw: number; vh: number } {
+    const entry = this.cache.get(videoUrl);
+    return { vw: entry?.vw ?? 640, vh: entry?.vh ?? 480 };
   }
 
   /**

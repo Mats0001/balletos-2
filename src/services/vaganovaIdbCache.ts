@@ -24,6 +24,8 @@ interface IdbRecord {
   duration:  number;
   savedAt:   number;       // epoch ms — for future TTL / eviction
   frameCount: number;
+  vw?:       number;       // video pixel width (added 2026-08-11)
+  vh?:       number;       // video pixel height
 }
 
 // ─── DB singleton ─────────────────────────────────────────────────────────────
@@ -67,7 +69,7 @@ export class VaganovaIdbCache {
   }
 
   /** Load cached scan from IndexedDB. Returns null on miss. */
-  public async load(key: string): Promise<{ frames: FrameEntry[]; fps: number; duration: number } | null> {
+  public async load(key: string): Promise<{ frames: FrameEntry[]; fps: number; duration: number; vw: number; vh: number } | null> {
     try {
       const db    = await openDb();
       const tx    = db.transaction(STORE_NAME, 'readonly');
@@ -78,7 +80,7 @@ export class VaganovaIdbCache {
           const record = req.result as IdbRecord | undefined;
           if (!record || record.frames.length < 10) { resolve(null); return; }
           console.log(`[IdbCache] HIT  ${key} — ${record.frameCount} frames`);
-          resolve({ frames: record.frames, fps: record.fps, duration: record.duration });
+          resolve({ frames: record.frames, fps: record.fps, duration: record.duration, vw: record.vw ?? 640, vh: record.vh ?? 480 });
         };
         req.onerror = () => reject(req.error);
       });
@@ -93,13 +95,15 @@ export class VaganovaIdbCache {
     key: string,
     frames: FrameEntry[],
     fps: number,
-    duration: number
+    duration: number,
+    vw = 640,
+    vh = 480
   ): Promise<void> {
     try {
       const db    = await openDb();
       const tx    = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const record: IdbRecord = { key, frames, fps, duration, savedAt: Date.now(), frameCount: frames.length };
+      const record: IdbRecord = { key, frames, fps, duration, savedAt: Date.now(), frameCount: frames.length, vw, vh };
       await new Promise<void>((resolve, reject) => {
         const req = store.put(record);
         req.onsuccess = () => resolve();

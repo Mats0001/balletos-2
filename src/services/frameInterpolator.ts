@@ -1,5 +1,16 @@
 import { PoseLandmark } from './realMediaPipePose';
 
+/**
+ * Maximum time gap (ms) between two frames before interpolation is refused.
+ * Gaps wider than this typically indicate no_pose periods (person not visible).
+ * Interpolating across such gaps would create phantom skeletons.
+ *
+ * ARCHITEKTUR-VERTRAG (Berater 2026-08-11):
+ *   – Keine Interpolation über no_pose-Lücken
+ */
+export const MAX_INTERPOLATION_GAP_MS = 200;
+
+
 export interface FrameEntry {
   timeMs: number;
   landmarks: PoseLandmark[];
@@ -98,6 +109,12 @@ export function findBracketingFrames(
   const after = frames[low];
 
   const timeDiff = after.timeMs - before.timeMs;
+
+  // Gap check: refuse interpolation over no_pose gaps (Berater 2026-08-11)
+  if (timeDiff > MAX_INTERPOLATION_GAP_MS) {
+    return null; // Gap too wide – likely no_pose period
+  }
+
   const t = timeDiff > 0 ? (targetTimeMs - before.timeMs) / timeDiff : 0;
 
   return { before, after, t };

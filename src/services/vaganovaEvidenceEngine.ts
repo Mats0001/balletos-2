@@ -299,10 +299,12 @@ export class VaganovaEvidenceEngineService {
     timestampStr: string,
     landmarks: PoseLandmark[] | null,
     selectedJointId: string,
-    teacherConfirmed: boolean = false  // Audit fix: false = safe default; teacher must explicitly confirm
+    teacherConfirmed: boolean = false,  // Audit fix: false = safe default; teacher must explicitly confirm
+    vw = 1,
+    vh = 1
   ): FeedbackObject {
     const evidenceLedger = this.computeRegionEvidence(landmarks, exerciseName);
-    const checkpointResults = this.computeCheckpoints(evidenceLedger, selectedJointId, landmarks); // vw/vh not available here – angles are review-only in evidence engine
+    const checkpointResults = this.computeCheckpoints(evidenceLedger, selectedJointId, landmarks, vw, vh);
 
     // Determine overall verdict
     const measurableCount = evidenceLedger.filter(e => e.verdict === 'measurable').length;

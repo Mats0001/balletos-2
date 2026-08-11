@@ -136,22 +136,53 @@ export class VaganovaPreAnalyzerService {
    * Priority: 1) Teacher-saved data, 2) DEMO_FIXTURE for known demos, 3) []
    */
   public getCuePoints(videoUrl: string): VaganovaCuePoint[] {
+    let points: VaganovaCuePoint[] = [];
     try {
       const stored = localStorage.getItem(this.getStorageKey(videoUrl));
       if (stored) {
-        return JSON.parse(stored);
+        points = JSON.parse(stored);
       }
     } catch (e) {
       console.warn('[VaganovaPreAnalyzer] Storage read error:', e);
     }
 
-    const fixtureKey = getDemoFixtureKey(videoUrl);
-    if (fixtureKey) {
-      return DEMO_FIXTURES[fixtureKey];
+    if (points.length === 0) {
+      const fixtureKey = getDemoFixtureKey(videoUrl);
+      if (fixtureKey) {
+        return DEMO_FIXTURES[fixtureKey];
+      }
+      return [];
     }
 
-    // Unknown video: no fabricated data. Teacher must add cue points manually.
-    return [];
+    // ── DEDUP: Bereinige alte KI_AUTO-Duplikate ──────────────────────────
+    // Vor dem Fix hatten KI_AUTO-IDs Date.now() → bei jedem Scan neue IDs,
+    // Duplikate wurden nicht erkannt. Jetzt: pro (dataSource=KI_AUTO + timeSec)
+    // nur den letzten Eintrag behalten.
+    const seen = new Map<string, number>(); // key → index
+    const cleaned: VaganovaCuePoint[] = [];
+    for (const p of points) {
+      if (p.dataSource === 'KI_AUTO') {
+        const dedupeKey = `${p.jointFocusId}:${p.timeSeconds.toFixed(3)}`;
+        const existing = seen.get(dedupeKey);
+        if (existing !== undefined) {
+          // Ersetze älteren Eintrag mit neuerem
+          cleaned[existing] = p;
+          continue;
+        }
+        seen.set(dedupeKey, cleaned.length);
+      }
+      cleaned.push(p);
+    }
+
+    // Wenn wir Duplikate entfernt haben, sofort persistieren
+    if (cleaned.length < points.length) {
+      console.info(`[VaganovaPreAnalyzer] Bereinigt: ${points.length - cleaned.length} KI_AUTO-Duplikate entfernt`);
+      try {
+        localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(cleaned));
+      } catch (e) { /* ignore */ }
+    }
+
+    return cleaned;
   }
 
   public saveCuePoints(videoUrl: string, points: VaganovaCuePoint[]): void {
@@ -219,6 +250,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   report: AutoAnalysisReport;
 } {
   const frames = vaganovaFrameCache.getFrames(videoUrl);
+  const { vw, vh } = vaganovaFrameCache.getVideoDimensions(videoUrl);
   if (frames.length < 5) {
     return { autoCuePoints: [], report: { strengths: [], corrections: [], durationSec: 0, framesAnalyzed: 0 } };
   }
@@ -241,7 +273,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
     const lm = f.landmarks;
     if (!lm || lm.length < 33) continue;
 
-    const analysis = vaganovaAngleCalculator.analyzeFullFrame(lm);
+    const analysis = vaganovaAngleCalculator.analyzeFullFrame(lm, vw, vh);
 
     // Worst knee (valgus drift)
     const kneeL = analysis.valgusDriftL?.value;
@@ -286,7 +318,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (worstKnee && worstKnee.value > 3) {
     const timeSec = worstKnee.timeSec;
     autoCuePoints.push({
-      id: `ki-knee-${Date.now()}`,
+      id: `ki-knee-${timeSec.toFixed(3)}`,
       timeSeconds: timeSec,
       timecodeStr: fmtTime(timeSec),
       poseName: 'Knie-Alignment (KI erkannt)',
@@ -308,7 +340,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (worstArm && worstArm.value > 10) {
     const timeSec = worstArm.timeSec;
     autoCuePoints.push({
-      id: `ki-arm-${Date.now() + 1}`,
+      id: `ki-arm-${timeSec.toFixed(3)}`,
       timeSeconds: timeSec,
       timecodeStr: fmtTime(timeSec),
       poseName: 'Arm-Linienführung (KI erkannt)',
@@ -331,7 +363,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   if (bestShoulder && bestShoulder.value > 150) {
     const timeSec = bestShoulder.timeSec;
     autoCuePoints.push({
-      id: `ki-shoulder-good-${Date.now() + 2}`,
+      id: `ki-shoulder-good-${timeSec.toFixed(3)}`,
       timeSeconds: timeSec,
       timecodeStr: fmtTime(timeSec),
       poseName: 'Schulter-Horizontalität (KI erkannt)',
