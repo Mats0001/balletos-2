@@ -69,26 +69,16 @@ function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
   const nonBlocked = states.filter(s => s !== 'blocked');
   if (nonBlocked.length === 0) return 'blocked';
 
-  // Mehrheits-Voting statt pessimistisch:
-  // score: match=0, attention=1, strong_attention=2
-  const scoreMap: Record<string, number> = {
-    'heuristic_match': 0,
-    'heuristic_attention': 1,
-    'heuristic_strong_attention': 2,
-  };
-  const order: TeacherHeuristicState[] = [
-    'heuristic_match',
-    'heuristic_attention',
-    'heuristic_strong_attention',
-  ];
+  // Mehrheits-Voting:
+  // Grün wenn MINDESTENS 2 von 3 Komponenten match sind.
+  // Rot nur wenn MINDESTENS 2 von 3 strong_attention sind.
+  // Sonst: attention.
+  const matchCount = nonBlocked.filter(s => s === 'heuristic_match').length;
+  const strongCount = nonBlocked.filter(s => s === 'heuristic_strong_attention').length;
 
-  const totalScore = nonBlocked.reduce((sum, s) => sum + (scoreMap[s] ?? 0), 0);
-  const avg = totalScore / nonBlocked.length;
-
-  // avg < 0.5 → match, < 1.5 → attention, >= 1.5 → strong_attention
-  if (avg < 0.5) return order[0];
-  if (avg < 1.5) return order[1];
-  return order[2];
+  if (matchCount >= Math.ceil(nonBlocked.length / 2)) return 'heuristic_match';
+  if (strongCount >= Math.ceil(nonBlocked.length / 2)) return 'heuristic_strong_attention';
+  return 'heuristic_attention';
 }
 
 // ─── EINZEL-HEURISTIKEN ─────────────────────────────────────────────────────
@@ -97,11 +87,11 @@ function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.spineTilt;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  // 2D-projizierte Wirbelsäulenneigung.
-  // Im dynamischen Plié sind 5-8° normal → match.
-  // Erst ab 8° beginnt pädagogischer Beobachtungsbedarf.
-  if (deg <= 8)  return 'heuristic_match';
-  if (deg <= 15) return 'heuristic_attention';
+  // MediaPipe-2D-Rauschboden: ~5-8° Jitter bei normaler Haltung.
+  // Im Plié kommen natürliche 5-12° dazu.
+  // Match-Schwelle muss OBERHALB des Rauschbodens liegen.
+  if (deg <= 12) return 'heuristic_match';
+  if (deg <= 20) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
@@ -109,10 +99,10 @@ function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.shoulderSymmetry;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  // Schulter-Horizontalität: 2D-Projektion.
-  // Bei Port de bras / Épaulement sind 3-5° Asymmetrie normal.
-  if (deg <= 5)  return 'heuristic_match';
-  if (deg <= 10) return 'heuristic_attention';
+  // Schulter-Symmetrie: 2D-Projektion + Épaulement.
+  // Rauschboden ~3-5°, Épaulement gibt 5-8° dazu.
+  if (deg <= 8)  return 'heuristic_match';
+  if (deg <= 15) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
@@ -120,11 +110,10 @@ function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
   if (!isEligible(m)) return 'blocked';
   const deg = Math.abs(m!.value);
-  // 2D-projizierte Hüftlinien-Neigung.
-  // Im Plié sind 6-10° normal (Projektion übertreibt).
-  // Erst ab 10° wirklicher Aufmerksamkeitsbedarf.
-  if (deg <= 10) return 'heuristic_match';
-  if (deg <= 18) return 'heuristic_attention';
+  // Hüftlinie: 2D-Projektion übertreibt massiv im Plié.
+  // Rauschboden ~5°, Plié-normal ~8-15°.
+  if (deg <= 14) return 'heuristic_match';
+  if (deg <= 22) return 'heuristic_attention';
   return 'heuristic_strong_attention';
 }
 
@@ -137,8 +126,26 @@ function computeTorsoAlignment(va: VaganovaFullAnalysis): TeacherHeuristicState 
   const spine   = computeSpine(va);
   const shoulder = computeShoulder(va);
   const pelvis  = computePelvis(va);
-  return combineStates([spine, shoulder, pelvis]);
+  const result = combineStates([spine, shoulder, pelvis]);
+
+  // 🔍 DEBUG: Echte Winkelwerte + Einzelergebnisse (TEMPORÄR, entfernen nach Diagnose)
+  const spineVal = va.spineTilt ? Math.abs(va.spineTilt.value).toFixed(1) : 'N/A';
+  const shoulderVal = va.shoulderSymmetry ? Math.abs(va.shoulderSymmetry.value).toFixed(1) : 'N/A';
+  const pelvisVal = va.pelvicTilt ? Math.abs(va.pelvicTilt.value).toFixed(1) : 'N/A';
+  
+  // Nur alle 2 Sekunden loggen um Konsole nicht zu fluten
+  const now = Date.now();
+  if (!computeTorsoAlignment._lastLog || now - computeTorsoAlignment._lastLog > 2000) {
+    computeTorsoAlignment._lastLog = now;
+    console.log(
+      `🔍 TORSO: spine=${spineVal}° (${spine}) | shoulder=${shoulderVal}° (${shoulder}) | pelvis=${pelvisVal}° (${pelvis}) → COMBINED: ${result}`
+    );
+  }
+
+  return result;
 }
+// eslint-disable-next-line @typescript-eslint/no-namespace
+(computeTorsoAlignment as any)._lastLog = 0;
 
 function computeArm(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristicState {
   const m = side === 'L' ? va.armLineQualityL : va.armLineQualityR;
