@@ -23,7 +23,8 @@ import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import { createBlockedPacket, TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { framePump, FrameTickEvent } from '../services/framePump';
 import { overlayStabilizer } from '../services/overlayStabilizer';
-import { capabilityTierManager } from '../services/capabilityTier';
+import { buildPausedTeacherOverlayEvidence, clonePausedCacheLandmarks, findExactCachedPoseLandmarks, shouldRefreshAnalysisForPosePacket } from '../services/pausedTeacherOverlayEvidence';
+import { capabilityTierManager, CapabilityManager } from '../services/capabilityTier';
 import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
@@ -758,8 +759,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // inside the explicit 66.7ms two-frame render tolerance so normal
               // scheduler jitter cannot produce a one-frame blank canvas.
               const nowMs = performance.now();
-              const ANALYSIS_INTERVAL_MS = 50;
-              if (nowMs - lastAnalysisTimeRef.current >= ANALYSIS_INTERVAL_MS || !cachedAnalysisRef.current) {
+              const packetMediaTimeUs = packet?.mediaTimeUs ?? 0;
+              if (shouldRefreshAnalysisForPosePacket(
+                cachedAnalysisRef.current?.packetMediaTimeUs ?? null,
+                packetMediaTimeUs,
+                nowMs - lastAnalysisTimeRef.current,
+              )) {
                 lastAnalysisTimeRef.current = nowMs;
                 const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
                 const motionCls2 = vaganovaMotionClassifier.classify(lm);
@@ -775,7 +780,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   sk: sk2, motionCls: motionCls2, cogPt: cogPt2,
                   vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
                   epaul: epaul2, footAl: footAl2, wDist: wDist2,
-                  packetMediaTimeUs: packet?.mediaTimeUs ?? 0,
+                  packetMediaTimeUs,
                 };
               }
 
@@ -805,9 +810,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 if (currentMode === 'lehrer-ampel') {
                   const analysisChanged = c.packetMediaTimeUs !== lastStabilizedAnalysisTimeRef.current;
                   if (analysisChanged) {
-                    const cap = capabilityTierManager;
-                    const clockCap = cap?.frameClock ?? cap?.getTier?.() ?? 'A';
-                    const canColor = typeof clockCap === 'string' && clockCap !== 'unavailable' && clockCap !== 'C';
+                    const canColor = CapabilityManager.canOutputColors(
+                      capabilityTierManager.frameClock,
+                    );
                     if (canColor) {
                       const analysisFramePtsSeconds = c.packetMediaTimeUs / 1_000_000;
                       const rawPacket = teacherHeuristicEngine.compute(
@@ -1032,7 +1037,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       landmarksRef.current = landmarks;
       worldLandmarksRef.current = worldLandmarks ?? null;
       cachedAnalysisRef.current = null;
-      lastStabilizedAnalysisTimeRef.current = -1;
+      activeCueGlowTypeRef.current = undefined;
+      const cacheDimensions = vaganovaFrameCache.getVideoDimensions(capturedSourceId);
+      stabilizedOverlayRef.current = buildPausedTeacherOverlayEvidence({
+        source,
+        frames: vaganovaFrameCache.getFrames(capturedSourceId),
+        targetPtsSeconds: capturedTime,
+        streamEpoch: capturedEpoch,
+        generation: capturedGeneration,
+        videoWidth: capturedVideo.videoWidth || 0,
+        videoHeight: capturedVideo.videoHeight || 0,
+        cacheVideoWidth: cacheDimensions.vw,
+        cacheVideoHeight: cacheDimensions.vh,
+        canOutputColors: CapabilityManager.canOutputColors(
+          capabilityTierManager.frameClock,
+        ),
+      });
+      // The paused packet was derived from causal neighboring cache frames and
+      // the exact target. Reuse it rather than aging a still frame by wall time.
+      lastStabilizedAnalysisTimeRef.current = capturedMediaTimeUs;
       poseDropoutStartedAtRef.current = null;
       setDetectedLandmarks(landmarks);
       setDetectedWorldLandmarks(worldLandmarks ?? null);
@@ -1040,11 +1063,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       staticFrameRetryCountRef.current = 0;
     };
 
-    const cached = vaganovaFrameCache.getFrame(capturedSourceId, capturedTime);
-    if (cached) {
-      const smoothed = vaganovaPoseEngine.smoothLandmarks(cached, capturedTime);
-      if (smoothed) acceptPose(smoothed, 'frame_cache');
-      else acceptNoPose();
+    const cachedFrames = vaganovaFrameCache.getFrames(capturedSourceId);
+    const exactCached = findExactCachedPoseLandmarks(cachedFrames, capturedTime);
+    if (exactCached) {
+      // Exact cached evidence is also the exact rendered geometry. Interpolated
+      // fallback geometry is allowed for display, but its paused colors remain
+      // neutral because the evidence builder requires an exact cache PTS.
+      acceptPose(clonePausedCacheLandmarks(exactCached), 'frame_cache');
+      return;
+    }
+    const interpolatedCached = vaganovaFrameCache.getFrame(capturedSourceId, capturedTime);
+    if (interpolatedCached) {
+      acceptPose(clonePausedCacheLandmarks(interpolatedCached), 'frame_cache');
       return;
     }
 
