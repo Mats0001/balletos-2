@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
+import { StrictMode, createElement, type ReactNode } from 'react';
 import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import type { AnnotationEntry } from '../components/AnnotationLightbox';
 
@@ -36,13 +37,18 @@ function makeEntry(overrides: Partial<AnnotationEntry> = {}): AnnotationEntry {
 // ---------------------------------------------------------------------------
 
 let mockStore: Record<string, string> = {};
+let mockWrites: Array<{ key: string; value: string }> = [];
 
 beforeEach(() => {
   mockStore = {};
+  mockWrites = [];
 
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => mockStore[key] ?? null,
-    setItem: (key: string, value: string) => { mockStore[key] = value; },
+    setItem: (key: string, value: string) => {
+      mockWrites.push({ key, value });
+      mockStore[key] = value;
+    },
     removeItem: (key: string) => { delete mockStore[key]; },
     clear: () => { mockStore = {}; },
     get length() { return Object.keys(mockStore).length; },
@@ -243,5 +249,180 @@ describe('useUndoableAnnotations', () => {
     );
     expect(stored).toHaveLength(1);
     expect(stored[0].id).toBe('p1');
+  });
+
+  it('never writes the outgoing video entries under the incoming key', () => {
+    const entryA = makeEntry({ id: 'write-a', studentName: 'Video A' });
+    const entryB = makeEntry({ id: 'write-b', studentName: 'Video B' });
+    mockStore.balletos_annotations_videoA = JSON.stringify([entryA]);
+    mockStore.balletos_annotations_videoB = JSON.stringify([entryB]);
+
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+    expect(result.current.entries).toEqual([entryA]);
+
+    mockWrites = [];
+    rerender({ videoId: 'videoB' });
+
+    const writesToB = mockWrites.filter(
+      ({ key }) => key === 'balletos_annotations_videoB',
+    );
+    expect(writesToB.length).toBeGreaterThan(0);
+    writesToB.forEach(({ value }) => {
+      expect(JSON.parse(value)).toEqual([entryB]);
+    });
+    expect(result.current.entries).toEqual([entryB]);
+    expect(JSON.parse(mockStore.balletos_annotations_videoB)).toEqual([entryB]);
+  });
+
+  it('rejects a stale push after switching videos', () => {
+    const entryA = makeEntry({ id: 'stale-a' });
+    const entryB = makeEntry({ id: 'stable-b' });
+    mockStore.balletos_annotations_videoB = JSON.stringify([entryB]);
+
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+    const stalePush = result.current.push;
+
+    rerender({ videoId: 'videoB' });
+    let accepted: boolean | undefined;
+    act(() => { accepted = stalePush([entryA]); });
+
+    expect(accepted).toBe(false);
+    expect(result.current.entries).toEqual([entryB]);
+    expect(JSON.parse(mockStore.balletos_annotations_videoB)).toEqual([entryB]);
+  });
+
+  it('rejects an old callback after switching away and back to the same video', () => {
+    const staleEntryA = makeEntry({ id: 'stale-roundtrip-a' });
+    const currentEntryA = makeEntry({ id: 'current-roundtrip-a' });
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+    const stalePush = result.current.push;
+
+    rerender({ videoId: 'videoB' });
+    rerender({ videoId: 'videoA' });
+    act(() => { result.current.push([currentEntryA]); });
+
+    let accepted: boolean | undefined;
+    act(() => { accepted = stalePush([staleEntryA]); });
+
+    expect(accepted).toBe(false);
+    expect(result.current.entries).toEqual([currentEntryA]);
+    expect(JSON.parse(mockStore.balletos_annotations_videoA)).toEqual([currentEntryA]);
+  });
+
+  it('accepts the current video push after switching videos', () => {
+    const entryB = makeEntry({ id: 'current-b' });
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+
+    rerender({ videoId: 'videoB' });
+    let accepted: boolean | undefined;
+    act(() => { accepted = result.current.push([entryB]); });
+
+    expect(accepted).toBe(true);
+    expect(result.current.entries).toEqual([entryB]);
+    expect(JSON.parse(mockStore.balletos_annotations_videoB)).toEqual([entryB]);
+  });
+
+  it('ignores stale update, undo, and redo callbacks after a video switch', () => {
+    const entryA = makeEntry({ id: 'callback-a', note: 'A' });
+    const entryB = makeEntry({ id: 'callback-b', note: 'B' });
+    mockStore.balletos_annotations_videoB = JSON.stringify([entryB]);
+
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+    act(() => { result.current.push([entryA]); });
+    const staleUpdate = result.current.updateEntry;
+    const staleUndo = result.current.undo;
+    const staleRedo = result.current.redo;
+
+    rerender({ videoId: 'videoB' });
+    act(() => {
+      staleUpdate(entryB.id, { note: 'changed by A' });
+      staleUndo();
+      staleRedo();
+    });
+
+    expect(result.current.entries).toEqual([entryB]);
+    expect(result.current.canUndo).toBe(false);
+    expect(result.current.canRedo).toBe(false);
+    expect(JSON.parse(mockStore.balletos_annotations_videoB)).toEqual([entryB]);
+  });
+
+  it('keeps video storage isolated under React StrictMode', () => {
+    const entryA = makeEntry({ id: 'strict-a' });
+    const entryB = makeEntry({ id: 'strict-b' });
+    mockStore.balletos_annotations_videoA = JSON.stringify([entryA]);
+    mockStore.balletos_annotations_videoB = JSON.stringify([entryB]);
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(StrictMode, null, children);
+
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' }, wrapper },
+    );
+    expect(result.current.entries).toEqual([entryA]);
+
+    mockWrites = [];
+    rerender({ videoId: 'videoB' });
+
+    expect(result.current.entries).toEqual([entryB]);
+    const writesToB = mockWrites.filter(
+      ({ key }) => key === 'balletos_annotations_videoB',
+    );
+    expect(writesToB.length).toBeGreaterThan(0);
+    writesToB.forEach(({ value }) => {
+      expect(JSON.parse(value)).toEqual([entryB]);
+    });
+  });
+
+  it('rejects every stale callback across repeated video revisits', () => {
+    const currentEntryA = makeEntry({ id: 'multi-current-a' });
+    const staleEntries = [
+      makeEntry({ id: 'multi-stale-a1' }),
+      makeEntry({ id: 'multi-stale-b1' }),
+      makeEntry({ id: 'multi-stale-c1' }),
+      makeEntry({ id: 'multi-stale-b2' }),
+    ];
+    const { result, rerender } = renderHook(
+      ({ videoId }: { videoId: string }) => useUndoableAnnotations(videoId),
+      { initialProps: { videoId: 'videoA' } },
+    );
+    const stalePushes = [result.current.push];
+
+    rerender({ videoId: 'videoB' });
+    stalePushes.push(result.current.push);
+    rerender({ videoId: 'videoC' });
+    stalePushes.push(result.current.push);
+    rerender({ videoId: 'videoB' });
+    stalePushes.push(result.current.push);
+    rerender({ videoId: 'videoA' });
+
+    let acceptedCurrent: boolean | undefined;
+    act(() => { acceptedCurrent = result.current.push([currentEntryA]); });
+    expect(acceptedCurrent).toBe(true);
+
+    const staleResults: boolean[] = [];
+    stalePushes.forEach((stalePush, index) => {
+      act(() => {
+        staleResults.push(stalePush([staleEntries[index]]));
+      });
+    });
+
+    expect(staleResults).toEqual([false, false, false, false]);
+    expect(result.current.entries).toEqual([currentEntryA]);
+    expect(JSON.parse(mockStore.balletos_annotations_videoA)).toEqual([currentEntryA]);
   });
 });

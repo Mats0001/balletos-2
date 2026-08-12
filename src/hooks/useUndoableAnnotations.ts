@@ -19,7 +19,7 @@
  *   canRedo      – true when future is non-empty
  */
 
-import { useReducer, useCallback, useEffect, useRef } from 'react';
+import { useReducer, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import type { AnnotationEntry } from '../components/AnnotationLightbox';
 
 // ---------------------------------------------------------------------------
@@ -66,27 +66,38 @@ function saveToStorage(videoId: string, entries: AnnotationEntry[]): void {
 // ---------------------------------------------------------------------------
 
 interface UndoableState {
+  videoId: string;
+  generation: number;
   past: AnnotationEntry[][];
   present: AnnotationEntry[];
   future: AnnotationEntry[][];
 }
 
 type UndoableAction =
-  | { type: 'PUSH'; entries: AnnotationEntry[] }
-  | { type: 'UPDATE_ENTRY'; id: string; partial: Partial<AnnotationEntry> }
-  | { type: 'UNDO' }
-  | { type: 'REDO' }
-  | { type: 'RESET'; present: AnnotationEntry[] };
+  | { type: 'PUSH'; videoId: string; generation: number; entries: AnnotationEntry[] }
+  | { type: 'UPDATE_ENTRY'; videoId: string; generation: number; id: string; partial: Partial<AnnotationEntry> }
+  | { type: 'UNDO'; videoId: string; generation: number }
+  | { type: 'REDO'; videoId: string; generation: number }
+  | { type: 'RESET'; videoId: string; generation: number; present: AnnotationEntry[] };
 
 function undoableReducer(
   state: UndoableState,
   action: UndoableAction,
 ): UndoableState {
+  if (
+    action.type !== 'RESET'
+    && (action.videoId !== state.videoId || action.generation !== state.generation)
+  ) {
+    return state;
+  }
+
   switch (action.type) {
     // ----- Push new entries as present, record history -----
     case 'PUSH': {
       const newPast = [...state.past, state.present].slice(-HISTORY_LIMIT);
       return {
+        videoId: state.videoId,
+        generation: state.generation,
         past: newPast,
         present: action.entries,
         future: [],
@@ -106,6 +117,8 @@ function undoableReducer(
 
       const newPast = [...state.past, state.present].slice(-HISTORY_LIMIT);
       return {
+        videoId: state.videoId,
+        generation: state.generation,
         past: newPast,
         present: updated,
         future: [],
@@ -118,6 +131,8 @@ function undoableReducer(
       const previous = state.past[state.past.length - 1];
       const newPast = state.past.slice(0, -1);
       return {
+        videoId: state.videoId,
+        generation: state.generation,
         past: newPast,
         present: previous,
         future: [state.present, ...state.future],
@@ -130,6 +145,8 @@ function undoableReducer(
       const next = state.future[0];
       const newFuture = state.future.slice(1);
       return {
+        videoId: state.videoId,
+        generation: state.generation,
         past: [...state.past, state.present],
         present: next,
         future: newFuture,
@@ -139,6 +156,8 @@ function undoableReducer(
     // ----- Full reset (video switch): load new present, clear history -----
     case 'RESET': {
       return {
+        videoId: action.videoId,
+        generation: action.generation,
         past: [],
         present: action.present,
         future: [],
@@ -157,8 +176,8 @@ function undoableReducer(
 export interface UseUndoableAnnotationsResult {
   /** Current annotation entries. */
   entries: AnnotationEntry[];
-  /** Replace the entire entry list (records undo history). */
-  push: (newEntries: AnnotationEntry[]) => void;
+  /** Replace the entire entry list (records undo history when the video is still active). */
+  push: (newEntries: AnnotationEntry[]) => boolean;
   /** Patch a single entry by id (records undo history). */
   updateEntry: (id: string, partial: Partial<AnnotationEntry>) => void;
   /** Step backward in history. */
@@ -183,58 +202,102 @@ export interface UseUndoableAnnotationsResult {
 export function useUndoableAnnotations(
   stableVideoId: string,
 ): UseUndoableAnnotationsResult {
-  // Track the previous video ID so we can persist before switching.
-  const prevVideoIdRef = useRef<string>(stableVideoId);
+  const activeScopeRef = useRef({ videoId: stableVideoId, generation: 0 });
 
   // Initialise state lazily from localStorage on first render.
   const [state, dispatch] = useReducer(undoableReducer, stableVideoId, (id) => ({
+    videoId: id,
+    generation: 0,
     past: [],
     present: loadFromStorage(id),
     future: [],
   }));
 
   // ------ Video ID change: save outgoing, load incoming ------
-  useEffect(() => {
-    if (prevVideoIdRef.current !== stableVideoId) {
-      // Persist the outgoing video's present state.
-      saveToStorage(prevVideoIdRef.current, state.present);
-      prevVideoIdRef.current = stableVideoId;
-
-      // Load the incoming video's annotations and reset history.
-      dispatch({ type: 'RESET', present: loadFromStorage(stableVideoId) });
+  useLayoutEffect(() => {
+    if (state.videoId !== stableVideoId) {
+      saveToStorage(state.videoId, state.present);
+      const nextGeneration = activeScopeRef.current.generation + 1;
+      activeScopeRef.current = {
+        videoId: stableVideoId,
+        generation: nextGeneration,
+      };
+      dispatch({
+        type: 'RESET',
+        videoId: stableVideoId,
+        generation: nextGeneration,
+        present: loadFromStorage(stableVideoId),
+      });
+      return;
     }
-    // We intentionally depend only on stableVideoId here. Reading
-    // state.present inside this effect is safe because the save targets the
-    // *previous* video ID, which is only relevant at the moment the ID
-    // changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stableVideoId]);
+
+    activeScopeRef.current = {
+      videoId: state.videoId,
+      generation: state.generation,
+    };
+  }, [stableVideoId, state.videoId, state.generation, state.present]);
 
   // ------ Persist present to localStorage on every change ------
   useEffect(() => {
-    saveToStorage(stableVideoId, state.present);
-  }, [stableVideoId, state.present]);
+    saveToStorage(state.videoId, state.present);
+  }, [state.videoId, state.present]);
 
   // ------ Stable callbacks ------
 
   const push = useCallback((newEntries: AnnotationEntry[]) => {
-    dispatch({ type: 'PUSH', entries: newEntries });
-  }, []);
+    if (
+      activeScopeRef.current.videoId !== state.videoId
+      || activeScopeRef.current.generation !== state.generation
+    ) return false;
+    dispatch({
+      type: 'PUSH',
+      videoId: state.videoId,
+      generation: state.generation,
+      entries: newEntries,
+    });
+    return true;
+  }, [state.videoId, state.generation]);
 
   const updateEntry = useCallback(
     (id: string, partial: Partial<AnnotationEntry>) => {
-      dispatch({ type: 'UPDATE_ENTRY', id, partial });
+      if (
+        activeScopeRef.current.videoId !== state.videoId
+        || activeScopeRef.current.generation !== state.generation
+      ) return;
+      dispatch({
+        type: 'UPDATE_ENTRY',
+        videoId: state.videoId,
+        generation: state.generation,
+        id,
+        partial,
+      });
     },
-    [],
+    [state.videoId, state.generation],
   );
 
   const undo = useCallback(() => {
-    dispatch({ type: 'UNDO' });
-  }, []);
+    if (
+      activeScopeRef.current.videoId !== state.videoId
+      || activeScopeRef.current.generation !== state.generation
+    ) return;
+    dispatch({
+      type: 'UNDO',
+      videoId: state.videoId,
+      generation: state.generation,
+    });
+  }, [state.videoId, state.generation]);
 
   const redo = useCallback(() => {
-    dispatch({ type: 'REDO' });
-  }, []);
+    if (
+      activeScopeRef.current.videoId !== state.videoId
+      || activeScopeRef.current.generation !== state.generation
+    ) return;
+    dispatch({
+      type: 'REDO',
+      videoId: state.videoId,
+      generation: state.generation,
+    });
+  }, [state.videoId, state.generation]);
 
   return {
     entries: state.present,

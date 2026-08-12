@@ -1512,7 +1512,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         note: '',
       };
       const updated = [...annotationEntries, entry];
-      pushAnnotations(updated);
+      const accepted = pushAnnotations(updated);
+      if (!accepted) return;
       // Open lightbox showing the new entry
       setLightboxIndex(updated.length - 1);
       setLightboxOpen(true);
@@ -2458,6 +2459,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* 🎨 ANNOTATION DRAWING CANVAS – above skeleton, receives drawing events */}
                 {overlayBounds && overlayBounds.width > 0 && overlayBounds.height > 0 && (
                   <AnnotationCanvas
+                    key={`annotation:${selectedDevVideoUrl}`}
                     ref={annotationCanvasRef}
                     width={overlayBounds.width}
                     height={overlayBounds.height}
