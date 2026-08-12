@@ -213,6 +213,7 @@ export interface VaganovaFullAnalysis {
 
 export class VaganovaAngleCalculator {
   private static _lastIsoWarn = 0;
+  private static readonly GEOMETRY_EPSILON_PX = 0.000_001;
   // ─── Baseline tracking for relative valgus drift (per Asaeda 2024) ───────
   // Absolute valgus from webcam has ~19° systematic error vs Vicon.
   // We track session-start values and only report RELATIVE change.
@@ -242,16 +243,24 @@ export class VaganovaAngleCalculator {
     c: { x: number; y: number },
     vw: number,
     vh: number
-  ): number {
+  ): number | null {
+    if (![a.x, a.y, b.x, b.y, c.x, c.y, vw, vh].every(Number.isFinite)) return null;
+    if (vw <= 0 || vh <= 0) return null;
     // Convert to pixel space before computing angle
     const ax = a.x * vw, ay = a.y * vh;
     const bx = b.x * vw, by = b.y * vh;
     const cx = c.x * vw, cy = c.y * vh;
+    const firstLength = Math.hypot(ax - bx, ay - by);
+    const secondLength = Math.hypot(cx - bx, cy - by);
+    if (
+      firstLength <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+      || secondLength <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+    ) return null;
     let angle = Math.abs(
       (Math.atan2(cy - by, cx - bx) - Math.atan2(ay - by, ax - bx)) * (180 / Math.PI)
     );
     if (angle > 180) angle = 360 - angle;
-    return angle; // normalized to 0-180
+    return Number.isFinite(angle) ? angle : null; // normalized to 0-180
   }
 
   private angleTilt(
@@ -259,12 +268,18 @@ export class VaganovaAngleCalculator {
     bottom: { x: number; y: number },
     vw: number,
     vh: number
-  ): number {
+  ): number | null {
+    if (![top.x, top.y, bottom.x, bottom.y, vw, vh].every(Number.isFinite)) return null;
+    if (vw <= 0 || vh <= 0) return null;
     // Measures deviation from vertical (0° = perfectly vertical)
     // Convert to pixel space before atan2
     const tx = top.x * vw,    ty = top.y * vh;
     const bx = bottom.x * vw, by = bottom.y * vh;
-    return Math.abs(Math.atan2(bx - tx, by - ty) * (180 / Math.PI));
+    if (Math.hypot(bx - tx, by - ty) <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX) {
+      return null;
+    }
+    const angle = Math.abs(Math.atan2(bx - tx, by - ty) * (180 / Math.PI));
+    return Number.isFinite(angle) ? angle : null;
   }
 
   private distance2D(
@@ -272,11 +287,14 @@ export class VaganovaAngleCalculator {
     b: { x: number; y: number },
     vw: number,
     vh: number
-  ): number {
+  ): number | null {
+    if (![a.x, a.y, b.x, b.y, vw, vh].every(Number.isFinite)) return null;
+    if (vw <= 0 || vh <= 0) return null;
     // Returns distance in pixels (isotropic)
     const dx = (b.x - a.x) * vw;
     const dy = (b.y - a.y) * vh;
-    return Math.sqrt(dx * dx + dy * dy);
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    return Number.isFinite(distance) ? distance : null;
   }
 
   private midpoint(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number } {
@@ -287,7 +305,15 @@ export class VaganovaAngleCalculator {
     let minVis = 1;
     for (const i of indices) {
       const lm = landmarks[i];
-      if (!lm || lm.visibility === undefined) return 0;
+      if (
+        !lm
+        || !Number.isFinite(lm.x)
+        || !Number.isFinite(lm.y)
+        || lm.visibility === undefined
+        || !Number.isFinite(lm.visibility)
+        || lm.visibility < 0
+        || lm.visibility > 1
+      ) return 0;
       minVis = Math.min(minVis, lm.visibility);
     }
     return minVis;
@@ -299,6 +325,7 @@ export class VaganovaAngleCalculator {
     if (conf < 0.3) return null;
 
     const angle = this.angle3P(landmarks[hipIdx], landmarks[kneeIdx], landmarks[ankleIdx], vw, vh);
+    if (angle === null) return null;
     // P0-a FIX (Berater 2026-08-10): research_observation darf KEINE CORRECT/WARNING/ERROR erzeugen.
     // Ein Studienmittelwert (Fotaki: 134.98° ± 4.62°) ist KEIN Sollwert für Einzelpersonen.
     // DOI-Fix P0-e: 10.1371/journal.pone.0230654 ist Gorwa (Turnout), NICHT Plié.
@@ -332,7 +359,13 @@ export class VaganovaAngleCalculator {
 
     const haX = ax - hx, haY = ay - hy;
     const haLen = Math.sqrt(haX * haX + haY * haY);
-    if (haLen < 0.001) return null;
+    const hkLen = Math.hypot(kx - hx, ky - hy);
+    const kaLen = Math.hypot(ax - kx, ay - ky);
+    if (
+      haLen < 0.001
+      || hkLen <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+      || kaLen <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+    ) return null;
 
     const hkX = kx - hx, hkY = ky - hy;
     const crossProduct = haX * hkY - haY * hkX;
@@ -412,24 +445,27 @@ export class VaganovaAngleCalculator {
     if (heelConf >= 0.3) {
       const heel = landmarks[heelIdx];
       const toe = landmarks[toeIdx];
+      const heelDx = (toe.x - heel.x) * vw;
+      const heelDy = (toe.y - heel.y) * vh;
       // P0 FIX: pixel-space atan2
-      const footAngle = Math.abs(Math.atan2(
-        (toe.x - heel.x) * vw,
-        (toe.y - heel.y) * vh
-      ) * (180 / Math.PI));
-      return classify(footAngle, heelConf);
+      if (Math.hypot(heelDx, heelDy) > VaganovaAngleCalculator.GEOMETRY_EPSILON_PX) {
+        const footAngle = Math.abs(Math.atan2(heelDx, heelDy) * (180 / Math.PI));
+        if (Number.isFinite(footAngle)) return classify(footAngle, heelConf);
+      }
     }
 
     const ankleConf = this.getConfidence(landmarks, [ankleIdx, toeIdx]);
     if (ankleConf >= 0.3) {
       const ankle = landmarks[ankleIdx];
       const toe = landmarks[toeIdx];
+      const ankleDx = (toe.x - ankle.x) * vw;
+      const ankleDy = (toe.y - ankle.y) * vh;
+      if (Math.hypot(ankleDx, ankleDy) <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX) {
+        return null;
+      }
       // P0 FIX: pixel-space atan2
-      const footAngle = Math.abs(Math.atan2(
-        (toe.x - ankle.x) * vw,
-        (toe.y - ankle.y) * vh
-      ) * (180 / Math.PI));
-      return classify(footAngle, ankleConf * 0.8);
+      const footAngle = Math.abs(Math.atan2(ankleDx, ankleDy) * (180 / Math.PI));
+      return Number.isFinite(footAngle) ? classify(footAngle, ankleConf * 0.8) : null;
     }
 
     return null;
@@ -442,6 +478,7 @@ export class VaganovaAngleCalculator {
     const shMid = this.midpoint(landmarks[11], landmarks[12]);
     const hipMid = this.midpoint(landmarks[23], landmarks[24]);
     const angle = this.angleTilt(shMid, hipMid, vw, vh);
+    if (angle === null) return null;
 
     const { correctDeg, warningDeg } = VAGANOVA_NORMS.spine;
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
@@ -471,7 +508,12 @@ export class VaganovaAngleCalculator {
     const distL = this.distance2D(nose, earL, vw, vh);
     const distR = this.distance2D(nose, earR, vw, vh);
 
-    if (distL + distR < 0.001) return null;
+    if (
+      distL === null
+      || distR === null
+      || distL < 0.001
+      || distR < 0.001
+    ) return null;
 
     const ratio = distL / distR;
     // ratio > 1 = head turned right, ratio < 1 = head turned left
@@ -495,6 +537,7 @@ export class VaganovaAngleCalculator {
     if (conf < 0.3) return null;
 
     const angle = this.angle3P(landmarks[shIdx], landmarks[elIdx], landmarks[wrIdx], vw, vh);
+    if (angle === null) return null;
     return {
       value: angle,
       unit: 'deg',
@@ -512,6 +555,11 @@ export class VaganovaAngleCalculator {
     // P0 FIX: pixel-space dx/dy before atan2
     const dx = (landmarks[24].x - landmarks[23].x) * vw;
     const dy = (landmarks[24].y - landmarks[23].y) * vh;
+    if (
+      !Number.isFinite(dx)
+      || !Number.isFinite(dy)
+      || Math.hypot(dx, dy) <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+    ) return null;
     let angle = Math.abs(Math.atan2(dy, dx)) * (180 / Math.PI);
     if (angle > 90) angle = 180 - angle;
 
@@ -544,6 +592,11 @@ export class VaganovaAngleCalculator {
     // P0 FIX: pixel-space dx/dy before atan2
     const dx = (shR.x - shL.x) * vw;
     const dy = (shR.y - shL.y) * vh;
+    if (
+      !Number.isFinite(dx)
+      || !Number.isFinite(dy)
+      || Math.hypot(dx, dy) <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+    ) return null;
     // atan2(dy, dx) gibt den Winkel zur X-Achse (Horizontalen) zurück.
     // Bei horizontaler Linie: ~0° oder ~±180° (je nach dx-Vorzeichen).
     // Wir wollen die ABWEICHUNG von der Horizontalen (0-90°).
@@ -583,6 +636,11 @@ export class VaganovaAngleCalculator {
 
     const shoulder = landmarks[shIdx];
     const ear = landmarks[earIdx];
+    const shoulderEarDistance = this.distance2D(shoulder, ear, 1, 1);
+    if (
+      shoulderEarDistance === null
+      || shoulderEarDistance <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX
+    ) return null;
 
     // In image coords: Y increases downward.
     // Shoulder BELOW ear = normal (shoulder.y > ear.y)
@@ -624,6 +682,7 @@ export class VaganovaAngleCalculator {
     const wrist = landmarks[wrIdx];
 
     const elbowAngle = this.angle3P(shoulder, elbow, wrist, vw, vh);
+    if (elbowAngle === null) return null;
 
     // Elbow height relative to shoulder (normalized y is fine for this comparison)
     const elbowBelowShoulder = elbow.y - shoulder.y;
@@ -665,6 +724,7 @@ export class VaganovaAngleCalculator {
     const earMid = this.midpoint(landmarks[7], landmarks[8]);
     const shMid = this.midpoint(landmarks[11], landmarks[12]);
     const angle = this.angleTilt(earMid, shMid, vw, vh);
+    if (angle === null) return null;
 
     const status: 'CORRECT' | 'WARNING' | 'ERROR' =
       angle <= 2 ? 'CORRECT' : angle <= 5 ? 'WARNING' : 'ERROR';
@@ -687,6 +747,10 @@ export class VaganovaAngleCalculator {
 
     const hipMid = this.midpoint(landmarks[23], landmarks[24]);
     const ankleMid = this.midpoint(landmarks[27], landmarks[28]);
+    const axisLength = this.distance2D(hipMid, ankleMid, 1, 1);
+    if (axisLength === null || axisLength <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX) {
+      return null;
+    }
     const dx = Math.abs(hipMid.x - ankleMid.x);
 
     return {

@@ -17,7 +17,6 @@
  */
 
 import { VaganovaFullAnalysis } from './vaganovaAngleCalculator';
-import { vaganovaFootAnalyzer } from './vaganovaFootAnalyzer';
 import { ReconstructedSkeleton } from './vaganova3DKinematics';
 import {
   TeacherHeuristicState,
@@ -40,10 +39,12 @@ let _torsoLastLog = 0;
  *   – confidence < Mindest-Schwelle
  */
 function isEligible(
-  m: { measurement_class: string; confidence: number } | null | undefined,
+  m: { measurement_class: string; confidence: number; value: number } | null | undefined,
   minConfidence = 0.35
 ): boolean {
   if (!m) return false;
+  if (!Number.isFinite(m.value) || !Number.isFinite(m.confidence)) return false;
+  if (m.confidence < 0 || m.confidence > 1) return false;
   if (NEUTRAL_MEASUREMENT_CLASSES.has(m.measurement_class as any)) return false;
   if (m.measurement_class === 'validated_system_threshold') return false;
   if (m.confidence < minConfidence) return false;
@@ -65,18 +66,16 @@ function scoreToState(score: 0 | 1 | 2 | 3): TeacherHeuristicState {
 
 /**
  * Pessimistisch kombiniert mehrere States.
- * 'blocked' gewinnt nur wenn ALLE blocked.
- * Sonst: schlechtester nicht-blocked State.
+ * Jede fehlende Teilmessung blockiert den zusammengesetzten Befund.
  */
 function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
-  const nonBlocked = states.filter(s => s !== 'blocked');
-  if (nonBlocked.length === 0) return 'blocked';
+  if (states.some(s => s === 'blocked')) return 'blocked';
 
   // Pessimistisch: Der schlechteste nicht-blockierte Zustand gewinnt.
   // Begründung: Wenn EIN Bereich Aufmerksamkeit braucht, soll der
   // gesamte Torso-Rahmen das signalisieren — nicht durch Mehrheit verwässern.
-  if (nonBlocked.some(s => s === 'heuristic_strong_attention')) return 'heuristic_strong_attention';
-  if (nonBlocked.some(s => s === 'heuristic_attention')) return 'heuristic_attention';
+  if (states.some(s => s === 'heuristic_strong_attention')) return 'heuristic_strong_attention';
+  if (states.some(s => s === 'heuristic_attention')) return 'heuristic_attention';
   return 'heuristic_match';
 }
 
@@ -216,24 +215,11 @@ function computeLeg(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristic
  * Vorerst: nur dann nicht-blocked wenn Pose-Konfidenz ausreichend.
  */
 function computeFoot(
-  sk: ReconstructedSkeleton,
-  side: 'L' | 'R'
+  _sk: ReconstructedSkeleton,
+  _side: 'L' | 'R'
 ): TeacherHeuristicState {
-  const result = vaganovaFootAnalyzer.analyzeSickleWing(sk);
-  const foot = side === 'L' ? result.left : result.right;
-
-  if (!foot) return 'blocked';
-
-  // Direktes Mapping: FootAnalyzer Status → TeacherHeuristicState
-  // (FootAnalyzer-Gates prüfen bereits Landmark-Visibility)
-  if (foot.type === 'NEUTRAL') {
-    // Kein Sichel/Flügel sichtbar — aber NICHT automatisch heuristic_match
-    // „Fehlen eines Fehlers ≠ positiver Befund"
-    // Wir geben 'blocked' zurück solange kein positives Signal messbar ist
-    return 'blocked';
-  }
-  if (foot.status === 'ERROR')   return 'heuristic_strong_attention';
-  if (foot.status === 'WARNING') return 'heuristic_attention';
+  // A 2D shin/foot cross-product changes meaning with camera view and mirror
+  // state. Until both are explicit evidence, it has no traffic-light authority.
   return 'blocked';
 }
 
@@ -243,19 +229,10 @@ function computeFoot(
  * KEIN automatisches Grün — Abwesenheit eines Fehlers ≠ positiver Befund.
  */
 function computeCog(
-  sk: ReconstructedSkeleton,
+  _sk: ReconstructedSkeleton,
 ): TeacherHeuristicState {
-  const w = vaganovaFootAnalyzer.analyzeWeightDistribution(sk, 0);
-
-  // Fallback bei fehlenden Ankles: WeightDist gibt 'WARNING' mit label 'Zentriert'
-  // Das ist irreführend — wir geben stattdessen 'blocked' zurück
-  if (!sk.ankleL || !sk.ankleR) return 'blocked';
-
-  if (w.status === 'ERROR')   return 'heuristic_strong_attention';
-  if (w.status === 'WARNING') return 'heuristic_attention';
-  // CORRECT — aber nur wenn Ankles da und Berechnung valide
-  // Auch hier: erst mal 'blocked' bis wir echte Evidenz für heuristic_match haben
-  // (40-60% Balance ist "nicht auffällig" – noch kein positives Vaganova-Signal)
+  // Single-camera pose does not measure pressure or center of pressure. Keep
+  // this display proxy neutral until a dedicated evidence contract exists.
   return 'blocked';
 }
 
