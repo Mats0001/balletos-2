@@ -5,6 +5,16 @@
 **Policy-Version:** `0.2.0-teacher-ampel` (BUILD_POLICY.policyVersion)  
 **Status:** BINDEND – Produktionsimplementierung
 
+> **Technischer P0-Nachtrag, 2026-08-12:** Die unten dokumentierte
+> Bein-Heuristik ist vorläufig ausgesetzt. Ein reproduzierter Quellwechsel zeigte,
+> dass die globale Baseline denselben Zielframe allein durch vorherige Frames Rot
+> statt Grün färben konnte. Zudem sind `research_observation` und die aktuelle
+> vorzeichenbehaftete, aber richtungssemantisch nicht validierte
+> `individual_baseline` ausdrücklich keine Urteilsmetriken. `legL` und `legR`
+> bleiben daher neutral, bis ein von Nicole geprüfter, quell-/schülergebundener
+> DecisionGate Perspektive, Bewegungsphase und Richtungssemantik autorisiert.
+> Alle übrigen Teile dieser Entscheidung bleiben unverändert.
+
 ---
 
 ## Kernentscheid
@@ -22,7 +32,7 @@
 | Feature | Freigegeben |
 |---------|-------------|
 | `allowExperimentalTeacherTrafficLight` | **true** |
-| Vollständige Rot/Gelb/Grün-Heuristik im Lehrer-Modus | ✅ |
+| Rot/Gelb/Grün für evidenzautorisierte Regionen im Lehrer-Modus | ✅ |
 | Automatische Unterrichtshinweise und Priorisierung | ✅ |
 | KI-Cue-Vorschläge im Cue Point Manager | ✅ |
 | Nicoles persönlicher bevorzugter Modus speicherbar | ✅ |
@@ -72,12 +82,12 @@ wrong_camera, occluded, unassigned_person, insufficient_temporal_data
 
 ---
 
-## Lehrer-Ampel Bein-Heuristik (experimentell)
+## Lehrer-Ampel Bein-Heuristik (historischer Entwurf – technisch ausgesetzt)
 
-Da `knieFlexion` (research_observation) und `valgusDrift` (individual_baseline)
-keine direkten CORRECT/WARNING/ERROR-Status emittieren dürfen (Epistemologie!),
-wird im `skeletonCanvasRenderer.ts` eine separate `teacherLegStatus()` Funktion
-eingesetzt, die eine **heuristische Einschätzung** aus den Rohwerten ableitet:
+Da `knieFlexion` (research_observation) und `valgusDrift`
+(individual_baseline) keine direkten CORRECT/WARNING/ERROR-Status emittieren
+dürfen, sah der ursprüngliche Entwurf eine separate heuristische Einschätzung
+aus den Rohwerten vor:
 
 - `|knieFlexion| ≥ 165°` → CORRECT (gerades Standbein)
 - `|knieFlexion| ∈ [60°, 145°]` → CORRECT (Plié-Bereich)
@@ -87,7 +97,9 @@ eingesetzt, die eine **heuristische Einschätzung** aus den Rohwerten ableitet:
 - `|valgusDrift_delta| > 10°` → ERROR
 - Dominant: ERROR > WARNING > CORRECT > NEUTRAL
 
-Diese Heuristik ist **nicht validiert** und gilt ausschließlich im Lehrer-Ampelmodus.
+Diese Heuristik ist **nicht validiert** und seit dem P0-Nachtrag vom 2026-08-12
+nicht farbberechtigt. Die Rohmesswerte bleiben als neutrale Beobachtungswerte
+sichtbar; die Aussetzung verändert keine Messwerte.
 Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverändert.
 
 ---
@@ -97,7 +109,8 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 | Datei | Änderung |
 |-------|----------|
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
-| `src/services/skeletonCanvasRenderer.ts` | `statusColor()` gibt bei undefined → NEUTRAL; `teacherLegStatus()` Heuristik |
+| `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
+| `src/services/teacherHeuristicEngine.ts` | `legL`/`legR` bis zu einem kontextgebundenen DecisionGate → NEUTRAL |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | VaganovaCuePoint: provenance, nicoleAction, learnerVisible, parentVisible, kiSuggestionData |
 
@@ -105,7 +118,8 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 
 ## Abnahmekriterien (geprüft)
 
-- [x] Alle messbaren Metriken → Rot/Gelb/Grün im Lehrer-Ampelmodus
+- [x] Nur durch den aktuellen Evidenzvertrag autorisierte Regionen → Rot/Gelb/Grün im Lehrer-Ampelmodus
+- [x] Bein-Shadow-Metriken ohne Richtungs-/Kontextfreigabe → NEUTRAL
 - [x] `not_measurable`/`blocked` → niemals Grün (NEUTRAL grau)
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
 - [x] Moduswechsel verändert keine Rohmesswerte

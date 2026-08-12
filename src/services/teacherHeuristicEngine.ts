@@ -54,17 +54,6 @@ function isEligible(
 // ─── HEURISTIK-RESOLVER ─────────────────────────────────────────────────────
 
 /**
- * Einfacher numerischer Score → TeacherHeuristicState.
- * 0 = blocked, 1 = match, 2 = attention, 3 = strong_attention.
- */
-function scoreToState(score: 0 | 1 | 2 | 3): TeacherHeuristicState {
-  if (score === 0) return 'blocked';
-  if (score === 1) return 'heuristic_match';
-  if (score === 2) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
-}
-
-/**
  * Pessimistisch kombiniert mehrere States.
  * Jede fehlende Teilmessung blockiert den zusammengesetzten Befund.
  */
@@ -152,61 +141,12 @@ function computeArm(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristic
   return 'heuristic_strong_attention';
 }
 
-let _legLastLog = 0;
-
-function computeLeg(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristicState {
-  const knee  = side === 'L' ? va.knieFlexionL  : va.knieFlexionR;
-  const valgus = side === 'L' ? va.valgusDriftL  : va.valgusDriftR;
-
-  const kEligible = isEligible(knee);
-  const vEligible = isEligible(valgus);
-
-  if (!kEligible && !vEligible) return 'blocked';
-
-  let score: 0 | 1 | 2 | 3 = 0;
-
-  if (kEligible && knee) {
-    const kv = Math.abs(knee.value);
-    // Normaler Bereich: 30°–180° = alles OK (Plié, Tendu, Stehen)
-    // Nur extreme Überbeugung (<30°) ist besorgniserregend
-    if (kv >= 30) score = Math.max(score, 1) as 0|1|2|3;
-    else          score = Math.max(score, 2) as 0|1|2|3;
-
-    // ⚠️ GUARD: Bei gestrecktem Bein (>150°) ist die Valgus-Messung
-    // unzuverlässig! 2D-Projektion erzeugt 29-35° Phantom-Drift.
-    // Valgus nur bei gebeugtem Knie (<150°) bewerten.
-    if (kv > 150 && vEligible) {
-      // Valgus bei Streckung → ignorieren, score bleibt bei knee-score
-    } else if (vEligible && valgus) {
-      const dv = Math.abs(valgus.value);
-      // Schwellen für 2D-Projektion (seitliche Kamera)
-      if (dv < 12)      score = Math.max(score, 1) as 0|1|2|3;
-      else if (dv < 20) score = Math.max(score, 2) as 0|1|2|3;
-      else              score = Math.max(score, 3) as 0|1|2|3;
-    }
-  } else if (vEligible && valgus) {
-    // Kein Knie-Daten → Valgus trotzdem bewerten (Fallback)
-    const dv = Math.abs(valgus.value);
-    if (dv < 12)      score = Math.max(score, 1) as 0|1|2|3;
-    else if (dv < 20) score = Math.max(score, 2) as 0|1|2|3;
-    else              score = Math.max(score, 3) as 0|1|2|3;
-  }
-
-  const result = scoreToState(score);
-
-  // 🔍 DEBUG: Bein-Werte loggen (alle 2s, wie TORSO)
-  const now = Date.now();
-  if (now - _legLastLog > 2000) {
-    _legLastLog = now;
-    const kvVal = knee ? Math.abs(knee.value).toFixed(1) : 'N/A';
-    const dvVal = valgus ? Math.abs(valgus.value).toFixed(1) : 'N/A';
-    const skipInfo = (knee && Math.abs(knee.value) > 150) ? ' [valgus SKIPPED: Bein gestreckt]' : '';
-    console.log(
-      `🦵 LEG ${side}: knee=${kvVal}° | valgus=${dvVal}°${skipInfo} → ${result}`
-    );
-  }
-
-  return result;
+function computeLeg(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
+  // The only current inputs are research_observation (knee flexion) and an
+  // directionally ambiguous individual_baseline delta. Both are display/shadow metrics and
+  // explicitly have no scoring authority. A context-aware DecisionGate must
+  // authorize a future leg color; until then the teacher overlay stays neutral.
+  return 'blocked';
 }
 
 /**

@@ -17,6 +17,19 @@ function measurement(value: number, confidence = 0.9): VaganovaMeasurement {
   };
 }
 
+function observation(
+  value: number,
+  measurementClass: 'research_observation' | 'individual_baseline',
+): VaganovaMeasurement {
+  return {
+    value,
+    confidence: 0.95,
+    unit: measurementClass === 'individual_baseline' ? 'delta_deg' : 'deg',
+    label: 'leg shadow metric',
+    measurement_class: measurementClass,
+  };
+}
+
 function analysis(overrides: Partial<VaganovaFullAnalysis> = {}): VaganovaFullAnalysis {
   return {
     knieFlexionL: null,
@@ -95,4 +108,19 @@ describe('TeacherHeuristicEngine evidence gates', () => {
     expect(packet.footR).toBe('blocked');
     expect(packet.cog).toBe('blocked');
   });
+
+  it.each([24, -24])(
+    'keeps research and directionally ambiguous baseline leg observations out of the traffic light (%s°)',
+    delta => {
+      const packet = engine.compute(analysis({
+        knieFlexionL: observation(142, 'research_observation'),
+        knieFlexionR: observation(170, 'research_observation'),
+        valgusDriftL: observation(delta, 'individual_baseline'),
+        valgusDriftR: observation(-delta, 'individual_baseline'),
+      }), skeleton, 1, 1000);
+
+      expect(packet.legL).toBe('blocked');
+      expect(packet.legR).toBe('blocked');
+    },
+  );
 });
