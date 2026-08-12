@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SkeletonJointPopover } from '../components/SkeletonJointPopover';
 import { JOINT_KNOWLEDGE } from '../services/skeletonJointKnowledge';
 import {
@@ -115,6 +115,26 @@ function renderTarget(
 }
 
 describe('SkeletonJointPopover evidence color semantics', () => {
+  it('offers versioned Nicole-reference saving only when explicitly wired for a bone', () => {
+    const target = getSkeletonTarget('bone.forearm_l')!;
+    const onSave = vi.fn(() => true);
+    render(
+      <SkeletonJointPopover
+        knowledge={JOINT_KNOWLEDGE[target.representativeLandmarkIndex]}
+        jointX={300}
+        jointY={300}
+        videoLeft={0}
+        containerHeight={700}
+        onClose={() => undefined}
+        landmarkIndex={target.representativeLandmarkIndex}
+        selectedTarget={target}
+        onSaveNicoleReference={onSave}
+        nicoleReferenceVersion={2}
+      />,
+    );
+    screen.getByText('Neue Nicole-Referenzversion speichern · aktuell V2').click();
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
   it('keeps the fixed popover fully inside a 390px viewport', () => {
     setViewportWidth(390);
     const { container } = renderJoint(100, analysis({}), undefined);

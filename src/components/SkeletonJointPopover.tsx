@@ -21,6 +21,8 @@ interface Props {
   containerHeight: number;
   onClose: () => void;
   onAddToCueManager?: () => boolean | void;
+  onSaveNicoleReference?: () => boolean | void;
+  nicoleReferenceVersion?: number;
   /** Live frame analysis – if provided, shows specific real-time measurements */
   vaganovaAnalysis?: VaganovaFullAnalysis | null;
   /** Landmark index for mapping to specific measurements */
@@ -99,6 +101,8 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   containerHeight,
   onClose,
   onAddToCueManager,
+  onSaveNicoleReference,
+  nicoleReferenceVersion,
   vaganovaAnalysis,
   landmarkIndex,
   groundedTeacherDraft,
@@ -463,11 +467,31 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         )}
 
         {/* FOOTER */}
-        <div style={{ padding: '7px 10px', borderTop: `1px solid ${color}18`, display: 'flex', gap: '5px' }}>
+        <div style={{ padding: '7px 10px', borderTop: `1px solid ${color}18`, display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
           {onAddToCueManager && (
             <button onClick={() => { if (onAddToCueManager() !== false) onClose(); }}
               style={{ flex: 1, background: `linear-gradient(135deg, ${color}25 0%, ${color}12 100%)`, border: `1px solid ${color}45`, color, borderRadius: '6px', padding: '5px 7px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}>
               {readyTorsoDraft ? 'Als Nicole-Entwurf übernehmen' : '+ Zum Cue-Manager'}
+            </button>
+          )}
+          {onSaveNicoleReference && (
+            <button
+              onClick={() => { onSaveNicoleReference(); }}
+              style={{
+                flex: '1 1 100%',
+                background: 'linear-gradient(135deg, rgba(34,211,238,0.18) 0%, rgba(34,211,238,0.08) 100%)',
+                border: '1px solid rgba(34,211,238,0.42)',
+                color: '#22d3ee',
+                borderRadius: '6px',
+                padding: '6px 7px',
+                fontSize: '9px',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              {nicoleReferenceVersion
+                ? `Neue Nicole-Referenzversion speichern · aktuell V${nicoleReferenceVersion}`
+                : 'Diesen Bone als Nicole-Referenzlinie speichern'}
             </button>
           )}
           <button onClick={onClose}

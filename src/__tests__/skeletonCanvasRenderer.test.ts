@@ -17,6 +17,8 @@ import type {
 import { createBlockedPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
 import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngine';
 import type { PoseLandmark } from '../services/realMediaPipePose';
+import { sha256Canonical } from '../services/cueReviewAudit';
+import { NICOLE_REFERENCE_DIGEST_ALGORITHM } from '../types/nicoleReferenceLine';
 
 const REGION_KEYS: TeacherOverlayRegionKey[] = [
   'torsoAlignment', 'spine', 'shoulder', 'pelvis',
@@ -37,11 +39,11 @@ interface StrokeRecord {
   dash: number[];
 }
 
-function createRecordingCanvas() {
+function createRecordingCanvas(cssWidth = 1000) {
   const strokes: StrokeRecord[] = [];
   let currentDash: number[] = [];
   const context = {
-    canvas: { width: 1000, height: 1000 },
+    canvas: { width: 1000, height: 1000, getBoundingClientRect: () => ({ width: cssWidth, height: cssWidth }) },
     strokeStyle: '#000000',
     fillStyle: '#000000',
     globalAlpha: 1,
@@ -70,6 +72,7 @@ function createRecordingCanvas() {
   const canvas = {
     width: 1000,
     height: 1000,
+    getBoundingClientRect: () => ({ width: cssWidth, height: cssWidth }),
     getContext: () => context,
   } as unknown as HTMLCanvasElement;
 
@@ -436,5 +439,65 @@ describe('trusted skeleton color contract', () => {
 
     expect(renderSelection(2_500_000)).toHaveLength(1);
     expect(renderSelection(2_400_000)).toHaveLength(0);
+  });
+
+  it('draws a Nicole-owned reference cyan, never green, and rejects stale frame identity', () => {
+    const renderReference = (mediaTimeUs: number, targetId: 'bone.forearm_l' | 'bone.forearm_r' = 'bone.forearm_l', tamper = false) => {
+      const { canvas, strokes } = createRecordingCanvas();
+      const guideCore = {
+        schemaVersion: 1 as const, recordId: 'record', versionId: 'version', versionNumber: 3,
+        videoSourceId: 'clip-a', targetId: 'bone.forearm_l' as const, targetKind: 'bone' as const, videoWidth: 1000, videoHeight: 1000,
+        sourceMediaTimeUs: 1_500_000, direction: { x: 1, y: 0 }, label: 'Nicole-Referenzlinie' as const, teacherId: 'nicole' as const,
+        versionDigest: 'a'.repeat(64), digestAlgorithm: NICOLE_REFERENCE_DIGEST_ALGORITHM,
+      };
+      const guide = { ...guideCore, guideDigest: sha256Canonical(guideCore) };
+      renderSkeletonToCanvas(
+        canvas, SKELETON, { x: 500, y: 520 }, {} as never, {} as never, {} as never, {} as never, {} as never,
+        {
+          showSkeleton: true, showMotionTrails: false, showCoG: false, showAngleArcs: false,
+          selectedJointId: 'left_elbow',
+          selectedSkeletonTarget: {
+            targetId, kind: 'bone', anchorNormalized: { x: 0.3, y: 0.3 }, sourceId: 'clip-a',
+            streamEpoch: 4, generation: 2, mediaTimeUs: 2_500_000, frameStatus: 'exact_cache_frame',
+          },
+          selectedTargetFrameContext: { sourceId: 'clip-a', streamEpoch: 4, generation: 2, mediaTimeUs },
+          nicoleReferenceGuide: tamper ? { ...guide, direction: { x: 0, y: 1 } } : guide,
+          nicoleReferenceFrameContext: { sourceId: 'clip-a', streamEpoch: 4, generation: 2, mediaTimeUs, videoWidth: 1000, videoHeight: 1000 },
+          isPlie: true, vaganovaAnalysis: rawAnalysis(0.95), overlayMode: 'anatomisch',
+        },
+      );
+      return strokes;
+    };
+
+    expect(renderReference(2_500_000).some(stroke => stroke.color === '#22d3ee' && stroke.dash.join(',') === '11,7')).toBe(true);
+    expect(renderReference(2_500_000).some(stroke => stroke.color === '#22c55e')).toBe(false);
+    expect(renderReference(2_400_000).some(stroke => stroke.color === '#22d3ee')).toBe(false);
+    expect(renderReference(2_500_000, 'bone.forearm_r').some(stroke => stroke.color === '#22d3ee')).toBe(false);
+    expect(renderReference(2_500_000, 'bone.forearm_l', true).some(stroke => stroke.color === '#22d3ee')).toBe(false);
+  });
+
+  it('keeps the Nicole label at least 10 CSS px on a DPR-scaled canvas', () => {
+    const { canvas } = createRecordingCanvas(500);
+    const context = canvas.getContext('2d') as unknown as { font: string };
+    const guideCore = {
+      schemaVersion: 1 as const, recordId: 'record', versionId: 'version', versionNumber: 1,
+      videoSourceId: 'clip-a', targetId: 'bone.forearm_l' as const, targetKind: 'bone' as const,
+      videoWidth: 1000, videoHeight: 1000, sourceMediaTimeUs: 1_000_000,
+      direction: { x: 1, y: 0 }, label: 'Nicole-Referenzlinie' as const, teacherId: 'nicole' as const,
+      versionDigest: 'a'.repeat(64), digestAlgorithm: NICOLE_REFERENCE_DIGEST_ALGORITHM,
+    };
+    renderSkeletonToCanvas(
+      canvas, SKELETON, { x: 500, y: 520 }, {} as never, {} as never, {} as never, {} as never, {} as never,
+      {
+        showSkeleton: true, showMotionTrails: false, showCoG: false, showAngleArcs: false,
+        selectedJointId: 'left_elbow',
+        selectedSkeletonTarget: { targetId: 'bone.forearm_l', kind: 'bone', anchorNormalized: { x: 0.3, y: 0.3 }, sourceId: 'clip-a', streamEpoch: 4, generation: 2, mediaTimeUs: 2_500_000, frameStatus: 'exact_cache_frame' },
+        selectedTargetFrameContext: { sourceId: 'clip-a', streamEpoch: 4, generation: 2, mediaTimeUs: 2_500_000 },
+        nicoleReferenceGuide: { ...guideCore, guideDigest: sha256Canonical(guideCore) },
+        nicoleReferenceFrameContext: { sourceId: 'clip-a', streamEpoch: 4, generation: 2, mediaTimeUs: 2_500_000, videoWidth: 1000, videoHeight: 1000 },
+        isPlie: true, vaganovaAnalysis: rawAnalysis(0.95), overlayMode: 'anatomisch',
+      },
+    );
+    expect(context.font).toContain('20px');
   });
 });

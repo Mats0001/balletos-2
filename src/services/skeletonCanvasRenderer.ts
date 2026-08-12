@@ -21,6 +21,8 @@ import type { GroundedAplombGuide, GroundedGuideFrameContext } from '../types/gr
 import { isGroundedAplombGuideCurrent } from './groundedTeacherDraftEngine';
 import { getSkeletonTarget, getSkeletonTargetPoints, isSkeletonPointUsable, isSkeletonTargetGeometryUsable } from './skeletonTargetRegistry';
 import type { SelectedSkeletonTarget, SkeletonTargetFrameContext } from '../types/skeletonTarget';
+import type { NicoleReferenceFrameContext, NicoleReferenceLineGuide } from '../types/nicoleReferenceLine';
+import { isNicoleReferenceGuideCurrent } from './nicoleReferenceLine';
 
 // ─── ANATOMISCHE FARBPALETTE (Berater 2026-08-10 – Sprint 1) ───
 // Farben kodieren Körperregionen, KEIN Status-Urteil.
@@ -176,6 +178,10 @@ export interface CanvasRenderOptions {
   selectedSkeletonTarget?: SelectedSkeletonTarget | null;
   /** Current frame identity used to reject stale selection chrome. */
   selectedTargetFrameContext?: SkeletonTargetFrameContext;
+  /** Nicole-owned direction for the exact selected bone. Never a traffic-light verdict. */
+  nicoleReferenceGuide?: NicoleReferenceLineGuide | null;
+  /** Current source/frame/dimension identity used to reject stale reference lines. */
+  nicoleReferenceFrameContext?: NicoleReferenceFrameContext;
   isPlie: boolean;
   /** Typisiert als VaganovaFullAnalysis statt any (Berater 2026-08-11) */
   vaganovaAnalysis: VaganovaFullAnalysis | null;
@@ -850,6 +856,56 @@ export function renderSkeletonToCanvas(
         drawLine(ctx, points[0].x, points[0].y, points[1].x, points[1].y, COLOR_SELECTED, 6, sx, sy);
       }
       ctx.restore();
+    }
+  }
+
+  // ─── NICOLE-REFERENZLINIE ───
+  // A saved teacher reference is a direction for this exact bone and video,
+  // not a universal ideal or an automatic correctness verdict. It is therefore
+  // cyan and dashed, never traffic-light green. The saved direction is anchored
+  // to the current bone start and scaled to its current displayed length.
+  if (isNicoleReferenceGuideCurrent(
+    opts.nicoleReferenceGuide,
+    selectedTarget,
+    opts.nicoleReferenceFrameContext,
+  )) {
+    const definition = getSkeletonTarget(opts.nicoleReferenceGuide.targetId);
+    if (definition?.kind === 'bone' && isSkeletonTargetGeometryUsable(sk, definition)) {
+      const points = getSkeletonTargetPoints(sk, definition);
+      const currentLength = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+      if (Number.isFinite(currentLength) && currentLength > 0) {
+        const targetX = points[0].x + opts.nicoleReferenceGuide.direction.x * currentLength;
+        const targetY = points[0].y + opts.nicoleReferenceGuide.direction.y * currentLength;
+        ctx.save();
+        ctx.globalAlpha = 0.98;
+        drawLine(ctx, points[0].x, points[0].y, targetX, targetY, 'rgba(0,0,0,0.72)', 9, sx, sy, [11, 7]);
+        drawLine(ctx, points[0].x, points[0].y, targetX, targetY, '#22d3ee', 4.5, sx, sy, [11, 7]);
+        const avgScale = (sx + sy) / 2;
+        // The canvas backing store is DPR-scaled. Keep the label at a readable
+        // CSS-equivalent size instead of treating 8 backing pixels as 8 CSS px.
+        const cssWidth = ctx.canvas.getBoundingClientRect?.().width ?? ctx.canvas.width;
+        const cssPixelRatio = cssWidth > 0 ? ctx.canvas.width / cssWidth : 1;
+        const fontSize = Math.max(10 * cssPixelRatio, 8 * avgScale);
+        const label = `Nicole · V${opts.nicoleReferenceGuide.versionNumber}`;
+        ctx.font = `bold ${fontSize}px Inter, system-ui, sans-serif`;
+        const labelWidth = ctx.measureText(label).width;
+        const margin = 6 * cssPixelRatio;
+        const labelX = Math.max(margin, Math.min((targetX + 8) * sx, ctx.canvas.width - labelWidth - margin * 2));
+        const labelY = Math.max(fontSize + margin, Math.min((targetY - 6) * sy, ctx.canvas.height - margin));
+        ctx.fillStyle = 'rgba(0,0,0,0.72)';
+        ctx.beginPath();
+        ctx.roundRect(
+          labelX - 4 * cssPixelRatio,
+          labelY - fontSize,
+          labelWidth + 8 * cssPixelRatio,
+          fontSize + 5 * cssPixelRatio,
+          4 * cssPixelRatio,
+        );
+        ctx.fill();
+        ctx.fillStyle = '#22d3ee';
+        ctx.fillText(label, labelX, labelY);
+        ctx.restore();
+      }
     }
   }
 

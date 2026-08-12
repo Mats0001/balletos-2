@@ -43,6 +43,12 @@ import {
 import type { SelectedSkeletonTarget, SkeletonTargetId } from '../types/skeletonTarget';
 import { cueReviewAuditIsValid, cueReviewExpectedState, projectCueReviewAudit } from '../services/cueReviewAudit';
 import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
+import {
+  getNicoleReferenceLine,
+  projectNicoleReferenceGuide,
+  saveNicoleReferenceLine,
+} from '../services/nicoleReferenceLine';
+import type { NicoleReferenceLineGuide } from '../types/nicoleReferenceLine';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -89,6 +95,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const activeCueGlowTypeRef = useRef<CanvasRenderOptions['glowType']>(undefined);
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
   const [showIdealOverlay, setShowIdealOverlay] = useState<boolean>(false);
+  /** Nicole-owned bone reference, kept separate from the provisional 2D guide. */
+  const [showNicoleReference, setShowNicoleReference] = useState<boolean>(false);
+  const [nicoleReferenceGuide, setNicoleReferenceGuide] = useState<NicoleReferenceLineGuide | null>(null);
+  /** Synchronous paint authority: interaction clears must win before the next rAF. */
+  const nicoleReferenceRenderRef = useRef<Readonly<{
+    show: boolean;
+    guide: NicoleReferenceLineGuide | null;
+  }>>({ show: false, guide: null });
+  const updateNicoleReference = useCallback((guide: NicoleReferenceLineGuide | null, show: boolean) => {
+    const visible = Boolean(guide) && show;
+    nicoleReferenceRenderRef.current = Object.freeze({ show: visible, guide });
+    setNicoleReferenceGuide(guide);
+    setShowNicoleReference(visible);
+  }, []);
   /** Toggle: Dim everything except focused joint (spotlight effect) */
   const [showFocusDim, setShowFocusDim] = useState<boolean>(true);
   /** Exact-frame teacher draft. It is deliberately not persisted or published. */
@@ -125,11 +145,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setSelectedJointId('');
     setClickedLandmarkIndex(undefined);
     setShowIdealOverlay(false);
+    updateNicoleReference(null, false);
     if (resetView) {
       setZoomLevel(1);
       setPanOffset({ x: 0, y: 0 });
     }
-  }, [updateGroundedTeacherDraft, updateSelectedSkeletonTarget]);
+  }, [updateGroundedTeacherDraft, updateNicoleReference, updateSelectedSkeletonTarget]);
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -235,6 +256,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     selectedSkeletonTarget,
     isPlaying,
     showIdealOverlay,
+    showNicoleReference,
+    nicoleReferenceGuide,
     showFocusDim,
   });
   useEffect(() => {
@@ -249,6 +272,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       selectedSkeletonTarget,
       isPlaying,
       showIdealOverlay,
+      showNicoleReference,
+      nicoleReferenceGuide,
       showFocusDim,
     };
   }, [
@@ -262,6 +287,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     selectedSkeletonTarget,
     isPlaying,
     showIdealOverlay,
+    showNicoleReference,
+    nicoleReferenceGuide,
     showFocusDim,
   ]);
 
@@ -1023,6 +1050,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     });
                     skeletonTargetRebindRef.current = null;
                     updateSelectedSkeletonTarget(selected);
+                    try {
+                      const savedReference = getNicoleReferenceLine(
+                        localStorage,
+                        selectedDevVideoUrlRef.current,
+                        target.id,
+                      );
+                      const savedGuide = projectNicoleReferenceGuide(savedReference);
+                      updateNicoleReference(savedGuide, Boolean(savedGuide));
+                    } catch {
+                      updateNicoleReference(null, false);
+                    }
                     setJointPopover({
                       targetId: target.id,
                       normalizedX: anchor.x,
@@ -1101,6 +1139,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     streamEpoch: c.streamEpoch,
                     generation: c.generation,
                     mediaTimeUs: c.packetMediaTimeUs,
+                  },
+                  nicoleReferenceGuide: !renderState.isPlaying && nicoleReferenceRenderRef.current.show
+                    ? nicoleReferenceRenderRef.current.guide
+                    : null,
+                  nicoleReferenceFrameContext: {
+                    sourceId: c.sourceId,
+                    streamEpoch: c.streamEpoch,
+                    generation: c.generation,
+                    mediaTimeUs: c.packetMediaTimeUs,
+                    videoWidth: c.videoWidth,
+                    videoHeight: c.videoHeight,
                   },
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: currentMode === 'lehrer-ampel' && overlayPacket
@@ -1581,6 +1630,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     });
 
     if (hit) {
+      updateNicoleReference(null, false);
       const resolvedNormX = hit.anchorNormalized.x;
       const resolvedNormY = hit.anchorNormalized.y;
 
@@ -2133,6 +2183,41 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     return Boolean(created);
   };
 
+  const handleSaveNicoleReference = () => {
+    const selected = selectedSkeletonTarget;
+    const target = selected ? getSkeletonTarget(selected.targetId) : null;
+    const cached = cachedAnalysisRef.current;
+    const posePacket = latestPacketRef.current;
+    const video = videoRef.current;
+    if (!selected || target?.kind !== 'bone' || !cached || !posePacket || !video || !video.paused) {
+      showAnalyseToast('Nicole-Referenz benötigt einen exakt pausierten Bone.');
+      return false;
+    }
+    try {
+      const record = saveNicoleReferenceLine({
+        storage: localStorage,
+        videoSourceId: selectedDevVideoUrl,
+        selectedTarget: selected,
+        posePacket,
+        frame: {
+          sourceId: cached.sourceId,
+          streamEpoch: cached.streamEpoch,
+          generation: cached.generation,
+          mediaTimeUs: cached.packetMediaTimeUs,
+          videoWidth: cached.videoWidth,
+          videoHeight: cached.videoHeight,
+        },
+      });
+      const guide = projectNicoleReferenceGuide(record);
+      updateNicoleReference(guide, Boolean(guide));
+      showAnalyseToast(`Nicole-Referenz V${record.versions.length} gespeichert · nur ${target.label}`);
+      return true;
+    } catch (error) {
+      showAnalyseToast(error instanceof Error ? error.message : 'Nicole-Referenz konnte nicht gespeichert werden.');
+      return false;
+    }
+  };
+
   const persistCueUpdate = (
     cueId: string,
     updates: Partial<VaganovaCuePoint>,
@@ -2590,10 +2675,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             <Compass size={12} />
           </button>
 
-          {/* Ideal-Overlay: Soll-Position als grüne Hilfslinie */}
+          {/* Provenienzgebundene 2D-Aplomb-Orientierung */}
           <button
             onClick={() => setShowIdealOverlay(!showIdealOverlay)}
-            title="Soll-Position: Zeigt grüne Hilfslinien für die ideale Haltung am selektierten Gelenk"
+            title="2D-Leitlinie: zeigt die vorläufige Aplomb-Orientierung nur bei abgesicherter Rumpfevidenz"
             style={{
               background: showIdealOverlay ? 'rgba(52,211,153,0.15)' : 'transparent',
               color: showIdealOverlay ? '#34d399' : 'rgba(255,255,255,0.45)',
@@ -2608,7 +2693,31 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             }}
           >
             <span style={{ fontSize: '13px' }}>◎</span>
-            <span>Ideal</span>
+            <span>2D-Leitlinie</span>
+          </button>
+
+          {/* Von Nicole am exakten Bone gespeicherte, versionierte Referenz */}
+          <button
+            onClick={() => updateNicoleReference(nicoleReferenceGuide, !showNicoleReference)}
+            disabled={!nicoleReferenceGuide || selectedSkeletonTarget?.frameStatus !== 'exact_cache_frame'}
+            title={nicoleReferenceGuide
+              ? `Nicole-Referenz V${nicoleReferenceGuide.versionNumber} für den ausgewählten Bone ein-/ausblenden`
+              : 'Für diesen ausgewählten Bone ist noch keine Nicole-Referenz gespeichert'}
+            style={{
+              background: showNicoleReference ? 'rgba(34,211,238,0.15)' : 'transparent',
+              color: nicoleReferenceGuide ? '#22d3ee' : 'rgba(255,255,255,0.22)',
+              border: showNicoleReference ? '1px solid rgba(34,211,238,0.35)' : '1px solid transparent',
+              padding: '5px 11px',
+              borderRadius: '9px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: nicoleReferenceGuide ? 'pointer' : 'not-allowed',
+              display: 'flex', alignItems: 'center', gap: '4px',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <span style={{ fontSize: '13px' }}>◇</span>
+            <span>Nicole-Referenz</span>
           </button>
 
           {/* Focus-Dim: Umgebung abdunkeln */}
@@ -3145,6 +3254,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   groundedTeacherDraft={groundedTeacherDraft}
                   onAddToCueManager={groundedTeacherDraft.kind === 'ready'
                     ? handleTakeOverGroundedDraft
+                    : undefined}
+                  onSaveNicoleReference={target.kind === 'bone'
+                    && selectedSkeletonTarget?.frameStatus === 'exact_cache_frame'
+                    ? handleSaveNicoleReference
+                    : undefined}
+                  nicoleReferenceVersion={nicoleReferenceGuide?.targetId === target.id
+                    ? nicoleReferenceGuide.versionNumber
                     : undefined}
                   onClose={() => clearSkeletonSelection()}
                 />
