@@ -13,6 +13,8 @@ import type {
   VaganovaMeasurement,
 } from '../services/vaganovaAngleCalculator';
 import { createBlockedPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
+import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngine';
+import type { PoseLandmark } from '../services/realMediaPipePose';
 
 const REGION_KEYS: TeacherOverlayRegionKey[] = [
   'torsoAlignment', 'spine', 'shoulder', 'pelvis',
@@ -43,12 +45,17 @@ function createRecordingCanvas() {
     globalAlpha: 1,
     lineWidth: 1,
     lineCap: 'butt',
+    save: () => undefined,
+    restore: () => undefined,
     clearRect: () => undefined,
     beginPath: () => undefined,
     moveTo: () => undefined,
     lineTo: () => undefined,
     arc: () => undefined,
     fill: () => undefined,
+    roundRect: () => undefined,
+    fillText: () => undefined,
+    measureText: (value: string) => ({ width: value.length * 8 }),
     setLineDash: (dash: number[]) => { currentDash = [...dash]; },
     stroke() {
       strokes.push({
@@ -273,5 +280,97 @@ describe('trusted skeleton color contract', () => {
 
     expect(strokes.some(({ color }) => color === '#ff6b6b')).toBe(false);
     expect(strokes.some(({ color }) => color === EXPECTED.blocked.color)).toBe(true);
+  });
+
+  it('draws the torso guide only for the current exact-frame grounded contract', () => {
+    const points: PoseLandmark[] = Array.from({ length: 33 }, (_, index) => ({
+      x: 0.2 + index * 0.01,
+      y: 0.3 + index * 0.005,
+      z: -index * 0.001,
+      visibility: 0.95,
+    }));
+    const overlay = createBlockedPacket(2.5, 42);
+    overlay.spine = 'heuristic_attention';
+    const draft = buildGroundedTeacherDraft({
+      targetJointId: 'spine_center',
+      isPaused: true,
+      exactCacheLandmarks: points,
+      posePacket: {
+        streamEpoch: 42,
+        frameSeq: 75,
+        mediaTimeUs: 2_500_000,
+        inferenceStartedAtMs: 1,
+        inferenceEndedAtMs: 2,
+        resultKind: 'pose',
+        landmarks: points.map(point => ({ ...point })),
+        avgVisibility: 0.95,
+        source: 'frame_cache',
+        generation: 7,
+        sourceId: '/videos/nicole_saal_1.mp4',
+        videoWidth: 960,
+        videoHeight: 1280,
+      },
+      analysis: rawAnalysis(0.95),
+      analysisMediaTimeUs: 2_500_000,
+      overlayPacket: overlay,
+      runtime: {
+        sourceId: '/videos/nicole_saal_1.mp4',
+        streamEpoch: 42,
+        generation: 7,
+        mediaTimeUs: 2_500_000,
+        videoWidth: 960,
+        videoHeight: 1280,
+        policyVersion: '0.2.0-teacher-ampel',
+      },
+    });
+    expect(draft.kind).toBe('ready');
+    if (draft.kind !== 'ready') return;
+
+    const renderGuide = (mediaTimeUs: number, includeGuide = true) => {
+      const { canvas, strokes } = createRecordingCanvas();
+      renderSkeletonToCanvas(
+        canvas,
+        SKELETON,
+        { x: 500, y: 520 },
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {
+          showSkeleton: true,
+          showMotionTrails: false,
+          showCoG: false,
+          showAngleArcs: false,
+          selectedJointId: 'spine_center',
+          showIdealOverlay: true,
+          groundedAplombGuide: includeGuide ? draft.guide : undefined,
+          groundedGuideFrameContext: {
+            ...readyInputContext,
+            mediaTimeUs,
+          },
+          isPlie: true,
+          vaganovaAnalysis: rawAnalysis(0.95),
+          overlayMode: 'anatomisch',
+        },
+      );
+      return strokes;
+    };
+    const readyInputContext = {
+      sourceId: '/videos/nicole_saal_1.mp4',
+      streamEpoch: 42,
+      generation: 7,
+      videoWidth: 960,
+      videoHeight: 1280,
+      policyVersion: '0.2.0-teacher-ampel',
+    };
+
+    const current = renderGuide(2_500_000);
+    const stale = renderGuide(2_400_000);
+    const missing = renderGuide(2_500_000, false);
+
+    expect(current.some(({ color, dash }) => color === '#22c55e' && dash.join(',') === '14,8')).toBe(true);
+    expect(stale.some(({ color }) => color === '#22c55e')).toBe(false);
+    expect(missing.some(({ color }) => color === '#22c55e')).toBe(false);
   });
 });

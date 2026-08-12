@@ -9,8 +9,21 @@ import {
   VaganovaFullAnalysis,
   VaganovaMeasurement,
 } from '../services/vaganovaAngleCalculator';
+import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngine';
+import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import { createBlockedPacket } from '../types/teacherHeuristic';
 
-afterEach(cleanup);
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    value: width,
+  });
+}
+
+afterEach(() => {
+  cleanup();
+  setViewportWidth(1024);
+});
 
 function analysis(kneeMeasurements: Partial<VaganovaFullAnalysis>): VaganovaFullAnalysis {
   return {
@@ -47,7 +60,11 @@ function measurable(status?: 'CORRECT' | 'WARNING' | 'ERROR'): VaganovaMeasureme
   };
 }
 
-function renderJoint(landmarkIndex: number, vaganovaAnalysis: VaganovaFullAnalysis | null) {
+function renderJoint(
+  landmarkIndex: number,
+  vaganovaAnalysis: VaganovaFullAnalysis | null,
+  groundedTeacherDraft?: GroundedTeacherDraft,
+) {
   return render(
     <SkeletonJointPopover
       knowledge={JOINT_KNOWLEDGE[landmarkIndex]}
@@ -58,11 +75,31 @@ function renderJoint(landmarkIndex: number, vaganovaAnalysis: VaganovaFullAnalys
       onClose={() => undefined}
       vaganovaAnalysis={vaganovaAnalysis}
       landmarkIndex={landmarkIndex}
+      groundedTeacherDraft={groundedTeacherDraft}
     />,
   );
 }
 
 describe('SkeletonJointPopover evidence color semantics', () => {
+  it('keeps the fixed popover fully inside a 390px viewport', () => {
+    setViewportWidth(390);
+    const { container } = renderJoint(100, analysis({}), undefined);
+    const popover = container.ownerDocument.querySelector('.skeleton-popover-scroll') as HTMLElement;
+
+    expect(popover.style.width).toBe('280px');
+    const left = 390 - Number.parseFloat(popover.style.right) - Number.parseFloat(popover.style.width);
+    expect(left).toBe(8);
+  });
+
+  it('preserves the canonical desktop popover position', () => {
+    setViewportWidth(1440);
+    const { container } = renderJoint(100, analysis({}), undefined);
+    const popover = container.ownerDocument.querySelector('.skeleton-popover-scroll') as HTMLElement;
+
+    expect(popover.style.width).toBe('280px');
+    expect(popover.style.right).toBe('356px');
+  });
+
   it('renders unavailable knee evidence neutral, never as correct', () => {
     renderJoint(25, analysis({
       valgusDriftL: {
@@ -132,5 +169,98 @@ describe('SkeletonJointPopover evidence color semantics', () => {
     expect(screen.getByText('Pädagogischer Kontext')).toBeTruthy();
     expect(screen.queryByText('Warum ist das problematisch?')).toBeNull();
     expect(screen.queryByText(/Pronation = oft Ursache|Theraband Knöchel-Kräftigung/i)).toBeNull();
+  });
+
+  it('renders the exact-frame torso draft as rich pending-Nicole coaching', () => {
+    const points = Array.from({ length: 33 }, (_, index) => ({
+      x: 0.2 + index * 0.01,
+      y: 0.3 + index * 0.005,
+      z: -index * 0.001,
+      visibility: 0.95,
+    }));
+    const torsoAnalysis = analysis({
+      spineTilt: {
+        value: 6.25,
+        unit: 'deg',
+        confidence: 0.91,
+        label: 'Aplomb',
+        measurement_class: 'vaganova_relation',
+      },
+    });
+    const overlay = createBlockedPacket(2.5, 42);
+    overlay.spine = 'heuristic_attention';
+    const draft = buildGroundedTeacherDraft({
+      targetJointId: 'spine_center',
+      isPaused: true,
+      exactCacheLandmarks: points,
+      posePacket: {
+        streamEpoch: 42,
+        frameSeq: 75,
+        mediaTimeUs: 2_500_000,
+        inferenceStartedAtMs: 1,
+        inferenceEndedAtMs: 2,
+        resultKind: 'pose',
+        landmarks: points.map(point => ({ ...point })),
+        avgVisibility: 0.95,
+        source: 'frame_cache',
+        generation: 7,
+        sourceId: '/videos/nicole_saal_1.mp4',
+        videoWidth: 960,
+        videoHeight: 1280,
+      },
+      analysis: torsoAnalysis,
+      analysisMediaTimeUs: 2_500_000,
+      overlayPacket: overlay,
+      runtime: {
+        sourceId: '/videos/nicole_saal_1.mp4',
+        streamEpoch: 42,
+        generation: 7,
+        mediaTimeUs: 2_500_000,
+        videoWidth: 960,
+        videoHeight: 1280,
+        policyVersion: '0.2.0-teacher-ampel',
+      },
+    });
+
+    renderJoint(100, torsoAnalysis, draft);
+
+    expect(screen.getByText('KI-Entwurf · Nicole prüft')).toBeTruthy();
+    expect(screen.getByText('Was wir sehen')).toBeTruthy();
+    expect(screen.getByText('Warum das technisch wichtig sein kann')).toBeTruthy();
+    expect(screen.getByText('Zielbild für Nicoles Prüfung')).toBeTruthy();
+    expect(screen.getByText('Üben & verbessern')).toBeTruthy();
+    expect(screen.getByText('Metapher / Bild')).toBeTruthy();
+    expect(screen.getByText('Technik für Nicole')).toBeTruthy();
+    expect(screen.getByText('Grenzen & Prüffragen')).toBeTruthy();
+    expect(screen.getAllByText(/6\.3°/)).toHaveLength(2);
+    expect(screen.queryByText('Oberkörper neigt sich beim Plie nach vorne oder zur Seite.')).toBeNull();
+    expect(screen.queryByText(/Beckenboden aktiv|10x/)).toBeNull();
+  });
+
+  it('renders a blocked torso as neutral only, never as legacy coaching', () => {
+    renderJoint(100, analysis({}), {
+      kind: 'blocked',
+      target: 'spine_center',
+      reason: 'exact_cache_frame_missing',
+      message: 'Für diesen Zeitpunkt liegt kein exakter Analyseframe vor.',
+    });
+
+    expect(screen.getByText('Noch keine gesicherte Frame-Evidenz')).toBeTruthy();
+    expect(screen.getByText('Für diesen Zeitpunkt liegt kein exakter Analyseframe vor.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Inhalt in Zwischenablage kopieren' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByText(/Beckenboden aktiv|10x|destabilisiert die Balance/i)).toBeNull();
+    expect(screen.queryByText('Vaganova-Standard')).toBeNull();
+    expect(screen.queryByText('Aplomb-Training an der Stange')).toBeNull();
+  });
+
+  it('fails closed when the torso draft prop is missing', () => {
+    renderJoint(100, analysis({}), undefined);
+
+    expect(screen.getByText('Noch keine gesicherte Frame-Evidenz')).toBeTruthy();
+    expect(screen.getByText('Für diesen Zeitpunkt liegt noch kein abgesicherter Lehrerentwurf vor.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Inhalt in Zwischenablage kopieren' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByText(/Beckenboden aktiv|10x|destabilisiert die Balance/i)).toBeNull();
+    expect(screen.queryByText('Vaganova-Standard')).toBeNull();
+    expect(screen.queryByText('Aplomb-Training an der Stange')).toBeNull();
   });
 });

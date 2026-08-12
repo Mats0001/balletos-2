@@ -32,6 +32,8 @@ import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPo
 import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
 import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeletonJointKnowledge';
+import { buildGroundedTeacherDraft, createBlockedGroundedTeacherDraft, findNearestExactPoseFrame, groundedTeacherDraftFingerprint } from '../services/groundedTeacherDraftEngine';
+import type { GroundedGuideFrameContext, GroundedTeacherDraft } from '../types/groundedTeacherDraft';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -76,6 +78,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [showIdealOverlay, setShowIdealOverlay] = useState<boolean>(false);
   /** Toggle: Dim everything except focused joint (spotlight effect) */
   const [showFocusDim, setShowFocusDim] = useState<boolean>(true);
+  /** Exact-frame teacher draft. It is deliberately not persisted or published. */
+  const [groundedTeacherDraft, setGroundedTeacherDraft] = useState<GroundedTeacherDraft>(
+    () => createBlockedGroundedTeacherDraft('target_not_selected'),
+  );
+  const groundedTeacherDraftRef = useRef<GroundedTeacherDraft>(groundedTeacherDraft);
+  const groundedTorsoDraftPendingRef = useRef(false);
+  const groundedTorsoSnapPendingRef = useRef(false);
+  const updateGroundedTeacherDraft = useCallback((draft: GroundedTeacherDraft) => {
+    if (
+      groundedTeacherDraftFingerprint(groundedTeacherDraftRef.current)
+      === groundedTeacherDraftFingerprint(draft)
+    ) return;
+    groundedTeacherDraftRef.current = draft;
+    setGroundedTeacherDraft(draft);
+  }, []);
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -546,6 +563,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       stabilizedOverlayRef.current = null;
       lastStabilizedAnalysisTimeRef.current = -1;
       activeCueGlowTypeRef.current = undefined;
+      groundedTorsoDraftPendingRef.current = false;
+      groundedTorsoSnapPendingRef.current = false;
+      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
       poseDropoutStartedAtRef.current = null;
       if (staticFrameRetryRef.current) {
         clearTimeout(staticFrameRetryRef.current);
@@ -587,6 +607,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       stabilizedOverlayRef.current = null; // Phase 8: cached stabilizer result
       lastStabilizedAnalysisTimeRef.current = -1;
       activeCueGlowTypeRef.current = undefined;
+      groundedTorsoDraftPendingRef.current = false;
+      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
+      if (!groundedTorsoSnapPendingRef.current) {
+        setJointPopover(null);
+        setSelectedJointId('');
+        setClickedLandmarkIndex(undefined);
+        setShowIdealOverlay(false);
+      }
       poseDropoutStartedAtRef.current = null;
       landmarksRef.current = null;
       vaganovaPoseEngine.reset();
@@ -600,6 +628,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // After seek completes: pump continues automatically (rVFC/rAF re-schedules)
       // No action needed – the seeking handler already cleared everything
       console.debug('[VideoAnalyzer] seeked – pump generation:', framePump.generation);
+      if (groundedTorsoSnapPendingRef.current) {
+        groundedTorsoSnapPendingRef.current = false;
+        groundedTorsoDraftPendingRef.current = true;
+        processStaticPausedFrame();
+      }
     };
     videoRef.current?.addEventListener('seeking', handleSeeking);
     videoRef.current?.addEventListener('seeked', handleSeeked);
@@ -895,6 +928,37 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   // Between analysis updates: reuse cached stabilized result
                 }
 
+                if (
+                  groundedTorsoDraftPendingRef.current
+                  && renderState.selectedJointId === 'spine_center'
+                  && v.paused
+                ) {
+                  const runtimeContext: GroundedGuideFrameContext = {
+                    sourceId: selectedDevVideoUrlRef.current,
+                    streamEpoch: streamEpochRef.current,
+                    generation: framePump.generation,
+                    mediaTimeUs: c.packetMediaTimeUs,
+                    videoWidth: v.videoWidth,
+                    videoHeight: v.videoHeight,
+                    policyVersion: BUILD_POLICY.policyVersion,
+                  };
+                  const refreshedDraft = buildGroundedTeacherDraft({
+                    targetJointId: 'spine_center',
+                    isPaused: true,
+                    exactCacheLandmarks: findExactCachedPoseLandmarks(
+                      vaganovaFrameCache.getFrames(runtimeContext.sourceId),
+                      c.packetMediaTimeUs / 1_000_000,
+                    ),
+                    posePacket: latestPacketRef.current,
+                    analysis: c.vagAn,
+                    analysisMediaTimeUs: c.packetMediaTimeUs,
+                    overlayPacket: overlayPacket ?? null,
+                    runtime: runtimeContext,
+                  });
+                  groundedTorsoDraftPendingRef.current = false;
+                  updateGroundedTeacherDraft(refreshedDraft);
+                }
+
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: renderState.showSkeleton,
                   showMotionTrails: renderState.showMotionTrails,
@@ -907,6 +971,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     ? activeCueGlowTypeRef.current
                     : undefined,
                   showIdealOverlay: !renderState.isPlaying && renderState.showIdealOverlay,
+                  groundedAplombGuide: groundedTeacherDraftRef.current.kind === 'ready'
+                    ? groundedTeacherDraftRef.current.guide
+                    : undefined,
+                  groundedGuideFrameContext: {
+                    sourceId: selectedDevVideoUrlRef.current,
+                    streamEpoch: streamEpochRef.current,
+                    generation: framePump.generation,
+                    mediaTimeUs: c.packetMediaTimeUs,
+                    videoWidth: v.videoWidth,
+                    videoHeight: v.videoHeight,
+                    policyVersion: BUILD_POLICY.policyVersion,
+                  },
                   showFocusDim: !renderState.isPlaying && renderState.showFocusDim,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
@@ -1185,6 +1261,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       preIndexRunRef.current += 1;
       setIsPreIndexing(false);
       setAnalysisReport(null);
+      groundedTorsoDraftPendingRef.current = false;
+      groundedTorsoSnapPendingRef.current = false;
+      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
+      setJointPopover(null);
+      setSelectedJointId('');
+      setClickedLandmarkIndex(undefined);
+      setShowIdealOverlay(false);
       selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(newVid.url));
@@ -1206,6 +1289,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     preIndexRunRef.current += 1;
     setIsPreIndexing(false);
     setAnalysisReport(null);
+    groundedTorsoDraftPendingRef.current = false;
+    groundedTorsoSnapPendingRef.current = false;
+    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
+    setJointPopover(null);
+    setSelectedJointId('');
+    setClickedLandmarkIndex(undefined);
+    setShowIdealOverlay(false);
     selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
     setCuePoints(vaganovaPreAnalyzer.getCuePoints(url));
@@ -1221,6 +1311,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // Phase 2 (Berater v2): Pre-invalidate BEFORE setting currentTime
       // This ensures no stale in-flight inference can contaminate the new frame
       framePump.bumpGeneration();
+      groundedTorsoDraftPendingRef.current = false;
+      groundedTorsoSnapPendingRef.current = false;
+      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
       latestPacketRef.current = null;
       // NOTE: cachedAnalysisRef is intentionally NOT cleared here.
       // The old analysis provides skeleton data for the glow animation
@@ -1286,6 +1379,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
     if (slowMoTimerRef.current) clearTimeout(slowMoTimerRef.current);
 
+    clearGroundedSelectionForPlayback();
     vid.currentTime = startAt;
     vid.playbackRate = 0.25;
     setPlaybackSpeed(0.25);
@@ -1454,8 +1548,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         normalizedY: resolvedNormY,
         // viewportX/Y removed: was causing drift on auto-zoom
       });
+      const wasPlaying = Boolean(videoRef.current && !videoRef.current.paused);
       // Pause video for better exploration
-      if (videoRef.current && !videoRef.current.paused) {
+      if (videoRef.current && wasPlaying) {
         videoRef.current.pause();
         setIsPlaying(false);
       }
@@ -1486,6 +1581,37 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (mappedJointId) {
         setSelectedJointId(mappedJointId);
         setClickedLandmarkIndex(nearestIdx);
+
+        if (mappedJointId === 'spine_center' && videoRef.current) {
+          const currentVideo = videoRef.current;
+          const nearestExactFrame = findNearestExactPoseFrame(
+            vaganovaFrameCache.getFrames(selectedDevVideoUrlRef.current),
+            currentVideo.currentTime,
+          );
+          if (!nearestExactFrame) {
+            groundedTorsoDraftPendingRef.current = false;
+            groundedTorsoSnapPendingRef.current = false;
+            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('exact_cache_frame_missing'));
+          } else if (Math.abs(nearestExactFrame.timeMs - currentVideo.currentTime * 1000) > 0.001) {
+            groundedTorsoSnapPendingRef.current = true;
+            groundedTorsoDraftPendingRef.current = false;
+            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
+            currentVideo.currentTime = nearestExactFrame.timeMs / 1000;
+            processStaticPausedFrame();
+          } else {
+            // Even at an already exact PTS, re-bind pose + analysis to that
+            // cached frame. This avoids depending on render-loop cadence or a
+            // prior live packet when Nicole clicks a paused skeleton.
+            groundedTorsoSnapPendingRef.current = false;
+            groundedTorsoDraftPendingRef.current = true;
+            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
+            processStaticPausedFrame();
+          }
+        } else {
+          groundedTorsoDraftPendingRef.current = false;
+          groundedTorsoSnapPendingRef.current = false;
+          updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
+        }
 
         // Determine glow type from current overlay packet state
         const pkt = stabilizedOverlayRef.current;
@@ -1533,6 +1659,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       }
     } else {
       setJointPopover(null);
+      groundedTorsoDraftPendingRef.current = false;
+      groundedTorsoSnapPendingRef.current = false;
+      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
     }
   };
 
@@ -1724,18 +1853,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         if (refVideoRef.current) refVideoRef.current.pause();
         processStaticPausedFrame();
       } else {
+        clearGroundedSelectionForPlayback();
         videoRef.current.play().catch(() => {});
         if (refVideoRef.current) refVideoRef.current.play().catch(() => {});
         // Reset zoom + cue-overlays when resuming playback
         setZoomLevel(1);
         setPanOffset({ x: 0, y: 0 });
-        setSelectedJointId('');
-        setClickedLandmarkIndex(undefined);
-        setShowIdealOverlay(false);
-        setJointPopover(null);
         setIsAnnotationModeActive(false);
       }
     }
+  };
+
+  const clearGroundedSelectionForPlayback = () => {
+    groundedTorsoDraftPendingRef.current = false;
+    groundedTorsoSnapPendingRef.current = false;
+    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('video_playing'));
+    setJointPopover(null);
+    setSelectedJointId('');
+    setClickedLandmarkIndex(undefined);
+    setShowIdealOverlay(false);
   };
 
   // Fullscreen: ganzer Panel (Video + Canvas + Scrubber)
@@ -2758,7 +2894,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   const dy = Math.abs(e.clientY - dragStartRef.current.y);
                   if (dx > 5 || dy > 5) return;
                 }
-                if (!isPlaying) handleSkeletonClick(e);
+                handleSkeletonClick(e);
               }}
               onMouseDown={(e) => {
                 // Always record start position (for click-vs-drag detection)
@@ -2802,7 +2938,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     processStaticPausedFrame();
                   }}
                   onSeeked={processStaticPausedFrame}
-                  onPause={processStaticPausedFrame}
+                  onPlay={() => {
+                    setIsPlaying(true);
+                    clearGroundedSelectionForPlayback();
+                  }}
+                  onPause={() => {
+                    setIsPlaying(false);
+                    processStaticPausedFrame();
+                  }}
                   style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }}
                 />
 
@@ -2926,7 +3069,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   containerHeight={window.innerHeight}
                   vaganovaAnalysis={vaganovaAnalysis}
                   landmarkIndex={jointPopover.landmarkIndex}
-                  onClose={() => setJointPopover(null)}
+                  groundedTeacherDraft={groundedTeacherDraft}
+                  onClose={() => {
+                    setJointPopover(null);
+                    groundedTorsoDraftPendingRef.current = false;
+                    groundedTorsoSnapPendingRef.current = false;
+                    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
+                  }}
                 />
               );
             })()}

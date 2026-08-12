@@ -17,6 +17,8 @@ import {
   heuristicDash,
 } from '../types/teacherHeuristic';
 import type { TeacherHeuristicState } from '../types/teacherHeuristic';
+import type { GroundedAplombGuide, GroundedGuideFrameContext } from '../types/groundedTeacherDraft';
+import { isGroundedAplombGuideCurrent } from './groundedTeacherDraftEngine';
 
 // ─── ANATOMISCHE FARBPALETTE (Berater 2026-08-10 – Sprint 1) ───
 // Farben kodieren Körperregionen, KEIN Status-Urteil.
@@ -127,6 +129,10 @@ export interface CanvasRenderOptions {
   glowType?: 'GOOD' | 'CORRECTION';
   /** Show ideal position overlay (green dashed guide) for selected joint */
   showIdealOverlay?: boolean;
+  /** Provenance-gated 2D Aplomb guide for the exact selected paused frame. */
+  groundedAplombGuide?: GroundedAplombGuide;
+  /** Current runtime identity used to reject stale or cross-video guides. */
+  groundedGuideFrameContext?: GroundedGuideFrameContext;
   /** Dim everything except the focused joint area (spotlight effect) */
   showFocusDim?: boolean;
   /** Index of the actually clicked landmark (for glow positioning) */
@@ -880,10 +886,18 @@ export function renderSkeletonToCanvas(
         break;
       }
       case 'spine_center': {
-        // APLOMB: Lotlinie vertikal bei pelvisCenter.x
-        // Kopf soll direkt darüber stehen (Vaganova Квадратност)
+        if (!isGroundedAplombGuideCurrent(
+          opts.groundedAplombGuide,
+          opts.groundedGuideFrameContext,
+        )) break;
+        // 2D orientation only. The evidence contract outside the renderer has
+        // already established source, exact PTS, dimensions and Nicole review.
         drawIdealLine(pelvisCenter.x, head.y - 15, pelvisCenter.x, pelvisCenter.y + 15);
-        drawIdealLabel('Lot', (pelvisCenter.x + 18) * sx, ((head.y + pelvisCenter.y) / 2) * sy);
+        drawIdealLabel(
+          'Aplomb-Orientierung (2D) · Nicole prüft',
+          (pelvisCenter.x + 18) * sx,
+          ((head.y + pelvisCenter.y) / 2) * sy,
+        );
         break;
       }
       case 'pelvis_core': {

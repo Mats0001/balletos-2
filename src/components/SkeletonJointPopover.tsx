@@ -7,6 +7,7 @@ import {
   VaganovaFullAnalysis,
   VaganovaMeasurement
 } from '../services/vaganovaAngleCalculator';
+import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
 
 interface Props {
   knowledge: JointKnowledge;
@@ -23,6 +24,8 @@ interface Props {
   vaganovaAnalysis?: VaganovaFullAnalysis | null;
   /** Landmark index for mapping to specific measurements */
   landmarkIndex: number;
+  /** Exact-frame, provenance-gated teacher draft for the synthetic torso bone. */
+  groundedTeacherDraft?: GroundedTeacherDraft;
 }
 
 const REGION_COLORS: Record<string, string> = {
@@ -93,13 +96,49 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   onAddToCueManager,
   vaganovaAnalysis,
   landmarkIndex,
+  groundedTeacherDraft,
 }) => {
   const color = REGION_COLORS[knowledge.region] ?? '#c084fc';
   const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
   const expectedMeasurementKeys = LIVE_MEASUREMENT_KEYS[landmarkIndex] ?? [];
   const [copied, setCopied] = useState(false);
+  const isGroundedTorso = landmarkIndex === 100;
+  const readyTorsoDraft = landmarkIndex === 100 && groundedTeacherDraft?.kind === 'ready'
+    ? groundedTeacherDraft
+    : null;
+  const blockedTorsoDraft = isGroundedTorso && groundedTeacherDraft?.kind === 'blocked'
+    ? groundedTeacherDraft
+    : null;
+  const blockedTorsoMessage = blockedTorsoDraft?.message
+    ?? 'Für diesen Zeitpunkt liegt noch kein abgesicherter Lehrerentwurf vor.';
 
   const handleCopyAll = useCallback(() => {
+    if (readyTorsoDraft) {
+      const sections = readyTorsoDraft.sections;
+      navigator.clipboard.writeText([
+        'Rumpf / Wirbelsäule · KI-ENTWURF – NICOLE PRÜFT',
+        '',
+        `WAS WIR SEHEN: ${sections.what}`,
+        '',
+        `WARUM DAS TECHNISCH WICHTIG SEIN KANN: ${sections.whyConditional}`,
+        '',
+        `ZIELBILD FÜR NICOLES PRÜFUNG: ${sections.goalConditional}`,
+        '',
+        `ÜBEN & VERBESSERN: ${sections.practiceForTeacherReview}`,
+        '',
+        `METAPHER / BILD: ${sections.metaphor}`,
+        '',
+        `TECHNIK FÜR NICOLE: ${sections.technical}`,
+        '',
+        `GRENZEN: ${sections.limitations}`,
+      ].join('\n')).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+      return;
+    }
+    if (isGroundedTorso) return;
+
     const parts: string[] = [
       `${knowledge.name} · ${knowledge.region.toUpperCase()} · VAGANOVA`,
       '',
@@ -123,7 +162,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [knowledge, liveMeasurements]);
+  }, [knowledge, liveMeasurements, readyTorsoDraft, isGroundedTorso]);
 
   // ESC to close
   useEffect(() => {
@@ -132,12 +171,13 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const W = 280;
+  const W = Math.min(280, Math.max(220, window.innerWidth - 16));
 
   // ── POSITION: überlagert den Video-Content ──────────────────────────────────
   // right: 356px = rechtes Panel (340px) + 16px Abstand — BLEIBT über dem Video
   // Das Popover überlagert bewusst den Video-Content (wie ein Overlay)
-  const popoverRight = 356; // px vom rechten Viewport-Rand
+  const desktopPopoverRight = 356; // px vom rechten Viewport-Rand
+  const popoverRight = Math.min(desktopPopoverRight, Math.max(8, window.innerWidth - W - 8));
   let popoverTop = Math.max(8, jointY - 120);
   const maxTop = containerHeight - 200;
   popoverTop = Math.min(popoverTop, maxTop);
@@ -254,6 +294,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
             <button
               onClick={handleCopyAll}
               title="Inhalt in Zwischenablage kopieren"
+              disabled={isGroundedTorso && !readyTorsoDraft}
               style={{ background: copied ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.07)', border: 'none', color: copied ? '#30d158' : 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '26px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s ease' }}
             >
               {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -265,7 +306,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         </div>
 
         {/* LIVE FRAME ANALYSIS – top priority block when data available */}
-        {liveMeasurements.length > 0 && (
+        {!isGroundedTorso && liveMeasurements.length > 0 && (
           <div style={{ margin: '8px 10px 0', display: 'flex', flexDirection: 'column', gap: '5px' }}>
             <div style={{ fontSize: '8px', fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.9px', marginBottom: '2px' }}>
               ⚡ Aktueller Frame · Live-Messung
@@ -310,7 +351,60 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           </div>
         )}
 
-        {/* BODY – knowledge sections: pädagogisch priorisiert */}
+        {readyTorsoDraft ? (
+          <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,214,10,0.08)', border: '1px solid rgba(255,214,10,0.25)', borderRadius: '8px', padding: '7px 9px' }}>
+              <span aria-hidden="true" style={{ color: '#ffd60a', fontSize: '11px' }}>✦</span>
+              <div>
+                <div style={{ fontSize: '8px', fontWeight: 900, color: '#ffd60a', textTransform: 'uppercase', letterSpacing: '0.7px' }}>
+                  KI-Entwurf · Nicole prüft
+                </div>
+                <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.58)', lineHeight: 1.4 }}>
+                  Noch nicht für Lernende oder Eltern freigegeben.
+                </div>
+              </div>
+            </div>
+            <Section icon={<span style={{ fontSize: '9px' }}>👁</span>} label="Was wir sehen" color={color} highlight>
+              {readyTorsoDraft.sections.what}
+            </Section>
+            <Section icon={<Zap size={9} />} label="Warum das technisch wichtig sein kann" color={color}>
+              {readyTorsoDraft.sections.whyConditional}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>◎</span>} label="Zielbild für Nicoles Prüfung" color="#34d399">
+              {readyTorsoDraft.sections.goalConditional}
+            </Section>
+            <Section icon={<Dumbbell size={9} />} label="Üben & verbessern" color="#30d158">
+              {readyTorsoDraft.sections.practiceForTeacherReview}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>✨</span>} label="Metapher / Bild" color="#c084fc">
+              {readyTorsoDraft.sections.metaphor}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Technik für Nicole" color="#64d2ff">
+              {readyTorsoDraft.sections.technical}
+            </Section>
+            <Section icon={<AlertTriangle size={9} />} label="Grenzen & Prüffragen" color="#ffd60a">
+              {readyTorsoDraft.sections.limitations}
+            </Section>
+          </div>
+        ) : isGroundedTorso ? (
+          <div style={{ padding: '8px 10px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '9px 10px' }}>
+              <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', lineHeight: 1 }}>○</span>
+              <div>
+                <div style={{ fontSize: '8px', fontWeight: 900, color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>
+                  Noch keine gesicherte Frame-Evidenz
+                </div>
+                <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
+                  {blockedTorsoMessage}
+                </div>
+                <div style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.45, marginTop: '6px' }}>
+                  Keine Bewertung, Ursache, Übung oder Leitlinie wird aus fehlender Evidenz abgeleitet.
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+        /* BODY – knowledge sections: pädagogisch priorisiert */
         <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
 
           {/* 1️⃣ WAS IST FALSCH – klar, direkt, vorne */}
@@ -342,6 +436,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           </Section>
 
         </div>
+        )}
 
         {/* FOOTER */}
         <div style={{ padding: '7px 10px', borderTop: `1px solid ${color}18`, display: 'flex', gap: '5px' }}>
