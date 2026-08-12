@@ -3,7 +3,7 @@
 //
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaFrameCache } from './vaganovaFrameCache';
-import { BUILD_POLICY } from '../config/buildPolicy';
+import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
 
 // ⚠️  AUDIT FIX (2026-08-10): Previous version faked AI analysis by switching
 //     on video filename and returning fabricated angle values (14°, 88°, 8°)
@@ -23,7 +23,7 @@ export interface VaganovaCuePoint {
   timeSeconds: number;
   timecodeStr: string;
   poseName: string;
-  status: 'GOOD' | 'CORRECTION' | 'WARNING';
+  status: 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL';
   scorePercent?: number;        // Only set by teacher, never auto-generated
   headline: string;
   cueMetaphor: string;
@@ -59,7 +59,7 @@ export interface VaganovaCuePoint {
     originalPracticeText?: string;
     originalTechnicalAnalysis?: string;
     metrics: string[];          // z.B. ['spineTilt: ERROR 8.3°', 'pelvicTilt: WARNING 4.1°']
-    ampelStatus: 'CORRECT' | 'WARNING' | 'ERROR';
+    ampelStatus: 'CORRECT' | 'WARNING' | 'ERROR' | 'NEUTRAL';
     generatedAt: string;        // ISO 8601
     policyVersion: string;      // BUILD_POLICY.policyVersion zum Zeitpunkt der Generierung
   };
@@ -81,8 +81,27 @@ export interface AutoAnalysisReport {
   framesAnalyzed: number;
 }
 
+export interface ManualCueSuggestion {
+  diagnosisText: string;
+  goalText: string;
+  practiceText: string;
+  headline: string;
+  status: 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL';
+}
+
+/** Claim-free structure for a teacher-created observation point. */
+export function buildNeutralManualCueSuggestion(poseName: string): ManualCueSuggestion {
+  return {
+    headline: `Beobachtungspunkt – ${poseName}`,
+    status: 'NEUTRAL',
+    diagnosisText: '',
+    goalText: '',
+    practiceText: '',
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// DEMO FIXTURES – Example cue points for two known demo videos
+// DEMO FIXTURES – Example cue points for a known demo video
 // These are NOT measurements. They are teacher-authored example annotations
 // for UI demonstration purposes only.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -99,6 +118,8 @@ const DEMO_FIXTURES: Record<string, VaganovaCuePoint[]> = {
       jointFocusId: 'pelvis_core',
       isDemoFixture: true,
       dataSource: 'DEMO_FIXTURE',
+      learnerVisible: false,
+      parentVisible: false,
       diagnosisMetaphor: '"Stell dir vor, du hast ein Wasserlas auf dem Steißbein — es darf weder nach vorne noch nach hinten kippen."',
       diagnosisText: 'Das Becken ist hier schön neutral gehalten — weder nach vorne gekippt noch hinten verklemmt. Das ist in der 2. Position gar nicht selbstverständlich, weil die breite Beinstellung viele Schüler dazu verführt, das Becken zu kippen. Hier passiert das nicht. Lendenwirbelsäule behält ihre natürliche Kurve, der Oberkörper liegt ruhig darüber. Schultern, Becken und Standfläche sind gut übereinandergestapelt — das gibt der ganzen Bewegung Stabilität und Eleganz.',
       goalText: 'Das Becken bleibt in dieser neutralen Mitte — nicht aktiv hineindrücken, nicht durch Anspannung einspannen. Die Wirbelsäule fühlt sich lang und leicht an. Diese Beckenposition als "Heimgefühl" etablieren, nicht als erzwungene Haltung. Wenn das sitzt, kann die Energie nach oben fließen: offene Brust, ruhige Schultern.',
@@ -115,6 +136,8 @@ const DEMO_FIXTURES: Record<string, VaganovaCuePoint[]> = {
       jointFocusId: 'right_knee',
       isDemoFixture: true,
       dataSource: 'DEMO_FIXTURE',
+      learnerVisible: false,
+      parentVisible: false,
       diagnosisMetaphor: '"Schau auf dein Knie im Spiegel: Zeigt es nach vorne über den Zeh — oder biegt es sich nach innen weg wie eine einknicke Brücke?"',
       diagnosisText: 'Am tiefsten Punkt des Plié kippt das rechte Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Positiv: Oberkörper und linke Seite sehen sehr ordentlich aus!',
       goalText: 'Das Knie bleibt direkt über dem mittleren Zeh — beim Plié hinunter aktiv nach außen öffnen, als würden die Knie zwei Türen aufdrücken. Die ganze Beinlinie von Hüfte bis Zehenspitze bleibt sauber in einer Ebene. Dabei die Ferse am Boden lassen — das Knie gibt nach außen nach, nicht die Ferse nach oben.',
@@ -161,20 +184,32 @@ export class VaganovaPreAnalyzerService {
 
     // ── DEDUP: Bereinige alte KI_AUTO-Duplikate ──────────────────────────
     // Vor dem Fix hatten KI_AUTO-IDs Date.now() → bei jedem Scan neue IDs,
-    // Duplikate wurden nicht erkannt. Jetzt: pro (dataSource=KI_AUTO + timeSec)
-    // nur den letzten Eintrag behalten.
-    const seen = new Map<string, number>(); // key → index
+    // Duplikate wurden nicht erkannt. Jetzt: pro noch unreviewtem KI-Vorschlag
+    // und timeSec nur den letzten Eintrag behalten. Nicole-Entscheidungen bleiben
+    // als Auditspur stets vollständig erhalten.
+    const seenPending = new Map<string, number>(); // key → index
     const cleaned: VaganovaCuePoint[] = [];
     for (const p of points) {
       if (p.dataSource === 'KI_AUTO') {
+        const reviewed = p.provenance === 'nicole_confirmed'
+          || p.provenance === 'nicole_edited'
+          || p.provenance === 'nicole_rejected';
+        if (reviewed) {
+          // Every explicit Nicole decision is audit evidence; never deduplicate it.
+          cleaned.push(p);
+          continue;
+        }
+        if (p.provenance !== 'ki_suggestion' || !canGenerateLegacyUngroundedCues()) {
+          continue;
+        }
         const dedupeKey = `${p.jointFocusId}:${p.timeSeconds.toFixed(3)}`;
-        const existing = seen.get(dedupeKey);
+        const existing = seenPending.get(dedupeKey);
         if (existing !== undefined) {
           // Ersetze älteren Eintrag mit neuerem
           cleaned[existing] = p;
           continue;
         }
-        seen.set(dedupeKey, cleaned.length);
+        seenPending.set(dedupeKey, cleaned.length);
       }
       cleaned.push(p);
     }
@@ -185,6 +220,11 @@ export class VaganovaPreAnalyzerService {
       try {
         localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(cleaned));
       } catch (e) { /* ignore */ }
+    }
+
+    if (cleaned.length === 0) {
+      const fixtureKey = getDemoFixtureKey(videoUrl);
+      if (fixtureKey) return DEMO_FIXTURES[fixtureKey];
     }
 
     return cleaned;
@@ -243,8 +283,9 @@ export function replaceAutoCuePoints(
   generated: VaganovaCuePoint[],
 ): VaganovaCuePoint[] {
   const isReviewed = (point: VaganovaCuePoint) => (
-    point.provenance !== undefined
-    && point.provenance !== 'ki_suggestion'
+    point.provenance === 'nicole_confirmed'
+    || point.provenance === 'nicole_edited'
+    || point.provenance === 'nicole_rejected'
   );
   const reviewedKeys = new Set(
     existing
@@ -264,6 +305,15 @@ export function replaceAutoCuePoints(
   ].sort((a, b) => a.timeSeconds - b.timeSeconds);
 }
 
+/** Finds the newly added cue without relying on its position after time sorting. */
+export function findAddedCuePoint(
+  previous: VaganovaCuePoint[],
+  updated: VaganovaCuePoint[],
+): VaganovaCuePoint | undefined {
+  const previousIds = new Set(previous.map(point => point.id));
+  return updated.find(point => !previousIds.has(point.id));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTO-ANALYSE ENGINE
 // Analysiert alle gecachten Frames und generiert KI-Cue-Points + Report.
@@ -279,8 +329,12 @@ function fmtTime(sec: number): string {
 
 export function analyzeFrameCacheForHighlights(videoUrl: string): {
   autoCuePoints: VaganovaCuePoint[];
-  report: AutoAnalysisReport;
+  report: AutoAnalysisReport | null;
 } {
+  if (!canGenerateLegacyUngroundedCues()) {
+    return { autoCuePoints: [], report: null };
+  }
+
   const frames = vaganovaFrameCache.getFrames(videoUrl);
   const { vw, vh } = vaganovaFrameCache.getVideoDimensions(videoUrl);
   if (frames.length < 5) {

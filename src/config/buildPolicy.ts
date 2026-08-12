@@ -29,6 +29,8 @@ export const BUILD_POLICY = Object.freeze({
   allowAutomaticSafetyClaims: false,
   /** Diagnose-Claims – DEAKTIVIERT */
   allowAutomaticDiagnosisClaims: false,
+  /** Alte Auto-Texte ohne metrikspezifischen Evidenzvertrag – DEAKTIVIERT */
+  allowLegacyUngroundedCueGeneration: false,
   /** Lernenden-Output ohne Nicole-Bestätigung – DEAKTIVIERT */
   allowUnreviewedLearnerOutput: false,
   /** Eltern-Output ohne Nicole-Bestätigung – DEAKTIVIERT */
@@ -57,6 +59,18 @@ export const BUILD_POLICY = Object.freeze({
 } as const);
 
 export type BuildPolicy = typeof BUILD_POLICY;
+
+/**
+ * The retired generator bundled scoring, diagnosis, safety and homework claims.
+ * It may only run if every corresponding hard policy is explicitly enabled.
+ */
+export function canGenerateLegacyUngroundedCues(): boolean {
+  return BUILD_POLICY.allowLegacyUngroundedCueGeneration
+    && BUILD_POLICY.allowValidatedThresholdScoring
+    && BUILD_POLICY.allowAutomaticDiagnosisClaims
+    && BUILD_POLICY.allowAutomaticSafetyClaims
+    && BUILD_POLICY.allowAutomaticHomeworkGeneration;
+}
 
 /**
  * Neutrale Messzustände – dürfen NIEMALS automatisch Grün werden.

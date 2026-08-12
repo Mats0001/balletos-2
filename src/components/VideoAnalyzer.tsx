@@ -10,7 +10,7 @@ import { vaganovaPoseEngine } from '../services/vaganovaPoseEngine';
 import { vaganovaEvidenceEngine } from '../services/vaganovaEvidenceEngine';
 import { vaganovaMotionClassifier, MotionClassificationResult } from '../services/vaganovaMotionClassifier';
 import { vaganova3DKinematics, ReconstructedSkeleton } from '../services/vaganova3DKinematics';
-import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport, replaceAutoCuePoints } from '../services/vaganovaPreAnalyzer';
+import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport, replaceAutoCuePoints, buildNeutralManualCueSuggestion, findAddedCuePoint } from '../services/vaganovaPreAnalyzer';
 import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
 import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
@@ -27,7 +27,7 @@ import { buildPausedTeacherOverlayEvidence, clonePausedCacheLandmarks, findExact
 import { capabilityTierManager, CapabilityManager } from '../services/capabilityTier';
 import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
-import { BUILD_POLICY } from '../config/buildPolicy';
+import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
 import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
 import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeletonJointKnowledge';
@@ -197,7 +197,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const getCueTab = (id: string) => cueTabState[id] ?? 0;
   const setCueTab = (id: string, tab: number) => setCueTabState(prev => ({ ...prev, [id]: tab }));
 
-  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: 'GOOD' | 'CORRECTION' | 'WARNING'; diagnosisText: string; goalText: string; practiceText: string }>({
+  const [editForm, setEditForm] = useState<{ poseName: string; headline: string; cueMetaphor: string; status: VaganovaCuePoint['status']; diagnosisText: string; goalText: string; practiceText: string }>({
     poseName: '',
     headline: '',
     cueMetaphor: '',
@@ -366,6 +366,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     );
 
     setIsPreIndexing(true);
+    setAnalysisReport(null);
     setLoadedFromCache(false);
     setIndexingProgress(0);
     setIndexingStatusStr('Suche im Cache...');
@@ -454,7 +455,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         );
         vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
         setCuePoints(merged);
-        if (report) setAnalysisReport(report);
+        setAnalysisReport(report);
       } else {
         // Automatisch starten – Nicole muss nichts tun
         triggerPreIndexingScan();
@@ -1130,6 +1131,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       setVideoList(videoStore.getAllVideos());
       preIndexRunRef.current += 1;
       setIsPreIndexing(false);
+      setAnalysisReport(null);
       selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(newVid.url));
@@ -1150,6 +1152,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setIsEngineReady(false);
     preIndexRunRef.current += 1;
     setIsPreIndexing(false);
+    setAnalysisReport(null);
     selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
     setCuePoints(vaganovaPreAnalyzer.getCuePoints(url));
@@ -1500,15 +1503,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // ── KI-VORSCHLAG für manuell gesetzte Marker ───────────────────────────
   // Liest die aktuelle vaganovaAnalysis und generiert kontextsensitiven Vorschlagstext
   const generateManualCueSuggestion = (va: typeof vaganovaAnalysis): {
-    diagnosisText: string; goalText: string; practiceText: string; headline: string; status: 'GOOD' | 'CORRECTION' | 'WARNING';
+    diagnosisText: string; goalText: string; practiceText: string; headline: string; status: VaganovaCuePoint['status'];
   } => {
-    if (!va) return {
-      headline: `Beobachtungspunkt an ${motionClass.detectedPoseName}`,
-      diagnosisText: 'Dieser Frame zeigt einen manuell markierten Moment. Beschreibe hier was du siehst — was fällt dir an Haltung, Ausrichtung oder Ausdruck auf? (KI-Vorschlag: keine Live-Daten verfügbar)',
-      goalText: 'Beschreibe das angestrebte Ziel für diesen Moment.',
-      practiceText: 'Übungsvorschlag eintragen.',
-      status: 'WARNING',
-    };
+    if (!canGenerateLegacyUngroundedCues() || !va) {
+      return buildNeutralManualCueSuggestion(motionClass.detectedPoseName);
+    }
 
     // Finde den auffälligsten Messwert
     const checks: Array<{ condition: boolean; headline: string; status: 'GOOD' | 'CORRECTION' | 'WARNING'; diag: string; goal: string; practice: string }> = [
@@ -1564,13 +1563,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     };
 
     // Fallback: generischer Beobachtungspunkt
-    return {
-      headline: `Beobachtungspunkt – ${motionClass.detectedPoseName}`,
-      status: 'WARNING',
-      diagnosisText: 'Manuell markierter Frame. Beschreibe hier deine Beobachtung — was fällt dir an diesem Moment auf?',
-      goalText: 'Ziel für die’Korrektur oder das Lob hier eintragen.',
-      practiceText: 'Übungshinweis oder Hausaufgabe für die Schülerin.',
-    };
+    return buildNeutralManualCueSuggestion(motionClass.detectedPoseName);
   };
 
   // TEACHER CRUD: Add Cue-Point at current video playback position
@@ -1584,14 +1577,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // KI generiert Vorschlagstext basierend auf aktuellem Frame
     const suggestion = generateManualCueSuggestion(vaganovaAnalysis);
 
+    const previousCuePoints = vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl);
     const updated = vaganovaPreAnalyzer.addCuePoint(selectedDevVideoUrl, {
       timeSeconds: timeSec,
       timecodeStr,
       poseName: motionClass.detectedPoseName,
       status: suggestion.status,
-      scorePercent: 80,
       headline: suggestion.headline,
-      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+      cueMetaphor: '',
       jointFocusId: selectedJointId || 'pelvis_core',
       diagnosisText: suggestion.diagnosisText,
       goalText: suggestion.goalText,
@@ -1600,14 +1593,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
     setCuePoints(updated);
     // Direkt in den Edit-Modus für den neuen Cue springen
-    const newCue = updated[updated.length - 1];
+    const newCue = findAddedCuePoint(previousCuePoints, updated);
     if (newCue) {
       setEditingCueId(newCue.id);
       setEditForm({
         poseName: newCue.poseName,
         headline: newCue.headline,
         cueMetaphor: newCue.cueMetaphor ?? '',
-        status: newCue.status as 'GOOD' | 'CORRECTION' | 'WARNING',
+        status: newCue.status,
         diagnosisText: suggestion.diagnosisText,
         goalText: suggestion.goalText,
         practiceText: suggestion.practiceText,
@@ -1623,7 +1616,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       poseName: cue.poseName,
       headline: cue.headline,
       cueMetaphor: cue.cueMetaphor,
-      status: (cue.status === 'CORRECTION' || cue.status === 'WARNING') ? cue.status : 'GOOD',
+      status: cue.status,
       diagnosisText: cue.diagnosisText ?? '',
       goalText: cue.goalText ?? '',
       practiceText: cue.practiceText ?? '',
@@ -1840,14 +1833,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // KI-Vorschlag für bestehende leere TEACHER_CREATED Cues generieren
   const handleApplyKiSuggestion = (cueId: string) => {
+    if (!canGenerateLegacyUngroundedCues()) return;
     const suggestion = generateManualCueSuggestion(vaganovaAnalysis);
+    const cueMetaphor = '(KI-Vorschlag — durch Nicole editierbar)';
     const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
       headline: suggestion.headline,
       status: suggestion.status,
       diagnosisText: suggestion.diagnosisText,
       goalText: suggestion.goalText,
       practiceText: suggestion.practiceText,
-      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+      cueMetaphor,
     });
     setCuePoints(updated);
     // Direkt in Edit-Modus
@@ -1855,7 +1850,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setEditForm({
       poseName: updated.find(c => c.id === cueId)?.poseName ?? '',
       headline: suggestion.headline,
-      cueMetaphor: '(KI-Vorschlag — durch Nicole editierbar)',
+      cueMetaphor,
       status: suggestion.status,
       diagnosisText: suggestion.diagnosisText,
       goalText: suggestion.goalText,
@@ -2035,28 +2030,32 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const COLOR_WARN = '#ff9f0a'; // Orange = besprechungswürdig
 
   // Gibt die Semantik-Farbe für einen Cue-Status zurück
-  const cueColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+  const cueColor = (status: VaganovaCuePoint['status']) =>
     status === 'CORRECTION' ? COLOR_BAD
     : status === 'WARNING'  ? COLOR_WARN
-    : COLOR_GOOD;
+    : status === 'GOOD' ? COLOR_GOOD
+    : 'rgba(255,255,255,0.35)';
 
   // Border-Farbe (gedimmt) für den Karten-Rand
-  const cueBorderColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+  const cueBorderColor = (status: VaganovaCuePoint['status']) =>
     status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.4)'
     : status === 'WARNING'  ? 'rgba(255, 159, 10, 0.4)'
-    : 'rgba(48, 209, 88, 0.3)';
+    : status === 'GOOD' ? 'rgba(48, 209, 88, 0.3)'
+    : 'rgba(255,255,255,0.18)';
 
   // Hintergrund-Farbe (gedimmt) für Status-Badges
-  const cueBgColor = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+  const cueBgColor = (status: VaganovaCuePoint['status']) =>
     status === 'CORRECTION' ? 'rgba(255, 69, 58, 0.15)'
     : status === 'WARNING'  ? 'rgba(255, 159, 10, 0.12)'
-    : 'rgba(48, 209, 88, 0.15)';
+    : status === 'GOOD' ? 'rgba(48, 209, 88, 0.15)'
+    : 'rgba(255,255,255,0.06)';
 
   // Status-Label mit Icon
-  const cueLabel = (status: 'GOOD' | 'CORRECTION' | 'WARNING') =>
+  const cueLabel = (status: VaganovaCuePoint['status']) =>
     status === 'CORRECTION' ? '🔴 FEHLER'
     : status === 'WARNING'  ? '🟠 BEOB.'
-    : '🟢 GUT';
+    : status === 'GOOD' ? '🟢 GUT'
+    : '⚪ NEUTRAL';
 
   // Helper to render glowing trajectory comet nodes
   const renderTrailNodes = (type: 'wristL' | 'wristR' | 'ankleL' | 'ankleR', color: string) => {
@@ -3125,7 +3124,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         nearest.cueMetaphor && nearest.cueMetaphor !== '(KI-Vorschlag — durch Nicole editierbar)' && { label: 'Metapher', text: nearest.cueMetaphor },
                       ].filter(Boolean) as Array<{ label: string; text: string }>;
 
-                      const cueColor = nearest.status === 'GOOD' ? '#30d158' : nearest.status === 'CORRECTION' ? '#ff453a' : '#ffd60a';
+                      const nearestCueColor = cueColor(nearest.status);
                       const distSec = Math.abs(nearest.timeSeconds - currentSec);
 
                       return (
@@ -3133,10 +3132,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                           <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
                             Aus Cue-Point einfügen:
                           </div>
-                          <div style={{ background: `${cueColor}0d`, border: `1px solid ${cueColor}30`, borderRadius: '9px', padding: '8px 10px' }}>
+                          <div style={{ background: cueBgColor(nearest.status), border: `1px solid ${cueBorderColor(nearest.status)}`, borderRadius: '9px', padding: '8px 10px' }}>
                             {/* Cue-Kontext */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                              <div style={{ fontSize: '10px', fontWeight: 800, color: cueColor, lineHeight: 1.2 }}>
+                              <div style={{ fontSize: '10px', fontWeight: 800, color: nearestCueColor, lineHeight: 1.2 }}>
                                 {nearest.timecodeStr} · {nearest.headline}
                               </div>
                               {distSec > 0.1 && (
@@ -3272,14 +3271,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                           transform: 'translate(-50%, 0)',
                           width: isActive ? '13px' : '9px',
                           height: isActive ? '13px' : '9px',
-                          background: cue.status === 'CORRECTION' ? '#ff453a' : '#30d158',
+                          background: cueColor(cue.status),
                           border: isActive ? '2px solid #fff' : '1.5px solid rgba(255,255,255,0.55)',
                           borderRadius: '2px',
                           rotate: '45deg',
                           cursor: 'pointer',
                           zIndex: 3,
                           transition: 'all 0.15s ease',
-                          boxShadow: isActive ? (cue.status === 'CORRECTION' ? '0 0 8px #ff453a88' : '0 0 8px #30d15888') : 'none',
+                          boxShadow: isActive ? `0 0 8px ${cueColor(cue.status)}` : 'none',
                           padding: 0
                         }}
                       />
@@ -3656,7 +3655,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       type="text"
                       value={editForm.headline}
                       onChange={e => setEditForm({ ...editForm, headline: e.target.value })}
-                      placeholder="Befund / Fehler..."
+                      placeholder={editForm.status === 'NEUTRAL' ? 'Beobachtung / Titel...' : 'Befund / Fehler...'}
                       style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
                     />
 
@@ -3668,13 +3667,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
                     />
 
-                    <div style={{ fontSize: '8px', fontWeight: 800, color: '#ff453a', letterSpacing: '0.5px', marginTop: '4px' }}>📍 WAS PASSIERT / WARUM</div>
+                    <div style={{ fontSize: '8px', fontWeight: 800, color: editForm.status === 'NEUTRAL' ? 'rgba(255,255,255,0.55)' : '#ff453a', letterSpacing: '0.5px', marginTop: '4px' }}>
+                      {editForm.status === 'NEUTRAL' ? '○ SICHTBARE BEOBACHTUNG' : '📍 WAS PASSIERT / WARUM'}
+                    </div>
                     <textarea
                       value={editForm.diagnosisText}
                       onChange={e => setEditForm({ ...editForm, diagnosisText: e.target.value })}
-                      placeholder="Was ist falsch und warum? (kein Fachjargon...)"
+                      placeholder={editForm.status === 'NEUTRAL'
+                        ? 'Was ist in diesem Frame sichtbar? Noch keine Ursache ableiten.'
+                        : 'Was ist falsch und warum? (kein Fachjargon...)'}
                       rows={2}
-                      style={{ background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,69,58,0.3)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
+                      style={{ background: 'rgba(0,0,0,0.6)', border: editForm.status === 'NEUTRAL' ? '1px solid rgba(255,255,255,0.2)' : '1px solid rgba(255,69,58,0.3)', color: '#fff', padding: '4px 8px', borderRadius: '6px', fontSize: '10px' }}
                     />
 
                     <div style={{ fontSize: '8px', fontWeight: 800, color: '#30d158', letterSpacing: '0.5px' }}>✦ WIE ES SEIN SOLL</div>
@@ -3696,6 +3699,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     />
 
                     <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setEditForm({ ...editForm, status: 'NEUTRAL' })}
+                        style={{ background: editForm.status === 'NEUTRAL' ? 'rgba(255,255,255,0.12)' : 'transparent', color: editForm.status === 'NEUTRAL' ? '#fff' : 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.35)', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        ⚪ NEUTRAL
+                      </button>
                       <button
                         onClick={() => setEditForm({ ...editForm, status: 'GOOD' })}
                         style={{ background: editForm.status === 'GOOD' ? 'rgba(48,209,88,0.35)' : 'transparent', color: editForm.status === 'GOOD' ? '#30d158' : 'rgba(255,255,255,0.5)', border: '1px solid #30d158', padding: '2px 8px', borderRadius: '6px', fontSize: '9px', fontWeight: 700, cursor: 'pointer' }}
@@ -3732,13 +3741,23 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 <div
                   key={cue.id}
                   style={{
-                    background: isSelected ? 'rgba(192, 132, 252, 0.18)' : cue.dataSource === 'TEACHER_CREATED' ? 'rgba(245,158,11,0.04)' : 'rgba(255, 255, 255, 0.03)',
+                    background: isSelected
+                      ? 'rgba(192, 132, 252, 0.18)'
+                      : cue.status === 'NEUTRAL'
+                        ? 'rgba(255,255,255,0.03)'
+                        : cue.dataSource === 'TEACHER_CREATED'
+                          ? 'rgba(245,158,11,0.04)'
+                          : 'rgba(255, 255, 255, 0.03)',
                     border: isSelected
                       ? '1px solid #c084fc'
-                      : cue.dataSource === 'TEACHER_CREATED'
+                      : cue.status === 'NEUTRAL'
+                        ? `1px solid ${cueBorderColor(cue.status)}`
+                        : cue.dataSource === 'TEACHER_CREATED'
                         ? '1px solid rgba(245,158,11,0.35)'
                         : `1px solid ${cueBorderColor(cue.status)}`,
-                    borderLeft: cue.dataSource === 'TEACHER_CREATED' && !isSelected ? '3px solid rgba(245,158,11,0.5)' : undefined,
+                    borderLeft: cue.dataSource === 'TEACHER_CREATED' && cue.status !== 'NEUTRAL' && !isSelected
+                      ? '3px solid rgba(245,158,11,0.5)'
+                      : undefined,
                     borderRadius: '10px',
                     overflow: 'hidden',
                     flexShrink: 0,
@@ -3775,6 +3794,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         {cue.provenance === 'ki_suggestion' && <span style={{ color: '#ffd60a', fontSize: '9px', flexShrink: 0 }}><FlaskConical size={9} style={{ display: 'inline', verticalAlign: 'middle' }} /></span>}
                         {cue.provenance === 'nicole_confirmed' && <span style={{ color: '#30d158', fontSize: '8px', flexShrink: 0 }}>✓</span>}
                         {cue.provenance === 'nicole_rejected' && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '8px', flexShrink: 0 }}>✕</span>}
+                        {cue.isDemoFixture && (
+                          <span
+                            title="Beispielinhalt – keine Messung und keine Schülerbeurteilung"
+                            style={{ color: '#ffd60a', fontSize: '7px', fontWeight: 900, flexShrink: 0, border: '1px solid rgba(255,214,10,0.45)', borderRadius: '4px', padding: '1px 4px' }}
+                          >DEMO · keine Messung</span>
+                        )}
                       </span>
                     </div>
                     {/* Rechts: Status-Dot + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
@@ -3787,7 +3812,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                           width: '9px', height: '9px',
                           borderRadius: '50%',
                           background: cueColor(cue.status),
-                          boxShadow: `0 0 5px ${cueColor(cue.status)}99`,
+                          boxShadow: cue.status === 'NEUTRAL'
+                            ? 'none'
+                            : `0 0 5px ${cueColor(cue.status)}`,
                           flexShrink: 0,
                         }}
                       />
@@ -3804,12 +3831,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
                   {/* ─── ACCORDION BODY (nur wenn aufgeklappt) ─── */}
                   {isExpanded && (
-                    <div style={{ padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)', background: cue.status === 'CORRECTION' ? 'rgba(255,69,58,0.07)' : cue.status === 'WARNING' ? 'rgba(255,159,10,0.06)' : 'rgba(48,209,88,0.06)', borderRadius: '0 0 10px 10px' }}>
+                    <div style={{ padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: '6px', borderTop: '1px solid rgba(255,255,255,0.06)', background: cue.status === 'CORRECTION' ? 'rgba(255,69,58,0.07)' : cue.status === 'WARNING' ? 'rgba(255,159,10,0.06)' : cue.status === 'GOOD' ? 'rgba(48,209,88,0.06)' : 'rgba(255,255,255,0.03)', borderRadius: '0 0 10px 10px' }}>
 
                   <div style={{ fontSize: '11px', fontWeight: 400, color: cue.status === 'CORRECTION' ? '#ff453a' : cueColor(cue.status), display: 'flex', alignItems: 'center', gap: '5px' }}>
                     {cue.status === 'CORRECTION' ? <AlertTriangle size={10} />
                      : cue.status === 'WARNING' ? <AlertTriangle size={10} />
-                     : <CheckCircle size={10} />}
+                     : cue.status === 'GOOD' ? <CheckCircle size={10} />
+                     : <span aria-hidden="true">○</span>}
                     <span>{cue.headline}</span>
                   </div>
 
@@ -3903,18 +3931,27 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                                         Noch kein Inhalt für diesen Marker.
                                       </div>
                                       <button
-                                        onClick={(e) => { e.stopPropagation(); handleApplyKiSuggestion(cue.id); }}
+                                        onClick={canGenerateLegacyUngroundedCues()
+                                          ? (e) => { e.stopPropagation(); handleApplyKiSuggestion(cue.id); }
+                                          : undefined}
+                                        disabled={!canGenerateLegacyUngroundedCues()}
+                                        title={!canGenerateLegacyUngroundedCues()
+                                          ? 'Automatische Textvorschläge sind bis zur metrikspezifischen Evidenzfreigabe deaktiviert.'
+                                          : undefined}
                                         style={{
                                           display: 'flex', alignItems: 'center', gap: '6px',
                                           background: 'linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(245,158,11,0.08) 100%)',
                                           border: '1px solid rgba(245,158,11,0.4)',
                                           borderRadius: '8px', padding: '7px 10px',
                                           color: '#f59e0b', fontSize: '10px', fontWeight: 800,
-                                          cursor: 'pointer', width: '100%', justifyContent: 'center',
+                                          cursor: canGenerateLegacyUngroundedCues() ? 'pointer' : 'not-allowed', width: '100%', justifyContent: 'center',
+                                          opacity: canGenerateLegacyUngroundedCues() ? 1 : 0.55,
                                         }}
                                       >
                                         <Sparkles size={11} />
-                                        KI-Vorschlag für diesen Frame generieren
+                                        {canGenerateLegacyUngroundedCues()
+                                          ? 'KI-Vorschlag für diesen Frame generieren'
+                                          : 'KI-Vorschlag derzeit gesperrt'}
                                       </button>
                                     </div>
                                   )

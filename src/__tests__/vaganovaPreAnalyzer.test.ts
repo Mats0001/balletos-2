@@ -1,88 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FrameEntry } from '../services/frameInterpolator';
-import { PoseLandmark } from '../services/realMediaPipePose';
-import {
-  VaganovaAngleCalculator,
-  VaganovaFullAnalysis,
-  VaganovaMeasurement,
-  vaganovaAngleCalculator,
-} from '../services/vaganovaAngleCalculator';
+import { VaganovaAngleCalculator } from '../services/vaganovaAngleCalculator';
+import { canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
 import {
   VaganovaCuePoint,
   analyzeFrameCacheForHighlights,
+  buildNeutralManualCueSuggestion,
+  findAddedCuePoint,
   replaceAutoCuePoints,
+  vaganovaPreAnalyzer,
 } from '../services/vaganovaPreAnalyzer';
 
-function landmarks(): PoseLandmark[] {
-  return Array.from({ length: 33 }, (_, index) => ({
-    x: 0.2 + (index % 6) * 0.1,
-    y: 0.1 + Math.floor(index / 6) * 0.12,
-    z: 0,
-    visibility: 0.95,
-  }));
-}
-
-function frames(): FrameEntry[] {
-  return Array.from({ length: 5 }, (_, index) => ({
-    timeMs: index * 100,
-    resultKind: 'pose' as const,
-    landmarks: landmarks(),
-  }));
-}
-
-function measurement(
-  value: number,
-  measurementClass: 'not_measurable' | 'individual_baseline',
-): VaganovaMeasurement {
-  return {
-    value,
-    confidence: 0.95,
-    unit: measurementClass === 'not_measurable' ? 'deg' : 'delta_deg',
-    label: 'non-authoritative knee shadow metric',
-    measurement_class: measurementClass,
+function installMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return values.size; },
+    clear: () => values.clear(),
+    getItem: key => values.get(key) ?? null,
+    key: index => [...values.keys()][index] ?? null,
+    removeItem: key => { values.delete(key); },
+    setItem: (key, value) => { values.set(key, value); },
   };
-}
-
-function relation(value: number): VaganovaMeasurement {
-  return {
-    value,
-    confidence: 0.95,
-    unit: 'deg',
-    label: 'projected relation',
-    measurement_class: 'vaganova_relation',
-    status: 'ERROR',
-  };
-}
-
-function analysis(overrides: Partial<VaganovaFullAnalysis> = {}): VaganovaFullAnalysis {
-  return {
-    knieFlexionL: null,
-    knieFlexionR: null,
-    valgusDriftL: null,
-    valgusDriftR: null,
-    turnoutL: null,
-    turnoutR: null,
-    spineTilt: null,
-    epaulement: null,
-    portDeBrasL: null,
-    portDeBrasR: null,
-    pelvicTilt: null,
-    shoulderSymmetry: null,
-    shoulderElevationL: null,
-    shoulderElevationR: null,
-    armLineQualityL: null,
-    armLineQualityR: null,
-    headTilt: null,
-    plumbDeviation: null,
-    ...overrides,
-  };
-}
-
-function prepareScan(result: VaganovaFullAnalysis): void {
-  vi.spyOn(vaganovaFrameCache, 'getFrames').mockReturnValue(frames());
-  vi.spyOn(vaganovaFrameCache, 'getVideoDimensions').mockReturnValue({ vw: 960, vh: 1280 });
-  vi.spyOn(VaganovaAngleCalculator.prototype, 'analyzeFullFrame').mockReturnValue(result);
+  vi.stubGlobal('localStorage', storage);
+  return storage;
 }
 
 function cue(
@@ -107,91 +47,126 @@ function cue(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-describe('analyzeFrameCacheForHighlights knee evidence gate', () => {
-  it.each([
-    ['not measurable absolute value', 99, 'not_measurable'],
-    ['positive individual-baseline delta', 24, 'individual_baseline'],
-    ['negative individual-baseline delta', -24, 'individual_baseline'],
-  ] as const)('does not turn %s into an automatic knee claim', (_label, value, metricClass) => {
-    prepareScan(analysis({
-      valgusDriftL: measurement(value, metricClass),
-      valgusDriftR: measurement(-value, metricClass),
-    }));
-
-    const result = analyzeFrameCacheForHighlights('knee-only.mp4');
-    const generatedText = JSON.stringify(result);
-
-    expect(result.autoCuePoints).toEqual([]);
-    expect(result.report.strengths).toEqual([]);
-    expect(result.report.corrections).toEqual([]);
-    expect(generatedText).not.toMatch(/Knie|Valgus|medial|Außenrotator|Pronation|6 Metriken/i);
+describe('legacy automatic claim gate', () => {
+  it('requires every hard claim policy and is disabled in this build', () => {
+    expect(canGenerateLegacyUngroundedCues()).toBe(false);
   });
 
-  it('uses a scan-local calculator instead of mutating the live singleton', () => {
-    const globalSpy = vi.spyOn(vaganovaAngleCalculator, 'analyzeFullFrame');
-    const localSpy = vi
-      .spyOn(VaganovaAngleCalculator.prototype, 'analyzeFullFrame')
-      .mockReturnValue(analysis());
-    vi.spyOn(vaganovaFrameCache, 'getFrames').mockReturnValue(frames());
-    vi.spyOn(vaganovaFrameCache, 'getVideoDimensions').mockReturnValue({ vw: 960, vh: 1280 });
+  it('returns no cues or report before reading frames or calculating metrics', () => {
+    const frameSpy = vi.spyOn(vaganovaFrameCache, 'getFrames');
+    const calculatorSpy = vi.spyOn(VaganovaAngleCalculator.prototype, 'analyzeFullFrame');
 
-    analyzeFrameCacheForHighlights('isolated-scan.mp4');
+    const result = analyzeFrameCacheForHighlights('unsupported-legacy-claims.mp4');
 
-    expect(localSpy).toHaveBeenCalledTimes(5);
-    expect(globalSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ autoCuePoints: [], report: null });
+    expect(frameSpy).not.toHaveBeenCalled();
+    expect(calculatorSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toMatch(/Knie|Valgus|Muskel|Ursache|Diagnose|Prognose|Hausaufgabe/i);
   });
 
-  it('is deterministic for identical cached evidence', () => {
-    prepareScan(analysis({
-      valgusDriftL: measurement(42, 'not_measurable'),
-      valgusDriftR: measurement(-42, 'not_measurable'),
-    }));
+  it('builds a claim-free neutral teacher marker', () => {
+    expect(buildNeutralManualCueSuggestion('Grand Plié')).toEqual({
+      headline: 'Beobachtungspunkt – Grand Plié',
+      status: 'NEUTRAL',
+      diagnosisText: '',
+      goalText: '',
+      practiceText: '',
+    });
+  });
+});
 
-    const first = analyzeFrameCacheForHighlights('same-evidence.mp4');
-    const second = analyzeFrameCacheForHighlights('same-evidence.mp4');
+describe('stored cue safety migration', () => {
+  it('removes unreviewed legacy AI while preserving every Nicole, teacher and demo record', () => {
+    const storage = installMemoryStorage();
+    const videoUrl = 'migration-source.mp4';
+    const storageKey = `balletos_cuepoints_v2_${encodeURIComponent(videoUrl)}`;
+    const confirmedA = cue('confirmed-a', 'KI_AUTO', 1, 'nicole_confirmed');
+    const confirmedB = cue('confirmed-b', 'KI_AUTO', 1, 'nicole_confirmed');
+    const edited = cue('edited', 'KI_AUTO', 2, 'nicole_edited');
+    const rejected = cue('rejected', 'KI_AUTO', 3, 'nicole_rejected');
+    const teacher = cue('teacher', 'TEACHER_CREATED', 4);
+    const demo = cue('demo', 'DEMO_FIXTURE', 5);
+    const pending = cue('pending', 'KI_AUTO', 6, 'ki_suggestion');
+    const unversioned = cue('unversioned', 'KI_AUTO', 7);
+    const invalid = { ...cue('invalid', 'KI_AUTO', 8), provenance: 'unknown_runtime_value' };
+    storage.setItem(storageKey, JSON.stringify([
+      confirmedA,
+      confirmedB,
+      edited,
+      rejected,
+      teacher,
+      demo,
+      pending,
+      unversioned,
+      invalid,
+    ]));
 
-    expect(second).toEqual(first);
+    const result = vaganovaPreAnalyzer.getCuePoints(videoUrl);
+    const expected = [confirmedA, confirmedB, edited, rejected, teacher, demo];
+
+    expect(result).toEqual(expected);
+    expect(JSON.parse(storage.getItem(storageKey) ?? 'null')).toEqual(expected);
   });
 
-  it('does not create a positive aggregate from knee or non-measurable proxies', () => {
-    prepareScan(analysis({
-      valgusDriftL: measurement(0, 'not_measurable'),
-      valgusDriftR: measurement(0, 'not_measurable'),
-      plumbDeviation: measurement(0, 'not_measurable'),
-    }));
+  it('keeps rich demo fixtures explicit and externally unpublished', () => {
+    installMemoryStorage();
 
-    const result = analyzeFrameCacheForHighlights('no-positive-aggregate.mp4');
+    const result = vaganovaPreAnalyzer.getCuePoints('/videos/IMG_2272.mp4');
 
-    expect(result.autoCuePoints).toEqual([]);
-    expect(result.report.strengths).toEqual([]);
-    expect(JSON.stringify(result)).not.toMatch(/Bester Frame|Gesamtmoment|im grünen Bereich/i);
+    expect(result).toHaveLength(2);
+    expect(result.every(point => (
+      point.dataSource === 'DEMO_FIXTURE'
+      && point.isDemoFixture === true
+      && point.learnerVisible === false
+      && point.parentVisible === false
+    ))).toBe(true);
+    expect(result[1].diagnosisMetaphor).toMatch(/einknicke Brücke/i);
+    expect(result[1].practiceText).toMatch(/demi-plié/i);
   });
 
-  it('marks every generated automatic cue as pending and not publishable', () => {
-    prepareScan(analysis({ spineTilt: relation(15) }));
+  it('falls back to the marked demo after removing a stale pending result', () => {
+    const storage = installMemoryStorage();
+    const videoUrl = '/videos/IMG_2272.mp4';
+    const storageKey = `balletos_cuepoints_v2_${encodeURIComponent(videoUrl)}`;
+    storage.setItem(storageKey, JSON.stringify([
+      cue('stale-pending', 'KI_AUTO', 1, 'ki_suggestion'),
+    ]));
 
-    const result = analyzeFrameCacheForHighlights('pending-provenance.mp4');
+    const result = vaganovaPreAnalyzer.getCuePoints(videoUrl);
 
-    expect(result.autoCuePoints.length).toBeGreaterThan(0);
-    for (const point of result.autoCuePoints) {
-      expect(point.dataSource).toBe('KI_AUTO');
-      expect(point.provenance).toBe('ki_suggestion');
-      expect(point.learnerVisible).toBe(false);
-      expect(point.parentVisible).toBe(false);
-      expect(point.kiSuggestionData).toMatchObject({
-        originalHeadline: point.headline,
-        originalCueMetaphor: point.cueMetaphor,
-        originalDiagnosisText: point.diagnosisText,
-        originalGoalText: point.goalText,
-        originalPracticeText: point.practiceText,
-        originalTechnicalAnalysis: point.technicalAnalysis,
-        ampelStatus: point.status === 'WARNING' ? 'WARNING' : 'ERROR',
-      });
-      expect(point.kiSuggestionData?.policyVersion).toBeTruthy();
-      expect(Number.isNaN(Date.parse(point.kiSuggestionData?.generatedAt ?? ''))).toBe(false);
-    }
+    expect(result).toHaveLength(2);
+    expect(result.every(point => point.isDemoFixture)).toBe(true);
+    expect(JSON.parse(storage.getItem(storageKey) ?? 'null')).toEqual([]);
+  });
+
+  it('returns no fabricated content for an unknown video', () => {
+    installMemoryStorage();
+    expect(vaganovaPreAnalyzer.getCuePoints('unknown-school-video.mp4')).toEqual([]);
+  });
+
+  it('identifies an earlier new marker without altering a later existing cue', () => {
+    installMemoryStorage();
+    const videoUrl = 'sorted-markers.mp4';
+    const existing = cue('existing-at-five', 'TEACHER_CREATED', 5);
+    vaganovaPreAnalyzer.saveCuePoints(videoUrl, [existing]);
+    const before = vaganovaPreAnalyzer.getCuePoints(videoUrl);
+
+    const updated = vaganovaPreAnalyzer.addCuePoint(videoUrl, {
+      timeSeconds: 1,
+      timecodeStr: '00:01.000',
+      poseName: 'New neutral marker',
+      status: 'NEUTRAL',
+      headline: 'Beobachtungspunkt',
+      cueMetaphor: '',
+      jointFocusId: 'pelvis_core',
+    });
+    const added = findAddedCuePoint(before, updated);
+
+    expect(added).toMatchObject({ timeSeconds: 1, status: 'NEUTRAL' });
+    expect(updated.find(point => point.id === existing.id)).toEqual(existing);
   });
 });
 

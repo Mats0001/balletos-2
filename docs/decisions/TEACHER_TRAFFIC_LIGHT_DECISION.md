@@ -28,6 +28,15 @@
 > explizit bestätigt und den vorhandenen Messstatus autorisiert.
 > Alle übrigen Teile dieser Entscheidung bleiben unverändert.
 
+> **P0-Textnachtrag, 2026-08-12:** Der alte automatische Cue-Textgenerator ist
+> vorläufig vollständig ausgesetzt. Seine Arm-, Rumpf- und Beckentexte leiteten
+> aus projizierten 2D-Werten unbelegte Ursachen, Diagnosen und Prognosen ab.
+> Automatische Scans erzeugen daher bis zur metrikspezifischen Freigabe keine
+> neuen Texte oder Gesamtberichte. Manuelle Marker bleiben verfügbar und öffnen
+> eine neutrale, von Nicole auszufüllende Struktur. Demo-Inhalte sowie von Nicole
+> bestätigte oder bearbeitete Inhalte bleiben unverändert erhalten; Demo-Inhalte
+> werden sichtbar als Beispiel ohne Messung gekennzeichnet.
+
 ---
 
 ## Kernentscheid
@@ -127,6 +136,7 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
+| `src/config/buildPolicy.ts` | Sperrt den alten unbelegten Auto-Textgenerator bis zur metrikspezifischen Wiederfreigabe |
 
 ---
 
@@ -145,6 +155,7 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 - [x] Nicole kann: bestätigen, bearbeiten, ablehnen, klassifizieren
 - [x] FlaskConical-Icon + `title`-Tooltip (Maus/Touch) + `aria-label` (Tastatur)
 - [x] Safety/Diagnose/Verletzungsclaims: `false` (unverändert)
+- [x] Alte unbelegte Auto-Ursachen/-Diagnosen/-Prognosen: vollständig gesperrt
 - [x] `npx tsc --noEmit` → 0 Fehler
 
 ---
