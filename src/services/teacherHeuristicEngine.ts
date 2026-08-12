@@ -131,18 +131,17 @@ function computeTorsoAlignment(va: VaganovaFullAnalysis): TeacherHeuristicState 
   return result;
 }
 
-function computeArm(va: VaganovaFullAnalysis, side: 'L' | 'R'): TeacherHeuristicState {
-  const m = side === 'L' ? va.armLineQualityL : va.armLineQualityR;
-  if (!isEligible(m)) return 'blocked';
-  // armLineQuality.value: Grad-Abweichung vom idealen Bogen
-  const deg = Math.abs(m!.value);
-  if (deg <= 8)  return 'heuristic_match';
-  if (deg <= 20) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+function computeArm(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
+  // armLineQuality is the actual elbow angle, not a deviation from zero. Its
+  // current candidate thresholds describe second position only, while this
+  // engine has no validated arm-position, camera-view or movement-phase gate.
+  // Keep both arms neutral until that context can authorize the upstream
+  // CORRECT/WARNING/ERROR status without reclassifying the angle here.
+  return 'blocked';
 }
 
 function computeLeg(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
-  // The only current inputs are research_observation (knee flexion) and an
+  // The only current inputs are research_observation (knee flexion) and a
   // directionally ambiguous individual_baseline delta. Both are display/shadow metrics and
   // explicitly have no scoring authority. A context-aware DecisionGate must
   // authorize a future leg color; until then the teacher overlay stays neutral.

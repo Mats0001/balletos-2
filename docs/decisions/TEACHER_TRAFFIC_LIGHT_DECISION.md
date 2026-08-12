@@ -13,6 +13,12 @@
 > `individual_baseline` ausdrücklich keine Urteilsmetriken. `legL` und `legR`
 > bleiben daher neutral, bis ein von Nicole geprüfter, quell-/schülergebundener
 > DecisionGate Perspektive, Bewegungsphase und Richtungssemantik autorisiert.
+> Die Arm-Heuristik ist ebenfalls vorläufig ausgesetzt: `armLineQuality` enthält
+> den tatsächlichen Ellbogenwinkel, wurde in der Ampel jedoch fälschlich als
+> Abweichung von 0° klassifiziert. Die hinterlegten Kandidatengrenzen gelten
+> zudem nur für die zweite Armposition. `armL` und `armR` bleiben neutral, bis
+> ein von Nicole geprüftes Gate Armposition, Perspektive und Bewegungsphase
+> explizit bestätigt und den vorhandenen Messstatus autorisiert.
 > Alle übrigen Teile dieser Entscheidung bleiben unverändert.
 
 ---
@@ -110,7 +116,7 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 |-------|----------|
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
-| `src/services/teacherHeuristicEngine.ts` | `legL`/`legR` bis zu einem kontextgebundenen DecisionGate → NEUTRAL |
+| `src/services/teacherHeuristicEngine.ts` | `armL`/`armR` und `legL`/`legR` bis zu kontextgebundenen Gates → NEUTRAL |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | VaganovaCuePoint: provenance, nicoleAction, learnerVisible, parentVisible, kiSuggestionData |
 
@@ -120,6 +126,7 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 
 - [x] Nur durch den aktuellen Evidenzvertrag autorisierte Regionen → Rot/Gelb/Grün im Lehrer-Ampelmodus
 - [x] Bein-Shadow-Metriken ohne Richtungs-/Kontextfreigabe → NEUTRAL
+- [x] Arm-Kandidatengrenzen ohne Positions-/Perspektivfreigabe → NEUTRAL
 - [x] `not_measurable`/`blocked` → niemals Grün (NEUTRAL grau)
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
 - [x] Moduswechsel verändert keine Rohmesswerte

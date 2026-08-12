@@ -30,6 +30,20 @@ function observation(
   };
 }
 
+function armMeasurement(
+  value: number,
+  status: 'CORRECT' | 'WARNING' | 'ERROR',
+): VaganovaMeasurement {
+  return {
+    value,
+    confidence: 0.95,
+    unit: 'deg',
+    label: 'actual elbow angle',
+    measurement_class: 'vaganova_relation',
+    status,
+  };
+}
+
 function analysis(overrides: Partial<VaganovaFullAnalysis> = {}): VaganovaFullAnalysis {
   return {
     knieFlexionL: null,
@@ -121,6 +135,24 @@ describe('TeacherHeuristicEngine evidence gates', () => {
 
       expect(packet.legL).toBe('blocked');
       expect(packet.legR).toBe('blocked');
+    },
+  );
+
+  it.each([
+    ['candidate-correct second-position angle', 160, 'CORRECT'],
+    ['candidate-warning second-position angle', 140, 'WARNING'],
+    ['candidate-error angle', 120, 'ERROR'],
+    ['near-zero angle that the former resolver inverted to green', 8, 'ERROR'],
+  ] as const)(
+    'keeps arm traffic colors neutral without a verified position and view: %s',
+    (_label, value, status) => {
+      const packet = engine.compute(analysis({
+        armLineQualityL: armMeasurement(value, status),
+        armLineQualityR: armMeasurement(value, status),
+      }), skeleton, 1, 1000);
+
+      expect(packet.armL).toBe('blocked');
+      expect(packet.armR).toBe('blocked');
     },
   );
 });
