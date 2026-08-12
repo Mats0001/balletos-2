@@ -18,13 +18,13 @@ import { vaganovaIdbCache } from '../services/vaganovaIdbCache';
 import { vaganovaAngleCalculator, VaganovaFullAnalysis } from '../services/vaganovaAngleCalculator';
 import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
-import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
+import { isTeacherOverlayPacketCurrent, renderSkeletonToCanvas, CanvasRenderOptions, resolveTeacherGlowType } from '../services/skeletonCanvasRenderer';
 import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
-import { TeacherOverlayPacket } from '../types/teacherHeuristic';
+import { createBlockedPacket, TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { framePump, FrameTickEvent } from '../services/framePump';
 import { overlayStabilizer } from '../services/overlayStabilizer';
 import { capabilityTierManager } from '../services/capabilityTier';
-import { makeNoPosePacket } from '../types/posePacket';
+import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY } from '../config/buildPolicy';
 import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
@@ -65,8 +65,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [selectedJointId, setSelectedJointId] = useState<string>('');
   /** Index of the actually clicked landmark (for glow positioning on exact joint) */
   const [clickedLandmarkIndex, setClickedLandmarkIndex] = useState<number | undefined>(undefined);
-  /** Glow type for selected cue point: 'GOOD' (green) or 'CORRECTION' (red-warm) */
-  const activeCueGlowTypeRef = useRef<'GOOD' | 'CORRECTION'>('CORRECTION');
+  /** Packet/cue-backed glow; undefined keeps selections neutral. */
+  const activeCueGlowTypeRef = useRef<CanvasRenderOptions['glowType']>(undefined);
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
   const [showIdealOverlay, setShowIdealOverlay] = useState<boolean>(false);
   /** Toggle: Dim everything except focused joint (spotlight effect) */
@@ -89,6 +89,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // Video Library State
   const [videoList, setVideoList] = useState<StoredVideoItem[]>(videoStore.getAllVideos());
   const [selectedDevVideoUrl, setSelectedDevVideoUrl] = useState<string>(videoList[0].url);
+  const selectedDevVideoUrlRef = useRef(selectedDevVideoUrl);
+  useEffect(() => { selectedDevVideoUrlRef.current = selectedDevVideoUrl; }, [selectedDevVideoUrl]);
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
@@ -106,12 +108,52 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const slowMoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const staticFrameRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const staticFrameRetryCountRef = useRef<number>(0);
 
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
   const [summaryOpen, setSummaryOpen] = useState<boolean>(true);
   const [summaryTab, setSummaryTab] = useState<number>(0);
+
+  const renderStateRef = useRef({
+    isPreIndexing,
+    showSkeleton,
+    showMotionTrails,
+    showCoG,
+    showAngleArcs,
+    selectedJointId,
+    clickedLandmarkIndex,
+    isPlaying,
+    showIdealOverlay,
+    showFocusDim,
+  });
+  useEffect(() => {
+    renderStateRef.current = {
+      isPreIndexing,
+      showSkeleton,
+      showMotionTrails,
+      showCoG,
+      showAngleArcs,
+      selectedJointId,
+      clickedLandmarkIndex,
+      isPlaying,
+      showIdealOverlay,
+      showFocusDim,
+    };
+  }, [
+    isPreIndexing,
+    showSkeleton,
+    showMotionTrails,
+    showCoG,
+    showAngleArcs,
+    selectedJointId,
+    clickedLandmarkIndex,
+    isPlaying,
+    showIdealOverlay,
+    showFocusDim,
+  ]);
 
   // VIDEO RENAME STATE
   const [renamingVideoId, setRenamingVideoId] = useState<string | null>(null);
@@ -219,6 +261,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const latestPacketRef = useRef<import('../types/posePacket').PosePacket | null>(null);
   const streamEpochRef = useRef<number>(Date.now());
   const frameSeqRef = useRef<number>(0);
+  const poseDropoutStartedAtRef = useRef<number | null>(null);
   const debugHudRef = useRef<import('../types/posePacket').FrameSyncDebugInfo>({
     inferenceMs: 0, poseAgeMs: 0, syncErrorMs: 0,
     droppedFrames: 0, skippedInferences: 0, usingRvfc: false,
@@ -437,6 +480,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       landmarksRef.current = null;
       worldLandmarksRef.current = null;
       cachedAnalysisRef.current = null;
+      stabilizedOverlayRef.current = null;
+      lastStabilizedAnalysisTimeRef.current = -1;
+      activeCueGlowTypeRef.current = undefined;
+      poseDropoutStartedAtRef.current = null;
+      if (staticFrameRetryRef.current) {
+        clearTimeout(staticFrameRetryRef.current);
+        staticFrameRetryRef.current = null;
+      }
+      staticFrameRetryCountRef.current = 0;
       frameSeqRef.current = 0;
       streamEpochRef.current = Date.now();
       vaganovaPoseEngine.reset();
@@ -470,6 +522,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       latestPacketRef.current = null;
       cachedAnalysisRef.current = null;
       stabilizedOverlayRef.current = null; // Phase 8: cached stabilizer result
+      lastStabilizedAnalysisTimeRef.current = -1;
+      activeCueGlowTypeRef.current = undefined;
+      poseDropoutStartedAtRef.current = null;
       landmarksRef.current = null;
       vaganovaPoseEngine.reset();
       const canvas = canvasRef.current;
@@ -492,8 +547,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
       const v = videoRef.current;
       const canvas = canvasRef.current;
+      const renderState = renderStateRef.current;
 
-      if (v && v.readyState >= 2 && !isPreIndexing) {
+      if (v && v.readyState >= 2 && !renderState.isPreIndexing) {
         const curTime = v.currentTime || 0;
         const timeDelta = Math.abs(curTime - lastProcessedTime);
         const shouldProcess = !v.paused || timeDelta > 0.01;
@@ -525,6 +581,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             };
             latestPacketRef.current = packet;
             landmarksRef.current = cached;
+            poseDropoutStartedAtRef.current = null;
 
             // Throttled React state update for side panels (~4fps)
             const now = performance.now();
@@ -580,8 +637,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 };
 
                 // Staleness check: discard if older than what we already have
-                const existing = latestPacketRef.current;
-                if (existing && packet.mediaTimeUs < existing.mediaTimeUs) {
+                const candidateIdentity = {
+                  streamEpoch: capturedEpoch,
+                  generation: capturedGeneration,
+                  sourceId: selectedDevVideoUrl,
+                  mediaTimeUs: capturedMediaTimeUs,
+                };
+                if (!isPoseResultLatest(candidateIdentity, latestPacketRef.current)) {
                   debugHudRef.current.droppedFrames++;
                   return; // Stale result – discard
                 }
@@ -591,6 +653,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
                 latestPacketRef.current = packet;
                 landmarksRef.current = lmToUse;
+                if (poseDropoutStartedAtRef.current !== null) {
+                  lastStabilizedAnalysisTimeRef.current = -1;
+                }
+                poseDropoutStartedAtRef.current = null;
                 if (data.worldLandmarks) worldLandmarksRef.current = data.worldLandmarks;
 
                 // Throttled React state update
@@ -603,13 +669,37 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 }
               } else {
                 // no_pose result – proper provenance tracking (Berater 2026-08-11)
-                latestPacketRef.current = makeNoPosePacket(
+                const candidateIdentity = {
+                  streamEpoch: capturedEpoch,
+                  generation: capturedGeneration,
+                  sourceId: selectedDevVideoUrl,
+                  mediaTimeUs: capturedMediaTimeUs,
+                };
+                if (!isPoseResultLatest(candidateIdentity, latestPacketRef.current)) {
+                  debugHudRef.current.droppedFrames++;
+                  return;
+                }
+                const noPosePacket = makeNoPosePacket(
                   capturedEpoch, capturedSeq, capturedMediaTimeUs,
                   'live_inference', capturedGeneration, selectedDevVideoUrl,
                   v.videoWidth || 0, v.videoHeight || 0
                 );
+                latestPacketRef.current = noPosePacket;
                 landmarksRef.current = null;
+                poseDropoutStartedAtRef.current ??= inferenceEndMs;
+                const blockedPacket = createBlockedPacket(
+                  capturedMediaTimeUs / 1_000_000,
+                  capturedEpoch,
+                );
+                stabilizedOverlayRef.current = overlayStabilizer.stabilize(
+                  blockedPacket,
+                  capturedGeneration,
+                );
+                lastStabilizedAnalysisTimeRef.current = capturedMediaTimeUs;
+                activeCueGlowTypeRef.current = undefined;
               }
+            }).then(status => {
+              if (status !== 'processed') isProcessingRef.current = false;
             }).catch(() => { isProcessingRef.current = false; });
           } else {
             debugHudRef.current.skippedInferences++;
@@ -624,7 +714,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           // P0-g FIX (Berater 2026-08-10): Staleness must skip draw, NOT return from rAF callback.
           // The old 'return' broke the renderLoop and stopped requestAnimationFrame.
           let skipDraw = false;
-          if (canvas2 && lm && showSkeleton) {
+          if (canvas2 && lm && renderState.showSkeleton) {
             // ── Staleness gate (Phase 4 fix, Berater v2) ────────────────────
             // FIXES:
             //   - Math.abs catches backward-seek (future landmarks)
@@ -664,9 +754,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 }
               }
 
-              // ⚡ THROTTLED ANALYSIS: max 15fps (every ~67ms) – canvas draw uses cached result at 60fps
+              // ⚡ THROTTLED ANALYSIS: max 20fps. The 50ms cadence stays safely
+              // inside the explicit 66.7ms two-frame render tolerance so normal
+              // scheduler jitter cannot produce a one-frame blank canvas.
               const nowMs = performance.now();
-              const ANALYSIS_INTERVAL_MS = 67; // ~15fps
+              const ANALYSIS_INTERVAL_MS = 50;
               if (nowMs - lastAnalysisTimeRef.current >= ANALYSIS_INTERVAL_MS || !cachedAnalysisRef.current) {
                 lastAnalysisTimeRef.current = nowMs;
                 const sk2 = vaganova3DKinematics.solve(lm, worldLandmarksRef.current, v.videoWidth, v.videoHeight);
@@ -690,6 +782,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               // Canvas draw always runs at 60fps using cached analysis
               const c = cachedAnalysisRef.current;
               if (c) {
+                const analysisIsCurrent = isPoseAnalysisCurrent(latestPacketRef.current, {
+                  streamEpoch: streamEpochRef.current,
+                  generation: framePump.generation,
+                  sourceId: selectedDevVideoUrl,
+                  analysisMediaTimeUs: c.packetMediaTimeUs,
+                  currentMediaTimeUs: (v.currentTime || 0) * 1_000_000,
+                });
+                if (!analysisIsCurrent) {
+                  const ctx2 = canvas2.getContext('2d');
+                  if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
+                } else {
                 // Read mode from ref (not state) to avoid effect restart on mode switch
                 const currentMode = overlayModeRef.current;
 
@@ -706,10 +809,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     const clockCap = cap?.frameClock ?? cap?.getTier?.() ?? 'A';
                     const canColor = typeof clockCap === 'string' && clockCap !== 'unavailable' && clockCap !== 'C';
                     if (canColor) {
+                      const analysisFramePtsSeconds = c.packetMediaTimeUs / 1_000_000;
                       const rawPacket = teacherHeuristicEngine.compute(
                         c.vagAn,
                         c.sk,
-                        v.currentTime,
+                        analysisFramePtsSeconds,
                         streamEpochRef.current,
                       );
                       overlayPacket = overlayStabilizer.stabilize(
@@ -725,25 +829,78 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 }
 
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
-                  showSkeleton: showSkeleton,
-                  showMotionTrails,
-                  showCoG,
-                  showAngleArcs,
-                  selectedJointId: !isPlaying ? selectedJointId : '',
-                  clickedLandmarkIndex: !isPlaying ? clickedLandmarkIndex : undefined,
+                  showSkeleton: renderState.showSkeleton,
+                  showMotionTrails: renderState.showMotionTrails,
+                  showCoG: renderState.showCoG,
+                  showAngleArcs: renderState.showAngleArcs,
+                  selectedJointId: !renderState.isPlaying ? renderState.selectedJointId : '',
+                  clickedLandmarkIndex: !renderState.isPlaying ? renderState.clickedLandmarkIndex : undefined,
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
-                  glowType: activeCueGlowTypeRef.current,
-                  showIdealOverlay: !isPlaying && showIdealOverlay,
-                  showFocusDim: !isPlaying && showFocusDim,
+                  glowType: currentMode === 'lehrer-ampel' && overlayPacket
+                    ? activeCueGlowTypeRef.current
+                    : undefined,
+                  showIdealOverlay: !renderState.isPlaying && renderState.showIdealOverlay,
+                  showFocusDim: !renderState.isPlaying && renderState.showFocusDim,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
                   overlayMode: currentMode,
                   overlayPacket,
+                  overlayFrameContext: {
+                    streamEpoch: streamEpochRef.current,
+                    framePtsSeconds: c.packetMediaTimeUs / 1_000_000,
+                    policyVersion: BUILD_POLICY.policyVersion,
+                  },
                 }, v.videoWidth, v.videoHeight);
+                }
               }
             } // end !skipDraw
 
-          } else if (canvas2 && !showSkeleton) {
+          } else if (canvas2 && renderState.showSkeleton) {
+            const packet = latestPacketRef.current;
+            const cachedAnalysis = cachedAnalysisRef.current;
+            const holdNeutral = cachedAnalysis && shouldHoldNeutralSkeleton(packet, {
+              streamEpoch: streamEpochRef.current,
+              generation: framePump.generation,
+              sourceId: selectedDevVideoUrl,
+              dropoutStartedAtMs: poseDropoutStartedAtRef.current,
+              nowMs: performance.now(),
+            });
+
+            if (holdNeutral && packet) {
+              const currentMode = overlayModeRef.current;
+              renderSkeletonToCanvas(
+                canvas2,
+                cachedAnalysis.sk,
+                cachedAnalysis.cogPt,
+                cachedAnalysis.armPos,
+                cachedAnalysis.elbowQ,
+                cachedAnalysis.epaul,
+                cachedAnalysis.footAl,
+                cachedAnalysis.wDist,
+                {
+                  showSkeleton: true,
+                  showMotionTrails: false,
+                  showCoG: false,
+                  showAngleArcs: false,
+                  selectedJointId: '',
+                  isPlie: cachedAnalysis.motionCls.isPlie,
+                  vaganovaAnalysis: cachedAnalysis.vagAn,
+                  overlayMode: currentMode,
+                  overlayPacket: stabilizedOverlayRef.current ?? undefined,
+                  overlayFrameContext: {
+                    streamEpoch: packet.streamEpoch,
+                    framePtsSeconds: packet.mediaTimeUs / 1_000_000,
+                    policyVersion: BUILD_POLICY.policyVersion,
+                  },
+                },
+                v.videoWidth,
+                v.videoHeight,
+              );
+            } else {
+              const ctx2 = canvas2.getContext('2d');
+              if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
+            }
+          } else if (canvas2 && !renderState.showSkeleton) {
             const ctx2 = canvas2.getContext('2d');
             if (ctx2) ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
           }
@@ -761,11 +918,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       if (animId) cancelAnimationFrame(animId);
       videoRef.current?.removeEventListener('seeking', handleSeeking);
       videoRef.current?.removeEventListener('seeked', handleSeeked);
+      if (staticFrameRetryRef.current) {
+        clearTimeout(staticFrameRetryRef.current);
+        staticFrameRetryRef.current = null;
+      }
+      staticFrameRetryCountRef.current = 0;
     };
   // FIX (Berater 2026-08-11): overlayMode removed from deps.
   // Mode is read via overlayModeRef inside the loop → no effect restart on mode switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDevVideoUrl, isPreIndexing, showSkeleton, showMotionTrails, showCoG, showAngleArcs, selectedJointId, clickedLandmarkIndex, showIdealOverlay, showFocusDim]);
+  }, [selectedDevVideoUrl]);
 
   // ── VIDEO TIME SYNC for Scrubber ─────────────────────────────────────────
   useEffect(() => {
@@ -787,34 +949,135 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Trigger immediate frame detection on Video Pause or Seek
   const processStaticPausedFrame = () => {
-    if (videoRef.current && videoRef.current.readyState >= 2) {
-      const curTime = videoRef.current.currentTime || 0;
-      const cached = vaganovaFrameCache.getFrame(selectedDevVideoUrl, curTime);
+    const capturedVideo = videoRef.current;
+    if (!capturedVideo || capturedVideo.readyState < 2 || capturedVideo.seeking) return;
 
-      if (cached) {
-        const smoothed = vaganovaPoseEngine.smoothLandmarks(cached, curTime);
-        if (smoothed) {
-          landmarksRef.current = smoothed;
-          setDetectedLandmarks(smoothed);
-          setIsEngineReady(true);
-        }
-      } else {
-        realMediaPipePose.processFrame(videoRef.current, (data: PoseResultsData) => {
-          if (data.landmarks && data.landmarks.length >= 33) {
-            const smoothed = vaganovaPoseEngine.smoothLandmarks(data.landmarks, curTime);
-            if (smoothed) {
-              landmarksRef.current = smoothed;
-              setDetectedLandmarks(smoothed);
-              setIsEngineReady(true);
-              if (data.worldLandmarks) {
-                worldLandmarksRef.current = data.worldLandmarks;
-                setDetectedWorldLandmarks(data.worldLandmarks);
-              }
-            }
-          }
-        });
-      }
+    const capturedTime = capturedVideo.currentTime || 0;
+    const capturedMediaTimeUs = capturedTime * 1_000_000;
+    const capturedEpoch = streamEpochRef.current;
+    const capturedGeneration = framePump.generation;
+    const capturedSourceId = selectedDevVideoUrlRef.current;
+    const capturedSeq = frameSeqRef.current++;
+    const inferenceStartedAtMs = performance.now();
+    const capturedIdentity = {
+      streamEpoch: capturedEpoch,
+      generation: capturedGeneration,
+      sourceId: capturedSourceId,
+      mediaTimeUs: capturedMediaTimeUs,
+    };
+
+    const captureIsCurrent = () => {
+      const currentVideo = videoRef.current;
+      return currentVideo === capturedVideo && isPoseCaptureCurrent(capturedIdentity, {
+        streamEpoch: streamEpochRef.current,
+        generation: framePump.generation,
+        sourceId: selectedDevVideoUrlRef.current,
+        mediaTimeUs: (currentVideo?.currentTime ?? -1) * 1_000_000,
+      });
+    };
+
+    const acceptNoPose = () => {
+      if (!captureIsCurrent()) return;
+
+      latestPacketRef.current = makeNoPosePacket(
+        capturedEpoch,
+        capturedSeq,
+        capturedMediaTimeUs,
+        'pause_reprocess',
+        capturedGeneration,
+        capturedSourceId,
+        capturedVideo.videoWidth || 0,
+        capturedVideo.videoHeight || 0,
+      );
+      landmarksRef.current = null;
+      worldLandmarksRef.current = null;
+      poseDropoutStartedAtRef.current ??= performance.now();
+      const blockedPacket = createBlockedPacket(capturedTime, capturedEpoch);
+      stabilizedOverlayRef.current = overlayStabilizer.stabilize(
+        blockedPacket,
+        capturedGeneration,
+      );
+      lastStabilizedAnalysisTimeRef.current = capturedMediaTimeUs;
+      activeCueGlowTypeRef.current = undefined;
+      setDetectedLandmarks(null);
+      setDetectedWorldLandmarks(null);
+      setIsEngineReady(false);
+      staticFrameRetryCountRef.current = 0;
+    };
+
+    const acceptPose = (
+      landmarks: PoseLandmark[],
+      source: 'frame_cache' | 'pause_reprocess',
+      worldLandmarks?: PoseLandmark[],
+    ) => {
+      if (!captureIsCurrent()) return;
+
+      const packet: import('../types/posePacket').PosePacket = {
+        streamEpoch: capturedEpoch,
+        frameSeq: capturedSeq,
+        mediaTimeUs: capturedMediaTimeUs,
+        inferenceStartedAtMs,
+        inferenceEndedAtMs: performance.now(),
+        resultKind: 'pose',
+        landmarks,
+        worldLandmarks,
+        avgVisibility: landmarks.reduce((sum, landmark) => sum + (landmark.visibility ?? 1), 0) / landmarks.length,
+        source,
+        generation: capturedGeneration,
+        sourceId: capturedSourceId,
+        videoWidth: capturedVideo.videoWidth || 0,
+        videoHeight: capturedVideo.videoHeight || 0,
+      };
+      latestPacketRef.current = packet;
+      landmarksRef.current = landmarks;
+      worldLandmarksRef.current = worldLandmarks ?? null;
+      cachedAnalysisRef.current = null;
+      lastStabilizedAnalysisTimeRef.current = -1;
+      poseDropoutStartedAtRef.current = null;
+      setDetectedLandmarks(landmarks);
+      setDetectedWorldLandmarks(worldLandmarks ?? null);
+      setIsEngineReady(true);
+      staticFrameRetryCountRef.current = 0;
+    };
+
+    const cached = vaganovaFrameCache.getFrame(capturedSourceId, capturedTime);
+    if (cached) {
+      const smoothed = vaganovaPoseEngine.smoothLandmarks(cached, capturedTime);
+      if (smoothed) acceptPose(smoothed, 'frame_cache');
+      else acceptNoPose();
+      return;
     }
+
+    void realMediaPipePose.processFrame(capturedVideo, (data: PoseResultsData) => {
+      if (!data.landmarks || data.landmarks.length < 33) {
+        acceptNoPose();
+        return;
+      }
+
+      const smoothed = vaganovaPoseEngine.smoothLandmarks(data.landmarks, capturedTime);
+      if (smoothed) acceptPose(smoothed, 'pause_reprocess', data.worldLandmarks);
+      else acceptNoPose();
+    }).then(status => {
+      if (!captureIsCurrent() || capturedVideo.seeking) return;
+
+      if (status === 'error' || status === 'unavailable') {
+        acceptNoPose();
+        return;
+      }
+
+      if (status !== 'busy') return;
+      if (staticFrameRetryCountRef.current >= 5) {
+        acceptNoPose();
+        return;
+      }
+
+      staticFrameRetryCountRef.current += 1;
+      if (staticFrameRetryRef.current) clearTimeout(staticFrameRetryRef.current);
+      staticFrameRetryRef.current = setTimeout(() => {
+        staticFrameRetryRef.current = null;
+        processStaticPausedFrame();
+      }, 50);
+    }).catch(acceptNoPose);
   };
 
   // Handle Custom Video Upload
@@ -875,7 +1138,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       setSelectedFrameTime(cue.timecodeStr);
       setSelectedJointId(cue.jointFocusId);
       setClickedLandmarkIndex(undefined); // Cue-based → fallback to region-center glow
-      activeCueGlowTypeRef.current = cue.status === 'GOOD' ? 'GOOD' : 'CORRECTION';
+      // Cue classification is not the live frame's color authority.
+      activeCueGlowTypeRef.current = undefined;
 
       // ── AUTO-ZOOM: Zoom zum relevanten Gelenk ──
       const jointPositions: Record<string, { y: number }> = {
@@ -1125,7 +1389,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
         // Determine glow type from current overlay packet state
         const pkt = stabilizedOverlayRef.current;
-        if (pkt) {
+        const analysisFramePtsSeconds = (cachedAnalysisRef.current?.packetMediaTimeUs ?? -1) / 1_000_000;
+        const currentPacket = overlayModeRef.current === 'lehrer-ampel'
+          && isTeacherOverlayPacketCurrent(pkt ?? undefined, {
+            streamEpoch: streamEpochRef.current,
+            framePtsSeconds: analysisFramePtsSeconds,
+            policyVersion: BUILD_POLICY.policyVersion,
+          })
+          ? pkt
+          : undefined;
+        if (currentPacket) {
           // Map jointId → overlay packet key
           const JOINT_TO_PKT_KEY: Record<string, keyof import('../types/teacherHeuristic').TeacherOverlayPacket> = {
             'left_knee':       'legL',
@@ -1133,18 +1406,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             'left_elbow':      'armL',
             'right_elbow':     'armR',
             'port_de_bras_arms': 'armL',
-            'head_epaulement': 'torsoAlignment',
+            'head_epaulement': 'head',
             'spine_center':    'spine',
             'pelvis_core':     'pelvis',
             'shoulder_line':   'shoulder',
           };
           const pktKey = JOINT_TO_PKT_KEY[mappedJointId];
-          const state = pktKey ? pkt[pktKey] : undefined;
-          activeCueGlowTypeRef.current =
-            (state === 'heuristic_match') ? 'GOOD' : 'CORRECTION';
+          const state = pktKey ? currentPacket[pktKey] : undefined;
+          activeCueGlowTypeRef.current = resolveTeacherGlowType(state);
         } else {
-          // No overlay data → neutral correction glow
-          activeCueGlowTypeRef.current = 'CORRECTION';
+          // Missing evidence stays neutral; selection/focus still identifies the joint.
+          activeCueGlowTypeRef.current = undefined;
         }
 
         // Auto-zoom to the ACTUAL landmark position (supports synthetic index 100)

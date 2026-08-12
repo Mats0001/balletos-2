@@ -11,8 +11,12 @@ import { vaganovaKineticAI } from './vaganovaKineticAI';
 import { vaganovaArmAnalyzer, ArmPositionResult, ElbowAnalysis, EpaulementResult } from './vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer, SickleWingResult, WeightDistributionResult } from './vaganovaFootAnalyzer';
 import { VaganovaFullAnalysis } from './vaganovaAngleCalculator';
-import { TEACHER_AMPEL_COLORS, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
-import { TeacherOverlayPacket, heuristicColor, heuristicDash } from '../types/teacherHeuristic';
+import {
+  TeacherOverlayPacket,
+  heuristicColor,
+  heuristicDash,
+} from '../types/teacherHeuristic';
+import type { TeacherHeuristicState } from '../types/teacherHeuristic';
 
 // ─── ANATOMISCHE FARBPALETTE (Berater 2026-08-10 – Sprint 1) ───
 // Farben kodieren Körperregionen, KEIN Status-Urteil.
@@ -35,6 +39,81 @@ const COLOR_TRAIL_ANKLE = '#818cf8'; // indigo – Knöchel-Trajektorie
 /** Opacity basierend auf Confidence (0.4–1.0). Kein Status-Urteil. */
 const confidenceAlpha = (conf?: number): number =>
   conf === undefined ? 0.9 : Math.max(0.4, Math.min(1.0, 0.4 + conf * 0.6));
+
+export type TeacherOverlayRegionKey =
+  | 'torsoAlignment'
+  | 'spine'
+  | 'shoulder'
+  | 'pelvis'
+  | 'armL'
+  | 'armR'
+  | 'legL'
+  | 'legR'
+  | 'footL'
+  | 'footR'
+  | 'cog'
+  | 'head';
+
+export interface TeacherOverlayVisualStyle {
+  state: TeacherHeuristicState;
+  color: string;
+  dash: number[];
+}
+
+export interface TeacherOverlayFrameContext {
+  streamEpoch: number;
+  framePtsSeconds: number;
+  policyVersion: string;
+}
+
+const isTeacherHeuristicState = (value: unknown): value is TeacherHeuristicState =>
+  value === 'heuristic_match'
+  || value === 'heuristic_attention'
+  || value === 'heuristic_strong_attention'
+  || value === 'blocked';
+
+/**
+ * The single presentation contract for traffic-light colors.
+ * Missing or malformed packets fail closed to neutral/blocked.
+ */
+export function resolveTeacherOverlayStyle(
+  packet: TeacherOverlayPacket | undefined,
+  key: TeacherOverlayRegionKey,
+): TeacherOverlayVisualStyle {
+  const candidate = packet?.[key];
+  const state: TeacherHeuristicState = isTeacherHeuristicState(candidate)
+    ? candidate
+    : 'blocked';
+
+  return {
+    state,
+    color: heuristicColor(state),
+    dash: heuristicDash(state),
+  };
+}
+
+/** Reject packets from another clip, frame, or policy revision. */
+export function isTeacherOverlayPacketCurrent(
+  packet: TeacherOverlayPacket | undefined,
+  context: TeacherOverlayFrameContext | undefined,
+): packet is TeacherOverlayPacket {
+  if (!packet || !context) return false;
+
+  return packet.streamEpoch === context.streamEpoch
+    && packet.policyVersion === context.policyVersion
+    && Number.isFinite(packet.framePtsSeconds)
+    && Number.isFinite(context.framePtsSeconds)
+    && Math.abs(packet.framePtsSeconds - context.framePtsSeconds) <= 0.000001;
+}
+
+/** Missing/blocked evidence has no red or green semantic glow. */
+export function resolveTeacherGlowType(
+  state: unknown,
+): 'GOOD' | 'CORRECTION' | undefined {
+  if (state === 'heuristic_match') return 'GOOD';
+  if (state === 'heuristic_strong_attention') return 'CORRECTION';
+  return undefined;
+}
 
 export interface CanvasRenderOptions {
   showSkeleton: boolean;
@@ -67,6 +146,8 @@ export interface CanvasRenderOptions {
    * Fehlt das Packet im Lehrer-Ampel-Modus → alle Bereiche neutral/blocked.
    */
   overlayPacket?: TeacherOverlayPacket;
+  /** Expected provenance for the packet rendered onto this exact skeleton frame. */
+  overlayFrameContext?: TeacherOverlayFrameContext;
 }
 
 /**
@@ -103,7 +184,8 @@ function drawCircle(
   fillColor: string,
   sx: number, sy: number,
   strokeColor?: string,
-  strokeWidth?: number
+  strokeWidth?: number,
+  strokeDash?: number[],
 ) {
   const avgScale = (sx + sy) / 2;
   ctx.beginPath();
@@ -115,7 +197,9 @@ function drawCircle(
   if (strokeColor) {
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = (strokeWidth || 1) * avgScale;
+    ctx.setLineDash(strokeDash ?? []);
     ctx.stroke();
+    ctx.setLineDash([]);
   }
 }
 
@@ -349,49 +433,30 @@ export function renderSkeletonToCanvas(
   // 'anatomisch' und 'lehrbuch' enthalten KEINE Urteils-Farben.
   const mode = opts.overlayMode ?? 'anatomisch';
   // Packet aus opts – fehlt es im Lehrer-Modus, alles blocked
-  const pkt = opts.overlayPacket;
-
-  // Status → Farbe (nur aktiv in 'lehrer-ampel'-Modus)
-  // WICHTIG: undefined/not_measurable = NEUTRAL (niemals automatisch Grün!)
-  // (Berater PROJECT_DECISION 2026-08-10)
-  const statusColor = (s?: string, measurementClass?: string): string => {
-    if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
-    // Neutrale Zustände: fehlende Evidenz darf NIEMALS Grün werden
-    if (!s || s === undefined) return TEACHER_AMPEL_COLORS.NEUTRAL;
-    if (measurementClass && NEUTRAL_MEASUREMENT_CLASSES.has(measurementClass as any))
-      return TEACHER_AMPEL_COLORS.NEUTRAL;
-    return s === 'CORRECT' ? TEACHER_AMPEL_COLORS.CORRECT
-         : s === 'WARNING' ? TEACHER_AMPEL_COLORS.WARNING
-         : s === 'ERROR'   ? TEACHER_AMPEL_COLORS.ERROR
-         : TEACHER_AMPEL_COLORS.NEUTRAL;
-  };
+  const pkt = mode === 'lehrer-ampel'
+    && isTeacherOverlayPacketCurrent(opts.overlayPacket, opts.overlayFrameContext)
+    ? opts.overlayPacket
+    : undefined;
 
   /**
    * Holt Farbe aus TeacherOverlayPacket für einen Körperbereich.
    * Renderer berechnet KEINE Heuristik – nur Farb-Lookup.
    * Fehlt das Packet → NEUTRAL.
    */
-  const packetColor = (key: keyof TeacherOverlayPacket): string => {
-    if (mode !== 'lehrer-ampel' || !pkt) return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
-    const state = pkt[key];
-    if (typeof state !== 'string') return TEACHER_AMPEL_COLORS.NEUTRAL;
-    // Only heuristic state strings go through heuristicColor
-    if (state === 'heuristic_match' || state === 'heuristic_attention' || state === 'heuristic_strong_attention' || state === 'blocked') {
-      return heuristicColor(state);
-    }
-    return TEACHER_AMPEL_COLORS.NEUTRAL;
+  const packetColor = (key: TeacherOverlayRegionKey): string => {
+    if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
+    return resolveTeacherOverlayStyle(pkt, key).color;
   };
 
   /** Strich-Muster für blockierte Bereiche */
-  const packetDash = (key: keyof TeacherOverlayPacket): number[] => {
-    if (mode !== 'lehrer-ampel' || !pkt) return [];
-    const state = pkt[key];
-    if (typeof state !== 'string') return [5, 4];
-    if (state === 'heuristic_match' || state === 'heuristic_attention' || state === 'heuristic_strong_attention' || state === 'blocked') {
-      return heuristicDash(state);
-    }
-    return [];
+  const packetDash = (key: TeacherOverlayRegionKey): number[] => {
+    if (mode !== 'lehrer-ampel') return [];
+    return resolveTeacherOverlayStyle(pkt, key).dash;
   };
+
+  /** Raw confidence may block evidence upstream, but must not pulse line opacity. */
+  const stableAlpha = (confidence?: number): number =>
+    mode === 'lehrer-ampel' ? 0.9 : confidenceAlpha(confidence);
 
   // Knochen-Farbe nach Region und Modus
   const boneColor = (regional: string): string =>
@@ -415,20 +480,21 @@ export function renderSkeletonToCanvas(
 
   // ─── MOTION TRAILS ───
   if (opts.showMotionTrails) {
+    const ankleTrailColor = mode === 'lehrer-ampel' ? COLOR_TRAIL_ANKLE : '#30d158';
     // Tapering trails (comet tails)
     drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('wristL', 10), 'rgba(192,132,252,0.5)', null, 0, sx, sy);
     drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('wristR', 10), 'rgba(192,132,252,0.5)', null, 0, sx, sy);
-    drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('ankleL', 10), 'rgba(48,209,88,0.5)', null, 0, sx, sy);
-    drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('ankleR', 10), 'rgba(48,209,88,0.5)', null, 0, sx, sy);
+    drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('ankleL', 10), ankleTrailColor, null, 0, sx, sy, 0.5);
+    drawSVGPath(ctx, vaganovaKineticAI.getTaperingTrailPath('ankleR', 10), ankleTrailColor, null, 0, sx, sy, 0.5);
 
     // Centerline spines
     drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('wristL'), null, '#c084fc', 1.5, sx, sy, 0.6);
     drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('wristR'), null, '#c084fc', 1.5, sx, sy, 0.6);
-    drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('ankleL'), null, '#30d158', 1.5, sx, sy, 0.6);
-    drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('ankleR'), null, '#30d158', 1.5, sx, sy, 0.6);
+    drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('ankleL'), null, ankleTrailColor, 1.5, sx, sy, 0.6);
+    drawSVGPath(ctx, vaganovaKineticAI.getTrailPath('ankleR'), null, ankleTrailColor, 1.5, sx, sy, 0.6);
 
     // Trail endpoint nodes
-    for (const [key, color] of [['wristL', '#c084fc'], ['wristR', '#c084fc'], ['ankleL', '#30d158'], ['ankleR', '#30d158']] as [string, string][]) {
+    for (const [key, color] of [['wristL', '#c084fc'], ['wristR', '#c084fc'], ['ankleL', ankleTrailColor], ['ankleR', ankleTrailColor]] as [string, string][]) {
       const pts = vaganovaKineticAI.getTrailPoints(key);
       const len = pts.length;
       for (let i = 0; i < len; i++) {
@@ -453,7 +519,7 @@ export function renderSkeletonToCanvas(
     const cogDash = mode === 'lehrer-ampel' ? packetDash('cog') : [];
     drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 2.5, sx, sy, cogDash);
     drawCircle(ctx, cog.x, cog.y, 10,
-      mode === 'lehrer-ampel' ? (cogC + '25').slice(0, 9) : 'rgba(167,139,250,0.25)',
+      mode === 'lehrer-ampel' ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.25)',
       sx, sy, cogC, 3);
     drawCircle(ctx, cog.x, cog.y, 3, '#ffffff', sx, sy);
   }
@@ -469,85 +535,88 @@ export function renderSkeletonToCanvas(
     for (const [anklePoint, turnoutKey] of turnoutPairs) {
       const turnoutVal = va?.[turnoutKey];
       const turnoutConf = turnoutVal?.confidence ?? 0.7;
-      const tColor = mode === 'lehrer-ampel'
-        ? statusColor(turnoutVal?.status)
-        : boneColor(COLOR_SPINE);
+      // There is no evidence-compatible turnout field in TeacherOverlayPacket.
+      // Keep the arc neutral instead of reusing raw measurement status.
+      const turnoutStyle = resolveTeacherOverlayStyle(undefined, 'footL');
+      const tColor = mode === 'lehrer-ampel' ? turnoutStyle.color : boneColor(COLOR_SPINE);
       ctx.beginPath();
       ctx.arc(anklePoint.x * sx, anklePoint.y * sy, 28 * avgS, Math.PI, 0);
       ctx.strokeStyle = tColor;
       ctx.lineWidth = 3 * avgS;
-      ctx.globalAlpha = confidenceAlpha(turnoutConf) * 0.7;
+      ctx.setLineDash(mode === 'lehrer-ampel' ? turnoutStyle.dash : []);
+      ctx.globalAlpha = stableAlpha(turnoutConf) * 0.7;
       ctx.fillStyle = mode === 'lehrer-ampel'
-        ? (turnoutVal?.status === 'CORRECT' ? 'rgba(48,209,88,0.12)' : 'rgba(255,214,10,0.10)')
+        ? 'rgba(255,255,255,0.04)'
         : 'rgba(226,232,240,0.06)';
       ctx.fill();
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.globalAlpha = 1.0;
     }
   }
 
   // ─── KOPF & HALS ───
   const headConf = opts.vaganovaAnalysis?.headTilt?.confidence;
-  const headStatusC = statusColor(opts.vaganovaAnalysis?.headTilt?.status);
-  const headC = mode === 'lehrer-ampel' ? headStatusC : boneColor(COLOR_HEAD);
-  ctx.globalAlpha = confidenceAlpha(headConf);
+  const headC = mode === 'lehrer-ampel' ? packetColor('head') : boneColor(COLOR_HEAD);
+  ctx.globalAlpha = stableAlpha(headConf);
   drawCircle(ctx, head.x, head.y, 18,
     mode === 'lehrer-ampel' ? 'rgba(192,132,252,0.15)' : 'rgba(192,132,252,0.18)', sx, sy,
-    opts.selectedJointId === 'head_epaulement' ? selColor : headC, 2.5);
+    mode !== 'lehrer-ampel' && opts.selectedJointId === 'head_epaulement' ? selColor : headC, 2.5,
+    mode === 'lehrer-ampel' ? packetDash('head') : []);
   drawLine(ctx, head.x, head.y, neck.x, neck.y, boneColor(COLOR_SPINE), 3.5, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // ─── WIRBELSÄULE ───
   const spineConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
-  const spineC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.spineTilt?.status)
-    : boneColor(COLOR_SPINE);
-  ctx.globalAlpha = confidenceAlpha(spineConf);
-  drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy);
-  drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 4, sx, sy);
-  drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 4, sx, sy);
+  const spineC = mode === 'lehrer-ampel' ? packetColor('spine') : boneColor(COLOR_SPINE);
+  const spineDash = mode === 'lehrer-ampel' ? packetDash('spine') : [];
+  ctx.globalAlpha = stableAlpha(spineConf);
+  drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy, spineDash);
+  drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 4, sx, sy, spineDash);
+  drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 4, sx, sy, spineDash);
   drawCircle(ctx, neck.x, neck.y, 5.5, COLOR_JOINT, sx, sy);
   drawCircle(ctx, sternum.x, sternum.y, 5.5, COLOR_JOINT, sx, sy);
-  drawCircle(ctx, navel.x, navel.y, 6.5, selColor, sx, sy);
+  drawCircle(ctx, navel.x, navel.y, 6.5, mode === 'lehrer-ampel' ? COLOR_JOINT : selColor, sx, sy);
   drawCircle(ctx, pelvisCenter.x, pelvisCenter.y, 7, COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // ─── ARME (violett / status im Lehrer-Ampel-Modus) ───
   const armLConf = opts.vaganovaAnalysis?.armLineQualityL?.confidence;
   const armRConf = opts.vaganovaAnalysis?.armLineQualityR?.confidence;
-  const armLStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityL?.status);
-  const armRStatusC = statusColor(opts.vaganovaAnalysis?.armLineQualityR?.status);
-  const armLColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
-    : mode === 'lehrer-ampel' ? armLStatusC : boneColor(COLOR_ARM);
-  const armRColor = opts.selectedJointId === 'port_de_bras_arms' ? selColor
-    : mode === 'lehrer-ampel' ? armRStatusC : boneColor(COLOR_ARM);
+  const armLStatusC = mode === 'lehrer-ampel' ? packetColor('armL') : boneColor(COLOR_ARM);
+  const armRStatusC = mode === 'lehrer-ampel' ? packetColor('armR') : boneColor(COLOR_ARM);
+  const armLDash = mode === 'lehrer-ampel' ? packetDash('armL') : [];
+  const armRDash = mode === 'lehrer-ampel' ? packetDash('armR') : [];
+  const armLColor = mode === 'lehrer-ampel' ? armLStatusC
+    : opts.selectedJointId === 'port_de_bras_arms' ? selColor : boneColor(COLOR_ARM);
+  const armRColor = mode === 'lehrer-ampel' ? armRStatusC
+    : opts.selectedJointId === 'port_de_bras_arms' ? selColor : boneColor(COLOR_ARM);
 
   // Schulterleiste
   const shConf = opts.vaganovaAnalysis?.shoulderSymmetry?.confidence;
-  const shC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.shoulderSymmetry?.status)
-    : boneColor(COLOR_ARM);
-  ctx.globalAlpha = confidenceAlpha(shConf);
-  drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy);
+  const shC = mode === 'lehrer-ampel' ? packetColor('shoulder') : boneColor(COLOR_ARM);
+  const shDash = mode === 'lehrer-ampel' ? packetDash('shoulder') : [];
+  ctx.globalAlpha = stableAlpha(shConf);
+  drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy, shDash);
   drawCircle(ctx, shoulderL.x, shoulderL.y, 7, COLOR_JOINT, sx, sy);
   drawCircle(ctx, shoulderR.x, shoulderR.y, 7, COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Linker Arm
-  ctx.globalAlpha = confidenceAlpha(armLConf);
-  drawLine(ctx, shoulderL.x, shoulderL.y, elbowL.x, elbowL.y, armLColor, 4.5, sx, sy);
-  drawLine(ctx, elbowL.x, elbowL.y, wristL.x, wristL.y, armLColor, 4.5, sx, sy);
+  ctx.globalAlpha = stableAlpha(armLConf);
+  drawLine(ctx, shoulderL.x, shoulderL.y, elbowL.x, elbowL.y, armLColor, 4.5, sx, sy, armLDash);
+  drawLine(ctx, elbowL.x, elbowL.y, wristL.x, wristL.y, armLColor, 4.5, sx, sy, armLDash);
   // Rechter Arm
-  ctx.globalAlpha = confidenceAlpha(armRConf);
-  drawLine(ctx, shoulderR.x, shoulderR.y, elbowR.x, elbowR.y, armRColor, 4.5, sx, sy);
-  drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 4.5, sx, sy);
+  ctx.globalAlpha = stableAlpha(armRConf);
+  drawLine(ctx, shoulderR.x, shoulderR.y, elbowR.x, elbowR.y, armRColor, 4.5, sx, sy, armRDash);
+  drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 4.5, sx, sy, armRDash);
   ctx.globalAlpha = 1.0;
 
   // Ellenbogen-Ringe
   const elbowC = boneColor(COLOR_ARM);
-  ctx.globalAlpha = confidenceAlpha(armLConf ?? 0.8) * 0.85;
+  ctx.globalAlpha = stableAlpha(armLConf ?? 0.8) * 0.85;
   drawDashedCircle(ctx, elbowL.x, elbowL.y, 18, mode === 'lehrer-ampel' ? armLStatusC : elbowC, 2, sx, sy);
-  ctx.globalAlpha = confidenceAlpha(armRConf ?? 0.8) * 0.85;
+  ctx.globalAlpha = stableAlpha(armRConf ?? 0.8) * 0.85;
   drawDashedCircle(ctx, elbowR.x, elbowR.y, 18, mode === 'lehrer-ampel' ? armRStatusC : elbowC, 2, sx, sy);
   ctx.globalAlpha = 1.0;
 
@@ -568,16 +637,15 @@ export function renderSkeletonToCanvas(
     : boneColor(COLOR_SPINE);
   const torsoDash = mode === 'lehrer-ampel' ? packetDash('torsoAlignment') : [];
   const torsoConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
-  ctx.globalAlpha = confidenceAlpha(torsoConf) * 0.75;
+  ctx.globalAlpha = stableAlpha(torsoConf) * 0.75;
   drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, torsoAlignC, 2.5, sx, sy, torsoDash);
   drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, torsoAlignC, 2.5, sx, sy, torsoDash);
   // Becken-Leiste
   const pelvisConf = opts.vaganovaAnalysis?.pelvicTilt?.confidence;
-  const pelvisC = mode === 'lehrer-ampel'
-    ? statusColor(opts.vaganovaAnalysis?.pelvicTilt?.status)
-    : boneColor(COLOR_PELVIS);
-  ctx.globalAlpha = confidenceAlpha(pelvisConf);
-  drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy);
+  const pelvisC = mode === 'lehrer-ampel' ? packetColor('pelvis') : boneColor(COLOR_PELVIS);
+  const pelvisDash = mode === 'lehrer-ampel' ? packetDash('pelvis') : [];
+  ctx.globalAlpha = stableAlpha(pelvisConf);
+  drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy, pelvisDash);
   ctx.globalAlpha = 1.0;
 
   // ─── BEINE (aus TeacherOverlayPacket) ───
@@ -592,21 +660,23 @@ export function renderSkeletonToCanvas(
   const legRConf = opts.vaganovaAnalysis?.knieFlexionR?.confidence ?? opts.vaganovaAnalysis?.valgusDriftR?.confidence;
 
   // Linkes Bein
-  ctx.globalAlpha = confidenceAlpha(legLConf);
+  ctx.globalAlpha = stableAlpha(legLConf);
   drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy, legLDash);
   drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy, legLDash);
   const kneeLSize = opts.selectedJointId === 'left_knee' ? 9 : 6.5;
   drawCircle(ctx, kneeL.x, kneeL.y, kneeLSize,
-    opts.selectedJointId === 'left_knee' ? selColor : (mode === 'lehrer-ampel' ? legLC : COLOR_JOINT), sx, sy);
+    mode === 'lehrer-ampel' ? legLC
+      : opts.selectedJointId === 'left_knee' ? selColor : COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Rechtes Bein
-  ctx.globalAlpha = confidenceAlpha(legRConf);
+  ctx.globalAlpha = stableAlpha(legRConf);
   drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy, legRDash);
   drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy, legRDash);
   const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
   drawCircle(ctx, kneeR.x, kneeR.y, kneeRSize,
-    opts.selectedJointId === 'right_knee' ? selColor : (mode === 'lehrer-ampel' ? legRC : COLOR_JOINT), sx, sy);
+    mode === 'lehrer-ampel' ? legRC
+      : opts.selectedJointId === 'right_knee' ? selColor : COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // ─── FUß-DOTS (aus TeacherOverlayPacket) ───
@@ -614,10 +684,10 @@ export function renderSkeletonToCanvas(
   // footL/footR = 'blocked' → kein Dot (fehlende Evidenz = kein Urteil)
   const footLC = mode === 'lehrer-ampel' ? packetColor('footL') : boneColor(COLOR_LEG);
   const footRC = mode === 'lehrer-ampel' ? packetColor('footR') : boneColor(COLOR_LEG);
-  if (footL && mode === 'lehrer-ampel' && pkt?.footL !== 'blocked') {
+  if (footL && mode === 'lehrer-ampel' && resolveTeacherOverlayStyle(pkt, 'footL').state !== 'blocked') {
     drawCircle(ctx, ankleL.x, ankleL.y, 8, footLC, sx, sy, footLC, 2);
   }
-  if (footR && mode === 'lehrer-ampel' && pkt?.footR !== 'blocked') {
+  if (footR && mode === 'lehrer-ampel' && resolveTeacherOverlayStyle(pkt, 'footR').state !== 'blocked') {
     drawCircle(ctx, ankleR.x, ankleR.y, 8, footRC, sx, sy, footRC, 2);
   }
 
@@ -686,9 +756,12 @@ export function renderSkeletonToCanvas(
   // Glow sitzt auf dem TATSÄCHLICH angeklickten Landmark, nicht auf der Region-Mitte.
   const selId = opts.selectedJointId;
   const glowPhase = opts.glowPulsePhase ?? 0;
-  const isGood = opts.glowType === 'GOOD';
+  const trustedGlowType = mode === 'lehrer-ampel' && !pkt
+    ? undefined
+    : opts.glowType;
+  const isGood = trustedGlowType === 'GOOD';
 
-  if (selId && selId !== '') {
+  if (selId && selId !== '' && trustedGlowType) {
     let glowX: number | undefined;
     let glowY: number | undefined;
     let glowRadius = 25;

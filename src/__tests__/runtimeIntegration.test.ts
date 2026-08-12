@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { FramePump } from '../services/framePump';
 import { OverlayStabilizer } from '../services/overlayStabilizer';
 import { CapabilityManager } from '../services/capabilityTier';
-import { makeNoPosePacket, PosePacket } from '../types/posePacket';
+import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, PosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
 import { TeacherOverlayPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
@@ -160,6 +160,150 @@ describe('Runtime Integration: PosePacket Provenance', () => {
   it('pause packets have source=pause_reprocess', () => {
     const packet = makeFullPacket({ source: 'pause_reprocess' });
     expect(packet.source).toBe('pause_reprocess');
+  });
+});
+
+describe('Runtime Integration: Neutral Pose Dropout', () => {
+  const context = {
+    streamEpoch: 12345,
+    generation: 3,
+    sourceId: 'test.mp4',
+    dropoutStartedAtMs: 1000,
+    nowMs: 1100,
+  };
+
+  it('briefly holds only a current no-pose packet', () => {
+    const packet = makeNoPosePacket(
+      context.streamEpoch, 1, 1_000_000,
+      'live_inference', context.generation, context.sourceId, 1920, 1080,
+    );
+
+    expect(shouldHoldNeutralSkeleton(packet, context)).toBe(true);
+    expect(shouldHoldNeutralSkeleton(packet, { ...context, streamEpoch: 999 })).toBe(false);
+    expect(shouldHoldNeutralSkeleton(packet, { ...context, generation: 4 })).toBe(false);
+    expect(shouldHoldNeutralSkeleton(packet, { ...context, sourceId: 'other.mp4' })).toBe(false);
+  });
+
+  it('does not extend the neutral hold beyond the fixed first-dropout window', () => {
+    const repeatedNoPosePacket = makeNoPosePacket(
+      context.streamEpoch, 99, 5_000_000,
+      'live_inference', context.generation, context.sourceId, 1920, 1080,
+    );
+
+    expect(shouldHoldNeutralSkeleton(repeatedNoPosePacket, {
+      ...context,
+      nowMs: 1251,
+    })).toBe(false);
+  });
+
+  it('never holds a valid pose packet or an unknown dropout start', () => {
+    expect(shouldHoldNeutralSkeleton(makeFullPacket({
+      streamEpoch: context.streamEpoch,
+      generation: context.generation,
+      sourceId: context.sourceId,
+    }), context)).toBe(false);
+    expect(shouldHoldNeutralSkeleton(null, context)).toBe(false);
+    expect(shouldHoldNeutralSkeleton(
+      makeNoPosePacket(context.streamEpoch, 1, 0),
+      { ...context, dropoutStartedAtMs: null },
+    )).toBe(false);
+  });
+});
+
+describe('Runtime Integration: Paused-Frame Capture Guard', () => {
+  const captured = {
+    streamEpoch: 123,
+    generation: 4,
+    sourceId: 'clip-a.mp4',
+    mediaTimeUs: 2_500_000,
+  };
+
+  it('accepts only the matching source, generation, epoch, and frame', () => {
+    expect(isPoseCaptureCurrent(captured, { ...captured })).toBe(true);
+    expect(isPoseCaptureCurrent(captured, { ...captured, streamEpoch: 124 })).toBe(false);
+    expect(isPoseCaptureCurrent(captured, { ...captured, generation: 5 })).toBe(false);
+    expect(isPoseCaptureCurrent(captured, { ...captured, sourceId: 'clip-b.mp4' })).toBe(false);
+    expect(isPoseCaptureCurrent(captured, { ...captured, mediaTimeUs: 2_600_000 })).toBe(false);
+  });
+
+  it('permits sub-frame timestamp rounding only within the explicit tolerance', () => {
+    expect(isPoseCaptureCurrent(captured, {
+      ...captured,
+      mediaTimeUs: captured.mediaTimeUs + 33_333,
+    })).toBe(true);
+    expect(isPoseCaptureCurrent(captured, {
+      ...captured,
+      mediaTimeUs: captured.mediaTimeUs + 33_334,
+    })).toBe(false);
+  });
+});
+
+describe('Runtime Integration: Latest Pose Result Wins', () => {
+  const existing = makeFullPacket({
+    streamEpoch: 123,
+    generation: 4,
+    sourceId: 'clip-a.mp4',
+    mediaTimeUs: 2_500_000,
+  });
+  const candidate = {
+    streamEpoch: 123,
+    generation: 4,
+    sourceId: 'clip-a.mp4',
+    mediaTimeUs: 2_500_000,
+  };
+
+  it('accepts the same or a newer frame for pose and no-pose alike', () => {
+    expect(isPoseResultLatest(candidate, existing)).toBe(true);
+    expect(isPoseResultLatest({ ...candidate, mediaTimeUs: 2_600_000 }, existing)).toBe(true);
+    expect(isPoseResultLatest(candidate, null)).toBe(true);
+  });
+
+  it('rejects an older or differently scoped result', () => {
+    expect(isPoseResultLatest({ ...candidate, mediaTimeUs: 2_499_999 }, existing)).toBe(false);
+    expect(isPoseResultLatest({ ...candidate, streamEpoch: 124 }, existing)).toBe(false);
+    expect(isPoseResultLatest({ ...candidate, generation: 5 }, existing)).toBe(false);
+    expect(isPoseResultLatest({ ...candidate, sourceId: 'clip-b.mp4' }, existing)).toBe(false);
+  });
+});
+
+describe('Runtime Integration: Rendered Analysis Guard', () => {
+  const packet = makeFullPacket({
+    streamEpoch: 123,
+    generation: 4,
+    sourceId: 'clip-a.mp4',
+    mediaTimeUs: 2_500_000,
+  });
+  const context = {
+    streamEpoch: 123,
+    generation: 4,
+    sourceId: 'clip-a.mp4',
+    analysisMediaTimeUs: 2_500_000,
+    currentMediaTimeUs: 2_500_000,
+  };
+
+  it('renders only when packet, analysis, source, and current video agree', () => {
+    expect(isPoseAnalysisCurrent(packet, context)).toBe(true);
+    expect(isPoseAnalysisCurrent(packet, { ...context, streamEpoch: 124 })).toBe(false);
+    expect(isPoseAnalysisCurrent(packet, { ...context, generation: 5 })).toBe(false);
+    expect(isPoseAnalysisCurrent(packet, { ...context, sourceId: 'clip-b.mp4' })).toBe(false);
+    expect(isPoseAnalysisCurrent(null, context)).toBe(false);
+    expect(isPoseAnalysisCurrent(makeNoPosePacket(123, 1, 2_500_000), context)).toBe(false);
+  });
+
+  it('rejects analysis outside the explicit two-frame tolerance', () => {
+    expect(isPoseAnalysisCurrent(packet, {
+      ...context,
+      currentMediaTimeUs: 2_566_667,
+    })).toBe(true);
+    expect(isPoseAnalysisCurrent(packet, {
+      ...context,
+      currentMediaTimeUs: 2_566_668,
+    })).toBe(false);
+    expect(isPoseAnalysisCurrent(packet, {
+      ...context,
+      analysisMediaTimeUs: 2_566_668,
+      currentMediaTimeUs: 2_566_668,
+    })).toBe(false);
   });
 });
 

@@ -10,6 +10,8 @@ export interface PoseResultsData {
   worldLandmarks?: PoseLandmark[];
 }
 
+export type PoseProcessStatus = 'processed' | 'busy' | 'unavailable' | 'error';
+
 export class RealMediaPipePoseService {
   private pose: any = null;
   private isInitialized = false;
@@ -65,17 +67,17 @@ export class RealMediaPipePoseService {
   public async processFrame(
     videoElem: HTMLVideoElement | HTMLCanvasElement,
     onResults: (data: PoseResultsData) => void
-  ): Promise<void> {
-    if (!this.pose || !videoElem) return;
+  ): Promise<PoseProcessStatus> {
+    if (!this.pose || !videoElem) return 'unavailable';
     
     // STRICT VALIDATION: Ensure element has valid pixel data
     if (videoElem instanceof HTMLVideoElement) {
-      if (videoElem.readyState < 2 || !videoElem.videoWidth || !videoElem.videoHeight) return;
-      if (videoElem.paused && videoElem.ended) return;
+      if (videoElem.readyState < 2 || !videoElem.videoWidth || !videoElem.videoHeight) return 'unavailable';
+      if (videoElem.paused && videoElem.ended) return 'unavailable';
     }
     
     // Prevent frame queue backlog
-    if (this.isProcessingFrame) return;
+    if (this.isProcessingFrame) return 'busy';
 
     try {
       this.isProcessingFrame = true;
@@ -93,6 +95,9 @@ export class RealMediaPipePoseService {
             landmarks: results.poseLandmarks,
             worldLandmarks: results.poseWorldLandmarks || undefined
           });
+        } else {
+          // Explicit negative evidence: callers must neutralize/clear stale color.
+          onResults({ landmarks: [] });
         }
         this.isProcessingFrame = false;
       });
@@ -129,8 +134,10 @@ export class RealMediaPipePoseService {
       } else {
         await this.pose.send({ image: videoElem });
       }
+      return 'processed';
     } catch (err) {
       this.isProcessingFrame = false;
+      return 'error';
     }
   }
 }

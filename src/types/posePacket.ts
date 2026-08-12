@@ -67,6 +67,92 @@ export interface PosePacket {
  *  Default: one video frame at 30fps = 33,333 µs */
 export const FRAME_TOLERANCE_US = 33_333;
 
+/** Briefly preserve only neutral geometry across a single lost-pose burst. */
+export const NEUTRAL_SKELETON_HOLD_MS = 250;
+
+export interface PoseDropoutContext {
+  streamEpoch: number;
+  generation: number;
+  sourceId: string;
+  dropoutStartedAtMs: number | null;
+  nowMs: number;
+}
+
+export interface PoseCaptureIdentity {
+  streamEpoch: number;
+  generation: number;
+  sourceId: string;
+  mediaTimeUs: number;
+}
+
+export interface PoseAnalysisContext {
+  streamEpoch: number;
+  generation: number;
+  sourceId: string;
+  analysisMediaTimeUs: number;
+  currentMediaTimeUs: number;
+}
+
+/** The drawn analysis must match both the latest pose packet and video frame. */
+export function isPoseAnalysisCurrent(
+  packet: PosePacket | null,
+  context: PoseAnalysisContext,
+  toleranceUs: number = FRAME_TOLERANCE_US * 2 + 1,
+): boolean {
+  if (!packet || packet.resultKind !== 'pose') return false;
+
+  return packet.streamEpoch === context.streamEpoch
+    && packet.generation === context.generation
+    && packet.sourceId === context.sourceId
+    && Math.abs(packet.mediaTimeUs - context.analysisMediaTimeUs) <= toleranceUs
+    && Math.abs(context.currentMediaTimeUs - context.analysisMediaTimeUs) <= toleranceUs;
+}
+
+/** Reject asynchronous pose results after a seek, clip change, or frame jump. */
+export function isPoseCaptureCurrent(
+  captured: PoseCaptureIdentity,
+  current: PoseCaptureIdentity,
+  toleranceUs: number = FRAME_TOLERANCE_US,
+): boolean {
+  return captured.streamEpoch === current.streamEpoch
+    && captured.generation === current.generation
+    && captured.sourceId === current.sourceId
+    && Math.abs(captured.mediaTimeUs - current.mediaTimeUs) <= toleranceUs;
+}
+
+/** Enforces "latest captured frame wins" for pose and no-pose results alike. */
+export function isPoseResultLatest(
+  candidate: PoseCaptureIdentity,
+  existing: PosePacket | null,
+): boolean {
+  if (!existing) return true;
+
+  return candidate.streamEpoch === existing.streamEpoch
+    && candidate.generation === existing.generation
+    && candidate.sourceId === existing.sourceId
+    && candidate.mediaTimeUs >= existing.mediaTimeUs;
+}
+
+/**
+ * Allows a short neutral geometry hold only for the current source/generation.
+ * Repeated no-pose packets do not extend the window because the caller owns the
+ * first dropout timestamp.
+ */
+export function shouldHoldNeutralSkeleton(
+  packet: PosePacket | null,
+  context: PoseDropoutContext,
+): boolean {
+  if (packet?.resultKind !== 'no_pose' || context.dropoutStartedAtMs === null) return false;
+
+  const ageMs = context.nowMs - context.dropoutStartedAtMs;
+  return packet.streamEpoch === context.streamEpoch
+    && packet.generation === context.generation
+    && packet.sourceId === context.sourceId
+    && Number.isFinite(ageMs)
+    && ageMs >= 0
+    && ageMs <= NEUTRAL_SKELETON_HOLD_MS;
+}
+
 /** Creates an empty "no_pose" packet for a given frame timestamp */
 export function makeNoPosePacket(
   streamEpoch: number,
