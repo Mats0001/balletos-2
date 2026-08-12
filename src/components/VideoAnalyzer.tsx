@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw, Hand } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
 import { AnnotationLightbox, AnnotationEntry } from './AnnotationLightbox';
@@ -61,6 +62,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     } catch {}
   };
   const [showOverlayMenu, setShowOverlayMenu] = useState<boolean>(false);
+  const overlayModeButtonRef = useRef<HTMLButtonElement>(null);
+  const overlayMenuRef = useRef<HTMLDivElement>(null);
+  const [overlayMenuPosition, setOverlayMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
   const [selectedJointId, setSelectedJointId] = useState<string>('');
@@ -83,6 +87,53 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isAutoCrop, setIsAutoCrop] = useState<boolean>(false);
+
+  const updateOverlayMenuPosition = useCallback(() => {
+    const button = overlayModeButtonRef.current;
+    if (!button) return;
+
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 220;
+    const viewportMargin = 8;
+    setOverlayMenuPosition({
+      top: rect.top + rect.height * 1.1,
+      left: Math.min(
+        Math.max(viewportMargin, rect.right - menuWidth),
+        window.innerWidth - menuWidth - viewportMargin
+      ),
+    });
+  }, []);
+
+  const closeOverlayMenu = useCallback((restoreFocus: boolean) => {
+    setShowOverlayMenu(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => overlayModeButtonRef.current?.focus());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showOverlayMenu) return;
+
+    updateOverlayMenuPosition();
+    const focusFrame = window.requestAnimationFrame(() => {
+      overlayMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
+    });
+    const handleOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (overlayMenuRef.current?.contains(target) || overlayModeButtonRef.current?.contains(target)) return;
+      closeOverlayMenu(false);
+    };
+    window.addEventListener('resize', updateOverlayMenuPosition);
+    window.addEventListener('scroll', updateOverlayMenuPosition, true);
+    document.addEventListener('pointerdown', handleOutsidePointer, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('resize', updateOverlayMenuPosition);
+      window.removeEventListener('scroll', updateOverlayMenuPosition, true);
+      document.removeEventListener('pointerdown', handleOutsidePointer, true);
+    };
+  }, [closeOverlayMenu, showOverlayMenu, updateOverlayMenuPosition]);
+
   // Drag-to-pan: track mouse drag for panning when zoomed
   const isDraggingRef = useRef<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number; panX: number; panY: number }>({ x: 0, y: 0, panX: 0, panY: 0 });
@@ -313,6 +364,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // to avoid CSS-zoom/transform doubling the reported dimensions
     const containerW = container.offsetWidth;
     const containerH = container.offsetHeight;
+    if (containerW <= 0 || containerH <= 0) return;
+
     const videoAspect = video.videoWidth / video.videoHeight;
     setVideoAspectRatio(videoAspect);
     const containerAspect = containerW / containerH;
@@ -2079,7 +2132,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 'calc(100vh - 32px)', height: 'calc(100dvh - 32px)', overflow: 'hidden' }}>
+    <div className="video-analyzer" style={{ display: 'flex', flexDirection: 'column', gap: '10px', minHeight: 'calc(100vh - 32px)', height: 'calc(100dvh - 32px)', overflow: 'hidden' }}>
       
       {/* Vaganova Curriculum & Homework Modal */}
       <VaganovaCurriculumModal
@@ -2120,7 +2173,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       />
 
       {/* 2️⃣ CLEAN EXECUTIVE TOOLBAR DOCK */}
-      <div style={{
+      <div className="video-analyzer-toolbar" style={{
         background: 'rgba(15, 12, 22, 0.95)',
         border: '1px solid rgba(192, 132, 252, 0.25)',
         borderRadius: '12px',
@@ -2462,7 +2515,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           <div style={{ position: 'relative' }}>
             <button
               id="overlay-mode-btn"
-              onClick={() => setShowOverlayMenu(!showOverlayMenu)}
+              ref={overlayModeButtonRef}
+              aria-haspopup="menu"
+              aria-expanded={showOverlayMenu}
+              aria-controls={showOverlayMenu ? 'overlay-mode-menu' : undefined}
+              onClick={() => {
+                if (!showOverlayMenu) updateOverlayMenuPosition();
+                setShowOverlayMenu(!showOverlayMenu);
+              }}
               style={{
                 background: overlayMode === 'lehrer-ampel'
                   ? 'linear-gradient(135deg, rgba(48,209,88,0.25) 0%, rgba(255,69,58,0.15) 100%)'
@@ -2498,17 +2558,48 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
               )}
               <span style={{ opacity: 0.6 }}>▾</span>
             </button>
-            {showOverlayMenu && (
-              <div style={{
-                position: 'absolute', top: '110%', right: 0, zIndex: 200,
+            {showOverlayMenu && overlayMenuPosition && createPortal(
+              <div
+                id="overlay-mode-menu"
+                ref={overlayMenuRef}
+                role="menu"
+                aria-labelledby="overlay-mode-btn"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeOverlayMenu(true);
+                    return;
+                  }
+
+                  const items = Array.from(
+                    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+                  );
+                  const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+                  const nextIndex = event.key === 'ArrowDown'
+                    ? (currentIndex + 1) % items.length
+                    : event.key === 'ArrowUp'
+                    ? (currentIndex - 1 + items.length) % items.length
+                    : event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                    ? items.length - 1
+                    : -1;
+                  if (nextIndex >= 0) {
+                    event.preventDefault();
+                    items[nextIndex]?.focus();
+                  }
+                }}
+                style={{
+                position: 'fixed', top: overlayMenuPosition.top, left: overlayMenuPosition.left, zIndex: 10001,
                 background: '#1e1b2e', border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '10px', padding: '6px', minWidth: '220px',
+                borderRadius: '10px', padding: '6px', width: '220px',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
               }}>
                 {/* Mode 1: Lehrer-Ampel */}
                 <button
                   id="overlay-lehrer-ampel"
-                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrer-ampel'); setShowOverlayMenu(false); }}
+                  role="menuitem"
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrer-ampel'); closeOverlayMenu(true); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'lehrer-ampel' ? 'rgba(48,209,88,0.15)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
@@ -2527,7 +2618,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* Mode 2: Anatomisch */}
                 <button
                   id="overlay-anatomisch"
-                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('anatomisch'); setShowOverlayMenu(false); }}
+                  role="menuitem"
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('anatomisch'); closeOverlayMenu(true); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'anatomisch' ? 'rgba(100,130,255,0.15)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
@@ -2543,7 +2635,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 {/* Mode 3: Lehrbuch */}
                 <button
                   id="overlay-lehrbuch"
-                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrbuch'); setShowOverlayMenu(false); }}
+                  role="menuitem"
+                  onClick={() => { setOverlayModeWithSave(selectedDevVideoUrl)('lehrbuch'); closeOverlayMenu(true); }}
                   style={{
                     width: '100%', textAlign: 'left', background: overlayMode === 'lehrbuch' ? 'rgba(255,255,255,0.08)' : 'transparent',
                     color: '#fff', border: 'none', borderRadius: '7px', padding: '8px 10px',
@@ -2556,7 +2649,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   </div>
                   <div style={{ opacity: 0.6, fontSize: '9px' }}>Monochromes Skelett ohne Farbe. Maximale Klarheit für Erklärungen.</div>
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
 
@@ -2579,10 +2673,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       </div>
 
       {/* 3️⃣ MAIN VIDEO ANALYZER WORKSPACE WITH INTERACTIVE TEACHER CUE-POINT SIDEBAR */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 360px', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
+      <div className="video-analyzer-workspace" style={{ flex: 1, display: 'grid', gap: '12px', minHeight: 0, overflow: 'hidden' }}>
         
         {/* LEFT PANEL: UNCLUTTERED MAIN VIDEO VIEWPORT */}
-        <div ref={videoPanelRef} className="monolith-card" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0, background: isFullscreen ? '#000' : undefined }}>
+        <div ref={videoPanelRef} className="monolith-card video-analyzer-video-panel" style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', padding: 0, minWidth: 0, background: isFullscreen ? '#000' : undefined }}>
           
           {/* ── ANNOTATION ROW: Thumbnails | Video | Tool Strip ── */}
           <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
@@ -2643,7 +2737,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             </div>
 
             {/* CENTER: Video Grid */}
-          <div style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
+          <div className="video-analyzer-video-grid" style={{ flex: 1, display: 'grid', gridTemplateColumns: splitScreenMode ? '1fr 1fr' : '1fr', gap: '2px', minWidth: 0, backgroundColor: '#000000', position: 'relative', overflow: 'hidden' }}>
             
             {/* VIEWPORT 1: HD BALLET VIDEO STREAM (NATIVE RELATIVE OVERLAY WRAP) */}
             <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
@@ -3391,7 +3485,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         </div>
 
         {/* RIGHT PANEL: INTERACTIVE TEACHER CUE-POINT MANAGER */}
-        <div className="monolith-card" style={{ display: 'flex', flexDirection: 'column', padding: '16px', gap: '14px', background: 'rgba(10, 8, 14, 0.98)', border: '1px solid rgba(192, 132, 252, 0.3)', overflow: 'hidden' }}>
+        <div className="monolith-card video-analyzer-cue-panel" style={{ display: 'flex', flexDirection: 'column', padding: '16px', gap: '14px', background: 'rgba(10, 8, 14, 0.98)', border: '1px solid rgba(192, 132, 252, 0.3)', overflow: 'hidden' }}>
           
           {/* Header & Add Button */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '10px' }}>

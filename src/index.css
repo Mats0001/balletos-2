@@ -164,6 +164,24 @@ html, body, #root {
   border-radius: 2px;
 }
 
+.video-analyzer-workspace {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+/* With both 240px/340px app panels visible, 1357px leaves 745px for the analyzer. */
+@media (max-width: 1357px) {
+  .video-analyzer .video-analyzer-toolbar {
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .video-analyzer .video-analyzer-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 3fr) minmax(220px, 2fr);
+  }
+}
+
 /* 📱 Responsive Mobile 390x844 Viewport Rules */
 @media (max-width: 768px) {
   .side-nav {
