@@ -12,12 +12,12 @@
 //   8. PosePacket provenance fields required
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { FramePump } from '../services/framePump';
 import { OverlayStabilizer } from '../services/overlayStabilizer';
 import { CapabilityManager } from '../services/capabilityTier';
 import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, PosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
-import { TeacherOverlayPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
+import { TeacherOverlayPacket } from '../types/teacherHeuristic';
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ function makeFullPacket(overrides: Partial<PosePacket> = {}): PosePacket {
   };
 }
 
-function makeOverlayPacket(overrides: Partial<Record<string, TeacherHeuristicState>> = {}): TeacherOverlayPacket {
+function makeOverlayPacket(overrides: Partial<TeacherOverlayPacket> = {}): TeacherOverlayPacket {
   return {
     torsoAlignment: 'heuristic_match',
     spine: 'heuristic_match',
@@ -54,8 +54,11 @@ function makeOverlayPacket(overrides: Partial<Record<string, TeacherHeuristicSta
     footR: 'heuristic_match',
     cog: 'heuristic_match',
     head: 'heuristic_match',
+    policyVersion: '0.2.0-teacher-ampel',
+    streamEpoch: 1000,
+    framePtsSeconds: 1,
     ...overrides,
-  } as TeacherOverlayPacket;
+  };
 }
 
 // ─── TEST SUITES ────────────────────────────────────────────────────────────
@@ -309,34 +312,44 @@ describe('Runtime Integration: Rendered Analysis Guard', () => {
 
 describe('Runtime Integration: Stabilizer Frequency Guard', () => {
   let stabilizer: OverlayStabilizer;
-  let mockNow: number;
 
   beforeEach(() => {
     stabilizer = new OverlayStabilizer();
-    mockNow = 1000;
-    vi.spyOn(performance, 'now').mockImplementation(() => mockNow);
   });
 
-  it('same analysis frame does not re-trigger hysteresis timer', () => {
-    // First call: match
-    stabilizer.stabilize(makeOverlayPacket({ spine: 'heuristic_match' }), 1);
+  const establishGreenSpine = () => {
+    for (let offsetMs = 0; offsetMs <= 500; offsetMs += 50) {
+      stabilizer.stabilize(makeOverlayPacket({
+        spine: 'heuristic_match',
+        framePtsSeconds: 1 + offsetMs / 1000,
+      }), 1);
+    }
+  };
+
+  it('same analysis frame cannot advance media-time hysteresis', () => {
+    // Establish green using distinct video frames.
+    establishGreenSpine();
 
     // Start worsening transition
-    mockNow = 1050;
-    stabilizer.stabilize(makeOverlayPacket({ spine: 'heuristic_attention' }), 1);
+    stabilizer.stabilize(makeOverlayPacket({
+      spine: 'heuristic_attention',
+      framePtsSeconds: 1.6,
+    }), 1);
 
-    // Same analysis (60fps redraw) should NOT advance the timer
-    // If stabilizer were called again at 60fps with same data,
-    // the hold time should not be counted from different calls
-    mockNow = 1100; // 100ms total, not 300ms
-    const result = stabilizer.stabilize(makeOverlayPacket({ spine: 'heuristic_attention' }), 1);
-    // 100ms < 300ms hold → should still be match
+    // Repeated 60fps redraws of that exact analysis frame cannot age it.
+    const result = stabilizer.stabilize(makeOverlayPacket({
+      spine: 'heuristic_attention',
+      framePtsSeconds: 1.6,
+    }), 1);
     expect(result.spine).toBe('heuristic_match');
   });
 
   it('blocked always overrides regardless of call frequency', () => {
-    stabilizer.stabilize(makeOverlayPacket({ spine: 'heuristic_match' }), 1);
-    const result = stabilizer.stabilize(makeOverlayPacket({ spine: 'blocked' }), 1);
+    establishGreenSpine();
+    const result = stabilizer.stabilize(makeOverlayPacket({
+      spine: 'blocked',
+      framePtsSeconds: 1.51,
+    }), 1);
     expect(result.spine).toBe('blocked');
   });
 });
