@@ -19,7 +19,7 @@ import { vaganovaIdbCache } from '../services/vaganovaIdbCache';
 import { vaganovaAngleCalculator, VaganovaFullAnalysis } from '../services/vaganovaAngleCalculator';
 import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
-import { isTeacherOverlayPacketCurrent, renderSkeletonToCanvas, CanvasRenderOptions, resolveTeacherGlowType } from '../services/skeletonCanvasRenderer';
+import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
 import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import { createBlockedPacket, TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { framePump, FrameTickEvent } from '../services/framePump';
@@ -31,9 +31,16 @@ import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
 import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
 import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
-import { getJointKnowledge, CLICKABLE_JOINT_INDICES } from '../services/skeletonJointKnowledge';
+import { getJointKnowledge } from '../services/skeletonJointKnowledge';
 import { buildGroundedTeacherDraft, createBlockedGroundedTeacherDraft, findNearestExactPoseFrame, groundedTeacherDraftFingerprint } from '../services/groundedTeacherDraftEngine';
 import type { GroundedGuideFrameContext, GroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import {
+  createSelectedSkeletonTarget,
+  findSkeletonTargetAtPoint,
+  getSkeletonTarget,
+  resolveSkeletonTargetAnchor,
+} from '../services/skeletonTargetRegistry';
+import type { SelectedSkeletonTarget, SkeletonTargetId } from '../types/skeletonTarget';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -72,6 +79,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [selectedJointId, setSelectedJointId] = useState<string>('');
   /** Index of the actually clicked landmark (for glow positioning on exact joint) */
   const [clickedLandmarkIndex, setClickedLandmarkIndex] = useState<number | undefined>(undefined);
+  const [selectedSkeletonTarget, setSelectedSkeletonTarget] = useState<SelectedSkeletonTarget | null>(null);
+  const updateSelectedSkeletonTarget = useCallback((target: SelectedSkeletonTarget | null) => {
+    setSelectedSkeletonTarget(target);
+  }, []);
   /** Packet/cue-backed glow; undefined keeps selections neutral. */
   const activeCueGlowTypeRef = useRef<CanvasRenderOptions['glowType']>(undefined);
   /** Toggle: Show ideal position overlay (green dashed guide lines) */
@@ -85,6 +96,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const groundedTeacherDraftRef = useRef<GroundedTeacherDraft>(groundedTeacherDraft);
   const groundedTorsoDraftPendingRef = useRef(false);
   const groundedTorsoSnapPendingRef = useRef(false);
+  const skeletonTargetRebindRef = useRef<Readonly<{
+    targetId: SkeletonTargetId;
+    segmentT?: number;
+  }> | null>(null);
   const updateGroundedTeacherDraft = useCallback((draft: GroundedTeacherDraft) => {
     if (
       groundedTeacherDraftFingerprint(groundedTeacherDraftRef.current)
@@ -93,6 +108,26 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     groundedTeacherDraftRef.current = draft;
     setGroundedTeacherDraft(draft);
   }, []);
+
+  const clearSkeletonSelection = useCallback((
+    reason: Parameters<typeof createBlockedGroundedTeacherDraft>[0] = 'target_not_selected',
+    resetView: boolean = true,
+  ) => {
+    groundedTorsoDraftPendingRef.current = false;
+    groundedTorsoSnapPendingRef.current = false;
+    skeletonTargetRebindRef.current = null;
+    activeCueGlowTypeRef.current = undefined;
+    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(reason));
+    setJointPopover(null);
+    updateSelectedSkeletonTarget(null);
+    setSelectedJointId('');
+    setClickedLandmarkIndex(undefined);
+    setShowIdealOverlay(false);
+    if (resetView) {
+      setZoomLevel(1);
+      setPanOffset({ x: 0, y: 0 });
+    }
+  }, [updateGroundedTeacherDraft, updateSelectedSkeletonTarget]);
 
   // OPTION 1 PRE-INDEXING ENGINE STATE
   const [isPreIndexing, setIsPreIndexing] = useState<boolean>(false);
@@ -195,6 +230,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     showAngleArcs,
     selectedJointId,
     clickedLandmarkIndex,
+    selectedSkeletonTarget,
     isPlaying,
     showIdealOverlay,
     showFocusDim,
@@ -208,6 +244,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       showAngleArcs,
       selectedJointId,
       clickedLandmarkIndex,
+      selectedSkeletonTarget,
       isPlaying,
       showIdealOverlay,
       showFocusDim,
@@ -220,6 +257,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     showAngleArcs,
     selectedJointId,
     clickedLandmarkIndex,
+    selectedSkeletonTarget,
     isPlaying,
     showIdealOverlay,
     showFocusDim,
@@ -309,7 +347,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // 🦴 Joint popover state
   // normalizedX/Y: 0–1 relative to canvas (used for joint clicks → arrow tracks landmark)
   const [jointPopover, setJointPopover] = useState<{
-    landmarkIndex: number;
+    targetId: import('../types/skeletonTarget').SkeletonTargetId;
     normalizedX: number;
     normalizedY: number;
   } | null>(null);
@@ -360,6 +398,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     wDist: ReturnType<typeof vaganovaFootAnalyzer.analyzeWeightDistribution>;
     cogPt: { x: number; y: number };
     packetMediaTimeUs: number; // Track which packet this analysis belongs to
+    sourceId: string;
+    streamEpoch: number;
+    generation: number;
+    videoWidth: number;
+    videoHeight: number;
   } | null>(null);
 
   // Phase 8: Stabilizer result cache (only update when analysis changes, not at 60fps)
@@ -565,6 +608,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       activeCueGlowTypeRef.current = undefined;
       groundedTorsoDraftPendingRef.current = false;
       groundedTorsoSnapPendingRef.current = false;
+      skeletonTargetRebindRef.current = null;
+      updateSelectedSkeletonTarget(null);
+      setJointPopover(null);
+      setSelectedJointId('');
+      setClickedLandmarkIndex(undefined);
+      setShowIdealOverlay(false);
       updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
       poseDropoutStartedAtRef.current = null;
       if (staticFrameRetryRef.current) {
@@ -610,10 +659,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       groundedTorsoDraftPendingRef.current = false;
       updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
       if (!groundedTorsoSnapPendingRef.current) {
-        setJointPopover(null);
-        setSelectedJointId('');
-        setClickedLandmarkIndex(undefined);
-        setShowIdealOverlay(false);
+        clearSkeletonSelection('analysis_stale');
       }
       poseDropoutStartedAtRef.current = null;
       landmarksRef.current = null;
@@ -630,7 +676,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       console.debug('[VideoAnalyzer] seeked – pump generation:', framePump.generation);
       if (groundedTorsoSnapPendingRef.current) {
         groundedTorsoSnapPendingRef.current = false;
-        groundedTorsoDraftPendingRef.current = true;
+        const pendingTarget = skeletonTargetRebindRef.current
+          ? getSkeletonTarget(skeletonTargetRebindRef.current.targetId)
+          : null;
+        groundedTorsoDraftPendingRef.current = pendingTarget?.metricAdapter === 'spine_tilt_aplomb';
         processStaticPausedFrame();
       }
     };
@@ -876,6 +925,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   vagAn: vagAn2, armPos: armPos2, elbowQ: elbowQ2,
                   epaul: epaul2, footAl: footAl2, wDist: wDist2,
                   packetMediaTimeUs,
+                  sourceId: packet?.sourceId ?? selectedDevVideoUrl,
+                  streamEpoch: packet?.streamEpoch ?? streamEpochRef.current,
+                  generation: packet?.generation ?? framePump.generation,
+                  videoWidth: packet?.videoWidth ?? v.videoWidth,
+                  videoHeight: packet?.videoHeight ?? v.videoHeight,
                 };
               }
 
@@ -928,6 +982,79 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   // Between analysis updates: reuse cached stabilized result
                 }
 
+                const targetToRebind = skeletonTargetRebindRef.current;
+                if (targetToRebind && v.paused) {
+                  const target = getSkeletonTarget(targetToRebind.targetId);
+                  const posePacket = latestPacketRef.current;
+                  const exactLandmarks = findExactCachedPoseLandmarks(
+                    vaganovaFrameCache.getFrames(selectedDevVideoUrlRef.current),
+                    c.packetMediaTimeUs / 1_000_000,
+                  );
+                  const anchor = target
+                    && posePacket?.resultKind === 'pose'
+                    && posePacket.source === 'frame_cache'
+                    && posePacket.sourceId === c.sourceId
+                    && posePacket.streamEpoch === c.streamEpoch
+                    && posePacket.generation === c.generation
+                    && Math.abs(posePacket.mediaTimeUs - c.packetMediaTimeUs) <= 1
+                    && exactLandmarks !== null
+                    ? resolveSkeletonTargetAnchor(
+                      c.sk,
+                      target,
+                      c.videoWidth,
+                      c.videoHeight,
+                      targetToRebind.segmentT,
+                    )
+                    : null;
+                  if (target && anchor) {
+                    const selected = createSelectedSkeletonTarget({
+                      target,
+                      anchorNormalized: anchor,
+                      distancePx: 0,
+                      segmentT: targetToRebind.segmentT,
+                    }, {
+                      sourceId: c.sourceId,
+                      streamEpoch: c.streamEpoch,
+                      generation: c.generation,
+                      mediaTimeUs: c.packetMediaTimeUs,
+                      frameStatus: 'exact_cache_frame',
+                    });
+                    skeletonTargetRebindRef.current = null;
+                    updateSelectedSkeletonTarget(selected);
+                    setJointPopover({
+                      targetId: target.id,
+                      normalizedX: anchor.x,
+                      normalizedY: anchor.y,
+                    });
+                    setPanOffset({
+                      x: (0.5 - anchor.x) * 100 / 1.8,
+                      y: (0.5 - anchor.y) * 100 / 1.8,
+                    });
+                  } else if (
+                    target
+                    && posePacket?.resultKind === 'pose'
+                    && posePacket.source === 'frame_cache'
+                    && posePacket.sourceId === c.sourceId
+                    && posePacket.streamEpoch === c.streamEpoch
+                    && posePacket.generation === c.generation
+                    && Math.abs(posePacket.mediaTimeUs - c.packetMediaTimeUs) <= 1
+                  ) {
+                    // The exact frame settled, but it cannot prove this target's
+                    // geometry (missing cache entry, low visibility or predicted
+                    // points). End the pending state instead of retrying forever.
+                    skeletonTargetRebindRef.current = null;
+                    groundedTorsoDraftPendingRef.current = false;
+                    groundedTorsoSnapPendingRef.current = false;
+                    // No trustworthy anchor exists on the exact displayed frame;
+                    // keeping the pre-snap pointer would visually misidentify it.
+                    clearSkeletonSelection(
+                      exactLandmarks === null
+                        ? 'exact_cache_frame_missing'
+                        : 'pose_geometry_mismatch',
+                    );
+                  }
+                }
+
                 if (
                   groundedTorsoDraftPendingRef.current
                   && renderState.selectedJointId === 'spine_center'
@@ -966,6 +1093,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   showAngleArcs: renderState.showAngleArcs,
                   selectedJointId: !renderState.isPlaying ? renderState.selectedJointId : '',
                   clickedLandmarkIndex: !renderState.isPlaying ? renderState.clickedLandmarkIndex : undefined,
+                  selectedSkeletonTarget: !renderState.isPlaying ? renderState.selectedSkeletonTarget : null,
+                  selectedTargetFrameContext: {
+                    sourceId: c.sourceId,
+                    streamEpoch: c.streamEpoch,
+                    generation: c.generation,
+                    mediaTimeUs: c.packetMediaTimeUs,
+                  },
                   glowPulsePhase: (performance.now() % 1500) / 1500, // 1.5s pulse cycle
                   glowType: currentMode === 'lehrer-ampel' && overlayPacket
                     ? activeCueGlowTypeRef.current
@@ -1122,6 +1256,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     const acceptNoPose = () => {
       if (!captureIsCurrent()) return;
 
+      clearSkeletonSelection('pose_packet_missing');
+
       latestPacketRef.current = makeNoPosePacket(
         capturedEpoch,
         capturedSeq,
@@ -1261,13 +1397,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       preIndexRunRef.current += 1;
       setIsPreIndexing(false);
       setAnalysisReport(null);
-      groundedTorsoDraftPendingRef.current = false;
-      groundedTorsoSnapPendingRef.current = false;
-      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
-      setJointPopover(null);
-      setSelectedJointId('');
-      setClickedLandmarkIndex(undefined);
-      setShowIdealOverlay(false);
+      clearSkeletonSelection();
       selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(newVid.url));
@@ -1289,13 +1419,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     preIndexRunRef.current += 1;
     setIsPreIndexing(false);
     setAnalysisReport(null);
-    groundedTorsoDraftPendingRef.current = false;
-    groundedTorsoSnapPendingRef.current = false;
-    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
-    setJointPopover(null);
-    setSelectedJointId('');
-    setClickedLandmarkIndex(undefined);
-    setShowIdealOverlay(false);
+    clearSkeletonSelection();
     selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
     setCuePoints(vaganovaPreAnalyzer.getCuePoints(url));
@@ -1311,9 +1435,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // Phase 2 (Berater v2): Pre-invalidate BEFORE setting currentTime
       // This ensures no stale in-flight inference can contaminate the new frame
       framePump.bumpGeneration();
-      groundedTorsoDraftPendingRef.current = false;
-      groundedTorsoSnapPendingRef.current = false;
-      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
+      clearSkeletonSelection('analysis_stale', false);
       latestPacketRef.current = null;
       // NOTE: cachedAnalysisRef is intentionally NOT cleared here.
       // The old analysis provides skeleton data for the glow animation
@@ -1399,15 +1521,34 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     vid.addEventListener('timeupdate', onTimeUpdate);
   };
 
-  // 🦴 SKELETON JOINT CLICK – hit-test landmarks + bone segments
-  // Uses generic HTMLElement so it works on the container div (events bubble from AnnotationCanvas)
+  // 🦴 SKELETON TARGET CLICK – hit-test the same reconstructed joints and
+  // bone segments that are actually painted by the renderer.
   const handleSkeletonClick = (e: React.MouseEvent<HTMLElement>) => {
     // Allow clicking at any time — if playing, we auto-pause below on joint hit
     // But NOT in annotation/drawing mode — those clicks are for strokes
     if (isAnnotationModeActive) return;
-    const lm = landmarksRef.current;
     const bounds = overlayBounds;
-    if (!lm || !bounds) { setJointPopover(null); return; }
+    const cached = cachedAnalysisRef.current;
+    const packet = latestPacketRef.current;
+    const video = videoRef.current;
+    if (!cached || !packet || packet.resultKind !== 'pose' || !bounds || !video) {
+      clearSkeletonSelection('analysis_stale');
+      return;
+    }
+
+    const analysisIsCurrent = isPoseAnalysisCurrent(packet, {
+      streamEpoch: cached.streamEpoch,
+      generation: cached.generation,
+      sourceId: cached.sourceId,
+      analysisMediaTimeUs: cached.packetMediaTimeUs,
+      currentMediaTimeUs: video.currentTime * 1_000_000,
+    });
+    if (!analysisIsCurrent
+      || cached.videoWidth !== packet.videoWidth
+      || cached.videoHeight !== packet.videoHeight) {
+      clearSkeletonSelection('analysis_stale');
+      return;
+    }
 
     // Get click position relative to the canvas rect (the overlay area)
     // CRITICAL: rect is the VISUAL bounding box (includes CSS zoom/pan transforms)
@@ -1423,130 +1564,30 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
     // Only consider clicks that are within the overlay bounds (now in logical space)
     if (clickX < 0 || clickY < 0 || clickX > bounds.width || clickY > bounds.height) {
-      setJointPopover(null);
+      clearSkeletonSelection();
       return;
     }
 
-    // Helper: distance from point P to line segment A-B
-    const distToSegment = (px: number, py: number, ax: number, ay: number, bx: number, by: number) => {
-      const dx = bx - ax; const dy = by - ay;
-      const lenSq = dx * dx + dy * dy;
-      if (lenSq === 0) return Math.hypot(px - ax, py - ay);
-      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
-      return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-    };
-
-    // Bone segments: [fromLandmark, toLandmark, representativeLandmark, jointFocusOverride?]
-    // representativeLandmark = the joint info shown in popover
-    const BONE_SEGMENTS: Array<[number, number, number, string?]> = [
-      // ── HEAD / NECK ──
-      [0, 11, 100, 'spine_center'],   // Neck-L (head→L-shoulder) → Rumpf-Knowledge
-      [0, 12, 100, 'spine_center'],   // Neck-R (head→R-shoulder) → Rumpf-Knowledge
-      // ── SHOULDERS ──
-      [11, 12, 11],                  // Schulterleiste → linke Schulter
-      // ── ARMS ──
-      [11, 13, 13],  // L Oberarm → L Ellbogen
-      [13, 15, 15],  // L Unterarm → L Handgelenk
-      [12, 14, 14],  // R Oberarm → R Ellbogen
-      [14, 16, 16],  // R Unterarm → R Handgelenk
-      // ── TORSO / SPINE ──
-      [11, 23, 100, 'spine_center'],  // L Rumpf (Schulter→Hüfte) → Rumpf-Knowledge (Index 100)
-      [12, 24, 100, 'spine_center'],  // R Rumpf (Schulter→Hüfte) → Rumpf-Knowledge (Index 100)
-      // ── PELVIS ──
-      [23, 24, 23],                  // Beckenleiste → L Hüfte
-      // ── LEGS ──
-      [23, 25, 25],  // L Oberschenkel → L Knie
-      [25, 27, 25],  // L Unterschenkel → L Knie
-      [27, 29, 27],  // L Fuß → L Knöchel
-      [29, 31, 31],  // L Zehe → L Zehenspitze
-      [24, 26, 26],  // R Oberschenkel → R Knie
-      [26, 28, 26],  // R Unterschenkel → R Knie
-      [28, 30, 28],  // R Fuß → R Knöchel
-      [30, 32, 32],  // R Zehe → R Zehenspitze
-    ];
-
-    // ────────────────────────────────────────────────────────────
-    //  HIT-TEST: Joint-Points AND Bone-Segments compete fairly.
-    //  The CLOSEST match wins, regardless of type.
-    //  Joint radius = 22px (visual dot size), Bone tolerance = 16px.
-    // ────────────────────────────────────────────────────────────
-
-    // 1️⃣ Joint point hit-test (22px radius — matches visual dot size)
-    const JOINT_RADIUS = 22;
-    let nearestJointIdx = -1;
-    let jointDist = JOINT_RADIUS;
-    lm.forEach((landmark, idx) => {
-      if (!CLICKABLE_JOINT_INDICES.has(idx)) return;
-      if ((landmark.visibility ?? 1) < 0.3) return;
-      const px = landmark.x * bounds.width;
-      const py = landmark.y * bounds.height;
-      const dist = Math.hypot(px - clickX, py - clickY);
-      if (dist < jointDist) { jointDist = dist; nearestJointIdx = idx; }
+    const hit = findSkeletonTargetAtPoint({
+      skeleton: cached.sk,
+      canvasX: clickX,
+      canvasY: clickY,
+      canvasWidth: bounds.width,
+      canvasHeight: bounds.height,
+      videoWidth: packet.videoWidth,
+      videoHeight: packet.videoHeight,
     });
 
-    // 2️⃣ Bone segment hit-test (16px tolerance — matches visual line width)
-    const SEG_TOLERANCE = 16;
-    let nearestBoneIdx = -1;
-    let boneDist = SEG_TOLERANCE;
-    let boneJointOverride: string | undefined;
-    for (const [fromIdx, toIdx, repIdx, overrideId] of BONE_SEGMENTS) {
-      const a = lm[fromIdx]; const b = lm[toIdx];
-      if (!a || !b) continue;
-      if ((a.visibility ?? 1) < 0.3 || (b.visibility ?? 1) < 0.3) continue;
-      const ax = a.x * bounds.width; const ay = a.y * bounds.height;
-      const bx = b.x * bounds.width; const by = b.y * bounds.height;
-      const d = distToSegment(clickX, clickY, ax, ay, bx, by);
-      if (d < boneDist && getJointKnowledge(repIdx)) {
-        boneDist = d;
-        nearestBoneIdx = repIdx;
-        boneJointOverride = overrideId;
-      }
-    }
-
-    // 3️⃣ Pick the CLOSEST match (joint or bone)
-    let nearestIdx = -1;
-    if (nearestJointIdx >= 0 && nearestBoneIdx >= 0) {
-      // Both matched — closest wins
-      if (jointDist <= boneDist) {
-        nearestIdx = nearestJointIdx;
-        boneJointOverride = undefined; // joint won → no bone override
-      } else {
-        nearestIdx = nearestBoneIdx;
-        // boneJointOverride already set
-      }
-    } else if (nearestJointIdx >= 0) {
-      nearestIdx = nearestJointIdx;
-      boneJointOverride = undefined;
-    } else if (nearestBoneIdx >= 0) {
-      nearestIdx = nearestBoneIdx;
-    }
-
-    if (nearestIdx >= 0 && getJointKnowledge(nearestIdx)) {
-      // ── SYNTHETIC INDEX RESOLUTION ──────────────────────────────────────
-      // Index 100 (sternum/torso) is synthetic and does NOT exist in lm[].
-      // Compute its normalized position from real landmarks.
-      let resolvedNormX: number;
-      let resolvedNormY: number;
-      if (nearestIdx === 100) {
-        // Sternum = centroid of shoulder+hip quad
-        resolvedNormX = (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4;
-        resolvedNormY = (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4;
-      } else if (lm[nearestIdx]) {
-        resolvedNormX = lm[nearestIdx].x;
-        resolvedNormY = lm[nearestIdx].y;
-      } else {
-        // Fallback: use click position normalized
-        resolvedNormX = clickX / bounds.width;
-        resolvedNormY = clickY / bounds.height;
-      }
+    if (hit) {
+      const resolvedNormX = hit.anchorNormalized.x;
+      const resolvedNormY = hit.anchorNormalized.y;
 
       // Popover anchor: ALWAYS use normalized coords so arrow tracks correctly
       // across auto-zoom and pan changes (fixes drift on bone clicks)
       setJointPopover({
-        landmarkIndex: nearestIdx,
+        targetId: hit.target.id,
         normalizedX: resolvedNormX,
         normalizedY: resolvedNormY,
-        // viewportX/Y removed: was causing drift on auto-zoom
       });
       const wasPlaying = Boolean(videoRef.current && !videoRef.current.paused);
       // Pause video for better exploration
@@ -1555,94 +1596,55 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setIsPlaying(false);
       }
 
-      // ── VISUAL ENHANCEMENT: Glow + FocusDim + Ideal + AutoZoom ──
-      // Map landmark index → selectedJointId for renderer effects
-      const LANDMARK_TO_JOINT_ID: Record<number, string> = {
-        0:  'head_epaulement',
-        11: 'shoulder_line',
-        12: 'shoulder_line',
-        13: 'left_elbow',
-        14: 'right_elbow',        // right elbow → right arm ideal
-        15: 'left_elbow',         // left wrist → left arm context
-        16: 'right_elbow',        // right wrist → right arm context
-        23: 'pelvis_core',
-        24: 'pelvis_core',
-        25: 'left_knee',
-        26: 'right_knee',
-        27: 'left_knee',          // left ankle → leg context
-        28: 'right_knee',         // right ankle → leg context
-        29: 'left_knee',          // left heel → leg context
-        30: 'right_knee',         // right heel → leg context
-        31: 'left_knee',          // left toe → leg context
-        32: 'right_knee',         // right toe → leg context
-      };
-
-      const mappedJointId = boneJointOverride || LANDMARK_TO_JOINT_ID[nearestIdx];
+      const mappedJointId = hit.target.focusId;
       if (mappedJointId) {
         setSelectedJointId(mappedJointId);
-        setClickedLandmarkIndex(nearestIdx);
+        setClickedLandmarkIndex(hit.target.representativeLandmarkIndex);
+        activeCueGlowTypeRef.current = undefined;
 
-        if (mappedJointId === 'spine_center' && videoRef.current) {
-          const currentVideo = videoRef.current;
-          const nearestExactFrame = findNearestExactPoseFrame(
+        const currentVideo = videoRef.current;
+        const nearestExactFrame = currentVideo
+          ? findNearestExactPoseFrame(
             vaganovaFrameCache.getFrames(selectedDevVideoUrlRef.current),
             currentVideo.currentTime,
-          );
-          if (!nearestExactFrame) {
-            groundedTorsoDraftPendingRef.current = false;
-            groundedTorsoSnapPendingRef.current = false;
-            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('exact_cache_frame_missing'));
-          } else if (Math.abs(nearestExactFrame.timeMs - currentVideo.currentTime * 1000) > 0.001) {
-            groundedTorsoSnapPendingRef.current = true;
-            groundedTorsoDraftPendingRef.current = false;
-            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
-            currentVideo.currentTime = nearestExactFrame.timeMs / 1000;
-            processStaticPausedFrame();
-          } else {
-            // Even at an already exact PTS, re-bind pose + analysis to that
-            // cached frame. This avoids depending on render-loop cadence or a
-            // prior live packet when Nicole clicks a paused skeleton.
-            groundedTorsoSnapPendingRef.current = false;
-            groundedTorsoDraftPendingRef.current = true;
-            updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
-            processStaticPausedFrame();
-          }
-        } else {
+          )
+          : null;
+        const pendingSelection = createSelectedSkeletonTarget(hit, {
+          sourceId: cached.sourceId,
+          streamEpoch: cached.streamEpoch,
+          generation: cached.generation,
+          mediaTimeUs: cached.packetMediaTimeUs,
+          frameStatus: nearestExactFrame ? 'pending_exact_frame' : 'display_frame',
+        });
+        updateSelectedSkeletonTarget(pendingSelection);
+
+        if (!nearestExactFrame || !currentVideo) {
+          skeletonTargetRebindRef.current = null;
           groundedTorsoDraftPendingRef.current = false;
           groundedTorsoSnapPendingRef.current = false;
-          updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
-        }
-
-        // Determine glow type from current overlay packet state
-        const pkt = stabilizedOverlayRef.current;
-        const analysisFramePtsSeconds = (cachedAnalysisRef.current?.packetMediaTimeUs ?? -1) / 1_000_000;
-        const currentPacket = overlayModeRef.current === 'lehrer-ampel'
-          && isTeacherOverlayPacketCurrent(pkt ?? undefined, {
-            streamEpoch: streamEpochRef.current,
-            framePtsSeconds: analysisFramePtsSeconds,
-            policyVersion: BUILD_POLICY.policyVersion,
-          })
-          ? pkt
-          : undefined;
-        if (currentPacket) {
-          // Map jointId → overlay packet key
-          const JOINT_TO_PKT_KEY: Record<string, keyof import('../types/teacherHeuristic').TeacherOverlayPacket> = {
-            'left_knee':       'legL',
-            'right_knee':      'legR',
-            'left_elbow':      'armL',
-            'right_elbow':     'armR',
-            'port_de_bras_arms': 'armL',
-            'head_epaulement': 'head',
-            'spine_center':    'spine',
-            'pelvis_core':     'pelvis',
-            'shoulder_line':   'shoulder',
-          };
-          const pktKey = JOINT_TO_PKT_KEY[mappedJointId];
-          const state = pktKey ? currentPacket[pktKey] : undefined;
-          activeCueGlowTypeRef.current = resolveTeacherGlowType(state);
+          updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(
+            hit.target.metricAdapter === 'spine_tilt_aplomb'
+              ? 'exact_cache_frame_missing'
+              : 'measurement_not_authorized',
+          ));
         } else {
-          // Missing evidence stays neutral; selection/focus still identifies the joint.
-          activeCueGlowTypeRef.current = undefined;
+          skeletonTargetRebindRef.current = Object.freeze({
+            targetId: hit.target.id,
+            segmentT: hit.segmentT,
+          });
+          const requiresSeek = Math.abs(
+            nearestExactFrame.timeMs - currentVideo.currentTime * 1000,
+          ) > 0.001;
+          groundedTorsoSnapPendingRef.current = requiresSeek;
+          groundedTorsoDraftPendingRef.current = !requiresSeek
+            && hit.target.metricAdapter === 'spine_tilt_aplomb';
+          updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(
+            hit.target.metricAdapter === 'spine_tilt_aplomb'
+              ? 'analysis_stale'
+              : 'measurement_not_authorized',
+          ));
+          if (requiresSeek) currentVideo.currentTime = nearestExactFrame.timeMs / 1000;
+          else processStaticPausedFrame();
         }
 
         // Auto-zoom to the ACTUAL landmark position (supports synthetic index 100)
@@ -1653,15 +1655,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setZoomLevel(autoZoom);
         setPanOffset({ x: panX, y: panY });
 
-        // Auto-enable visual overlays for full premium experience
-        setShowIdealOverlay(true);
+        // A green guide is only allowed for the provenance-gated torso adapter.
+        setShowIdealOverlay(hit.target.metricAdapter === 'spine_tilt_aplomb');
         if (!showFocusDim) setShowFocusDim(true);
       }
     } else {
-      setJointPopover(null);
-      groundedTorsoDraftPendingRef.current = false;
-      groundedTorsoSnapPendingRef.current = false;
-      updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
+      clearSkeletonSelection();
     }
   };
 
@@ -1865,13 +1864,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   };
 
   const clearGroundedSelectionForPlayback = () => {
-    groundedTorsoDraftPendingRef.current = false;
-    groundedTorsoSnapPendingRef.current = false;
-    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('video_playing'));
-    setJointPopover(null);
-    setSelectedJointId('');
-    setClickedLandmarkIndex(undefined);
-    setShowIdealOverlay(false);
+    clearSkeletonSelection('video_playing');
   };
 
   // Fullscreen: ganzer Panel (Video + Canvas + Scrubber)
@@ -3051,7 +3044,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
             {/* 🦴 JOINT KNOWLEDGE POPOVER – position:fixed, outside all overflow:hidden containers */}
             {jointPopover && overlayBounds && (() => {
-              const knowledge = getJointKnowledge(jointPopover.landmarkIndex);
+              const target = getSkeletonTarget(jointPopover.targetId);
+              if (!target) return null;
+              const knowledge = getJointKnowledge(target.representativeLandmarkIndex);
               if (!knowledge) return null;
               // Compute viewport coords from the skeleton canvas bounding rect
               const canvasRect = canvasRef.current?.getBoundingClientRect();
@@ -3068,14 +3063,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   videoLeft={canvasRect.left}
                   containerHeight={window.innerHeight}
                   vaganovaAnalysis={vaganovaAnalysis}
-                  landmarkIndex={jointPopover.landmarkIndex}
+                  landmarkIndex={target.representativeLandmarkIndex}
+                  selectedTarget={target}
+                  selectedTargetIdentity={selectedSkeletonTarget}
                   groundedTeacherDraft={groundedTeacherDraft}
-                  onClose={() => {
-                    setJointPopover(null);
-                    groundedTorsoDraftPendingRef.current = false;
-                    groundedTorsoSnapPendingRef.current = false;
-                    updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('target_not_selected'));
-                  }}
+                  onClose={() => clearSkeletonSelection()}
                 />
               );
             })()}

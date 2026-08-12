@@ -12,6 +12,7 @@ import {
 import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngine';
 import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import { createBlockedPacket } from '../types/teacherHeuristic';
+import { getSkeletonTarget } from '../services/skeletonTargetRegistry';
 
 function setViewportWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', {
@@ -76,6 +77,39 @@ function renderJoint(
       vaganovaAnalysis={vaganovaAnalysis}
       landmarkIndex={landmarkIndex}
       groundedTeacherDraft={groundedTeacherDraft}
+    />,
+  );
+}
+
+function renderTarget(
+  targetId: string,
+  vaganovaAnalysis: VaganovaFullAnalysis | null,
+  groundedTeacherDraft?: GroundedTeacherDraft,
+) {
+  const target = getSkeletonTarget(targetId);
+  if (!target) throw new Error(`Missing test target ${targetId}`);
+  return render(
+    <SkeletonJointPopover
+      knowledge={JOINT_KNOWLEDGE[target.representativeLandmarkIndex]}
+      jointX={300}
+      jointY={300}
+      videoLeft={0}
+      containerHeight={700}
+      onClose={() => undefined}
+      vaganovaAnalysis={vaganovaAnalysis}
+      landmarkIndex={target.representativeLandmarkIndex}
+      groundedTeacherDraft={groundedTeacherDraft}
+      selectedTarget={target}
+      selectedTargetIdentity={{
+        targetId: target.id,
+        kind: target.kind,
+        anchorNormalized: { x: 0.3, y: 0.3 },
+        sourceId: 'clip-a',
+        streamEpoch: 4,
+        generation: 2,
+        mediaTimeUs: 1_500_000,
+        frameStatus: 'exact_cache_frame',
+      }}
     />,
   );
 }
@@ -262,5 +296,19 @@ describe('SkeletonJointPopover evidence color semantics', () => {
     expect(screen.queryByText(/Beckenboden aktiv|10x|destabilisiert die Balance/i)).toBeNull();
     expect(screen.queryByText('Vaganova-Standard')).toBeNull();
     expect(screen.queryByText('Aplomb-Training an der Stange')).toBeNull();
+  });
+
+  it('renders a non-grounded bone as an exact neutral target without legacy claims', () => {
+    renderTarget('bone.upper_arm_l', analysis({
+      armLineQualityL: measurable('ERROR'),
+      portDeBrasL: measurable('ERROR'),
+    }));
+
+    expect(screen.getByText('Linker Oberarm')).toBeTruthy();
+    expect(screen.getByText('Bone · exakter Analyseframe')).toBeTruthy();
+    expect(screen.getByText('Ziel ausgewählt · noch keine automatische Bewertung')).toBeTruthy();
+    expect(screen.getByText(/bone\.upper_arm_l/)).toBeTruthy();
+    expect(screen.queryByText(/Ast im Wind|Port de Bras Arm-Linien-Training|Korrektur erforderlich/i)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Inhalt in Zwischenablage kopieren' }).hasAttribute('disabled')).toBe(true);
   });
 });

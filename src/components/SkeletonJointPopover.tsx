@@ -8,6 +8,7 @@ import {
   VaganovaMeasurement
 } from '../services/vaganovaAngleCalculator';
 import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { SelectedSkeletonTarget, SkeletonTargetDefinition } from '../types/skeletonTarget';
 
 interface Props {
   knowledge: JointKnowledge;
@@ -26,6 +27,10 @@ interface Props {
   landmarkIndex: number;
   /** Exact-frame, provenance-gated teacher draft for the synthetic torso bone. */
   groundedTeacherDraft?: GroundedTeacherDraft;
+  /** Exact joint or bone selected from the canonical rendered geometry. */
+  selectedTarget?: SkeletonTargetDefinition;
+  /** Immutable frame identity captured with the selection. */
+  selectedTargetIdentity?: SelectedSkeletonTarget | null;
 }
 
 const REGION_COLORS: Record<string, string> = {
@@ -97,13 +102,17 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   vaganovaAnalysis,
   landmarkIndex,
   groundedTeacherDraft,
+  selectedTarget,
+  selectedTargetIdentity,
 }) => {
   const color = REGION_COLORS[knowledge.region] ?? '#c084fc';
   const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
   const expectedMeasurementKeys = LIVE_MEASUREMENT_KEYS[landmarkIndex] ?? [];
   const [copied, setCopied] = useState(false);
-  const isGroundedTorso = landmarkIndex === 100;
-  const readyTorsoDraft = landmarkIndex === 100 && groundedTeacherDraft?.kind === 'ready'
+  const isGroundedTorso = selectedTarget
+    ? selectedTarget.metricAdapter === 'spine_tilt_aplomb'
+    : landmarkIndex === 100;
+  const readyTorsoDraft = isGroundedTorso && groundedTeacherDraft?.kind === 'ready'
     ? groundedTeacherDraft
     : null;
   const blockedTorsoDraft = isGroundedTorso && groundedTeacherDraft?.kind === 'blocked'
@@ -137,7 +146,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       });
       return;
     }
-    if (isGroundedTorso) return;
+    if (selectedTarget) return;
 
     const parts: string[] = [
       `${knowledge.name} · ${knowledge.region.toUpperCase()} · VAGANOVA`,
@@ -162,7 +171,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [knowledge, liveMeasurements, readyTorsoDraft, isGroundedTorso]);
+  }, [knowledge, liveMeasurements, readyTorsoDraft, isGroundedTorso, selectedTarget]);
 
   // ESC to close
   useEffect(() => {
@@ -207,7 +216,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       return isMeasurableVaganovaMeasurement(measurement) && measurement.status === 'CORRECT';
     });
   const isNeutral = !hasError && !hasWarning && !hasConfirmedCorrect;
-  const connectorColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : color;
+  const connectorColor = selectedTarget ? '#f59e0b' : hasError ? '#ff453a' : hasWarning ? '#ffd60a' : color;
   const findingColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : hasConfirmedCorrect ? '#30d158' : 'rgba(255,255,255,0.5)';
   const findingBackground = hasError ? 'rgba(255,69,58,0.1)' : hasWarning ? 'rgba(255,214,10,0.08)' : hasConfirmedCorrect ? 'rgba(48,209,88,0.07)' : 'rgba(255,255,255,0.04)';
   const findingBorder = hasError ? 'rgba(255,69,58,0.3)' : hasWarning ? 'rgba(255,214,10,0.25)' : hasConfirmedCorrect ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.12)';
@@ -266,8 +275,9 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           background: 'rgba(8,4,18,0.97)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
-          border: `1px solid ${color}50`,
-          borderLeft: `3px solid ${connectorColor}`,
+          borderStyle: 'solid',
+          borderWidth: '1px 1px 1px 3px',
+          borderColor: `${color}50 ${color}50 ${color}50 ${connectorColor}`,
           borderRadius: '14px',
           boxShadow: `0 8px 40px rgba(0,0,0,0.9), 0 0 0 1px ${color}18, inset 0 1px 0 rgba(255,255,255,0.06)`,
           animation: 'popoverSlideInRight 0.24s cubic-bezier(0.34,1.4,0.64,1)',
@@ -283,9 +293,11 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
             <span style={{ fontSize: '17px', flexShrink: 0 }}>{knowledge.emoji}</span>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{knowledge.name}</div>
+              <div style={{ fontSize: '12px', fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>{selectedTarget?.label ?? knowledge.name}</div>
               <div style={{ fontSize: '9px', fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.8px' }}>
-                {knowledge.region} · Vaganova
+                {selectedTarget
+                  ? `${selectedTarget.kind === 'bone' ? 'Bone' : 'Gelenk'} · ${selectedTargetIdentity?.frameStatus === 'exact_cache_frame' ? 'exakter Analyseframe' : selectedTargetIdentity?.frameStatus === 'pending_exact_frame' ? 'Analyseframe wird gebunden' : 'neutral ausgewählt'}`
+                  : `${knowledge.region} · Vaganova`}
               </div>
             </div>
           </div>
@@ -294,7 +306,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
             <button
               onClick={handleCopyAll}
               title="Inhalt in Zwischenablage kopieren"
-              disabled={isGroundedTorso && !readyTorsoDraft}
+              disabled={(Boolean(selectedTarget) || isGroundedTorso) && !readyTorsoDraft}
               style={{ background: copied ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.07)', border: 'none', color: copied ? '#30d158' : 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '26px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s ease' }}
             >
               {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -306,7 +318,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         </div>
 
         {/* LIVE FRAME ANALYSIS – top priority block when data available */}
-        {!isGroundedTorso && liveMeasurements.length > 0 && (
+        {!selectedTarget && liveMeasurements.length > 0 && (
           <div style={{ margin: '8px 10px 0', display: 'flex', flexDirection: 'column', gap: '5px' }}>
             <div style={{ fontSize: '8px', fontWeight: 800, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.9px', marginBottom: '2px' }}>
               ⚡ Aktueller Frame · Live-Messung
@@ -381,25 +393,37 @@ export const SkeletonJointPopover: React.FC<Props> = ({
             </Section>
             <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Technik für Nicole" color="#64d2ff">
               {readyTorsoDraft.sections.technical}
+              {selectedTarget?.metricScopeLabel ? (
+                <span style={{ display: 'block', marginTop: '4px', color: 'rgba(255,255,255,0.52)' }}>
+                  Messbereich: {selectedTarget.metricScopeLabel}. Das exakt ausgewählte Segment bleibt davon getrennt.
+                </span>
+              ) : null}
             </Section>
             <Section icon={<AlertTriangle size={9} />} label="Grenzen & Prüffragen" color="#ffd60a">
               {readyTorsoDraft.sections.limitations}
             </Section>
           </div>
-        ) : isGroundedTorso ? (
+        ) : selectedTarget || isGroundedTorso ? (
           <div style={{ padding: '8px 10px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '9px 10px' }}>
               <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', lineHeight: 1 }}>○</span>
               <div>
                 <div style={{ fontSize: '8px', fontWeight: 900, color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>
-                  Noch keine gesicherte Frame-Evidenz
+                  {isGroundedTorso ? 'Noch keine gesicherte Frame-Evidenz' : 'Ziel ausgewählt · noch keine automatische Bewertung'}
                 </div>
                 <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
-                  {blockedTorsoMessage}
+                  {isGroundedTorso
+                    ? blockedTorsoMessage
+                    : `${selectedTarget?.label ?? knowledge.name} ist als eigenständiges ${selectedTarget?.kind === 'bone' ? 'Segment' : 'Gelenk'} ausgewählt. Für diese Region ist noch kein freigegebener Exact-Frame-Adapter aktiv.`}
                 </div>
                 <div style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.45, marginTop: '6px' }}>
                   Keine Bewertung, Ursache, Übung oder Leitlinie wird aus fehlender Evidenz abgeleitet.
                 </div>
+                {selectedTargetIdentity?.frameStatus === 'exact_cache_frame' && (
+                  <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.32)', lineHeight: 1.4, marginTop: '6px', fontFamily: 'monospace' }}>
+                    Frame {(selectedTargetIdentity.mediaTimeUs / 1_000_000).toFixed(3)}s · {selectedTargetIdentity.targetId}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -472,7 +496,7 @@ interface SectionProps {
   icon: React.ReactNode;
   label: string;
   color: string;
-  children: string;
+  children: React.ReactNode;
   highlight?: boolean;
 }
 

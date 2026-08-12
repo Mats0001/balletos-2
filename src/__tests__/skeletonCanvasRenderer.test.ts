@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   isTeacherOverlayPacketCurrent,
+  isSelectedSkeletonTargetCurrent,
   renderSkeletonToCanvas,
+  resolveSelectedSkeletonTargetFocus,
   resolveTeacherGlowType,
   resolveTeacherOverlayStyle,
   TeacherOverlayRegionKey,
@@ -179,6 +181,21 @@ function renderTeacherPacket(
 }
 
 describe('trusted skeleton color contract', () => {
+  it('binds exact target focus to the selected joint or bone anchor, never a region proxy', () => {
+    const selected = {
+      targetId: 'bone.forearm_l' as const,
+      kind: 'bone' as const,
+      anchorNormalized: { x: 0.27, y: 0.35 },
+      sourceId: 'clip-a', streamEpoch: 4, generation: 3, mediaTimeUs: 2_500_000,
+      segmentT: 0.6,
+      frameStatus: 'exact_cache_frame' as const,
+    };
+    const context = { sourceId: 'clip-a', streamEpoch: 4, generation: 3, mediaTimeUs: 2_500_000 };
+
+    expect(isSelectedSkeletonTargetCurrent(selected, context)).toBe(true);
+    expect(resolveSelectedSkeletonTargetFocus(selected, context, 1000, 800)).toEqual({ x: 270, y: 280 });
+    expect(resolveSelectedSkeletonTargetFocus(selected, { ...context, generation: 5 }, 1000, 800)).toBeNull();
+  });
   it.each(Object.entries(EXPECTED) as Array<[
     TeacherHeuristicState,
     { color: string; dash: number[] },
@@ -372,5 +389,52 @@ describe('trusted skeleton color contract', () => {
     expect(current.some(({ color, dash }) => color === '#22c55e' && dash.join(',') === '14,8')).toBe(true);
     expect(stale.some(({ color }) => color === '#22c55e')).toBe(false);
     expect(missing.some(({ color }) => color === '#22c55e')).toBe(false);
+  });
+
+  it('outlines the exact selected bone in amber only for the matching frame identity', () => {
+    const renderSelection = (mediaTimeUs: number) => {
+      const { canvas, strokes } = createRecordingCanvas();
+      renderSkeletonToCanvas(
+        canvas,
+        SKELETON,
+        { x: 500, y: 520 },
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {
+          showSkeleton: true,
+          showMotionTrails: false,
+          showCoG: false,
+          showAngleArcs: false,
+          selectedJointId: 'left_elbow',
+          selectedSkeletonTarget: {
+            targetId: 'bone.upper_arm_l',
+            kind: 'bone',
+            anchorNormalized: { x: 0.36, y: 0.25 },
+            sourceId: 'clip-a',
+            streamEpoch: 42,
+            generation: 7,
+            mediaTimeUs: 2_500_000,
+            segmentT: 0.4,
+            frameStatus: 'exact_cache_frame',
+          },
+          selectedTargetFrameContext: {
+            sourceId: 'clip-a',
+            streamEpoch: 42,
+            generation: 7,
+            mediaTimeUs,
+          },
+          isPlie: true,
+          vaganovaAnalysis: rawAnalysis(0.95),
+          overlayMode: 'anatomisch',
+        },
+      );
+      return strokes.filter(stroke => stroke.color === '#f59e0b');
+    };
+
+    expect(renderSelection(2_500_000)).toHaveLength(1);
+    expect(renderSelection(2_400_000)).toHaveLength(0);
   });
 });

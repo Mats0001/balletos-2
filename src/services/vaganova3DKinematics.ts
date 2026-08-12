@@ -77,11 +77,14 @@ class Vaganova3DKinematicsEngine {
       const lm = landmarks2D[idx];
       const x = lm.x * videoWidth;
       const y = lm.y * videoHeight;
+      const hasFiniteVisibility = Number.isFinite(lm.visibility);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
       return {
-        x: isNaN(x) ? videoWidth / 2 : x,
-        y: isNaN(y) ? videoHeight / 2 : y,
+        x,
+        y,
         z: lm.z,
-        vis: lm.visibility ?? 1.0
+        vis: hasFiniteVisibility ? lm.visibility as number : 0,
+        isPredicted: !hasFiniteVisibility,
       };
     };
 
@@ -120,25 +123,29 @@ class Vaganova3DKinematicsEngine {
     const neck: KinematicPoint = {
       x: (validShoulderL.x + validShoulderR.x) / 2,
       y: (validShoulderL.y + validShoulderR.y) / 2,
-      vis: 0.95
+      vis: Math.min(validShoulderL.vis, validShoulderR.vis),
+      isPredicted: validShoulderL.isPredicted === true || validShoulderR.isPredicted === true,
     };
 
     const pelvisCenter: KinematicPoint = {
       x: (validPelvisL.x + validPelvisR.x) / 2,
       y: (validPelvisL.y + validPelvisR.y) / 2,
-      vis: 0.95
+      vis: Math.min(validPelvisL.vis, validPelvisR.vis),
+      isPredicted: validPelvisL.isPredicted === true || validPelvisR.isPredicted === true,
     };
 
     const sternum: KinematicPoint = {
       x: neck.x * 0.7 + pelvisCenter.x * 0.3,
       y: neck.y * 0.7 + pelvisCenter.y * 0.3,
-      vis: 0.90
+      vis: Math.min(neck.vis, pelvisCenter.vis),
+      isPredicted: neck.isPredicted === true || pelvisCenter.isPredicted === true,
     };
 
     const navel: KinematicPoint = {
       x: neck.x * 0.3 + pelvisCenter.x * 0.7,
       y: neck.y * 0.3 + pelvisCenter.y * 0.7,
-      vis: 0.90
+      vis: Math.min(neck.vis, pelvisCenter.vis),
+      isPredicted: neck.isPredicted === true || pelvisCenter.isPredicted === true,
     };
 
     // Head Position: Lock to Nose (Landmark 0) or directly above Neck
@@ -149,7 +156,8 @@ class Vaganova3DKinematicsEngine {
     } : {
       x: neck.x,
       y: neck.y - 50,
-      vis: 0.8
+      vis: 0,
+      isPredicted: true,
     };
 
     // Arms: Use exact MediaPipe points or natural continuation along torso
