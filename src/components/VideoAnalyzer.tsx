@@ -10,7 +10,7 @@ import { vaganovaPoseEngine } from '../services/vaganovaPoseEngine';
 import { vaganovaEvidenceEngine } from '../services/vaganovaEvidenceEngine';
 import { vaganovaMotionClassifier, MotionClassificationResult } from '../services/vaganovaMotionClassifier';
 import { vaganova3DKinematics, ReconstructedSkeleton } from '../services/vaganova3DKinematics';
-import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport } from '../services/vaganovaPreAnalyzer';
+import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport, replaceAutoCuePoints } from '../services/vaganovaPreAnalyzer';
 import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
 import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
@@ -109,6 +109,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [currentPlayTime, setCurrentPlayTime] = useState<number>(0);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
   const slowMoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preIndexRunRef = useRef(0);
   const staticFrameRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staticFrameRetryCountRef = useRef<number>(0);
 
@@ -357,6 +358,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // ⚡ OPTION 1: PRE-INDEXING TRIGGER
   const triggerPreIndexingScan = async () => {
     if (!videoRef.current) return;
+    const scanVideoUrl = selectedDevVideoUrl;
+    const scanRun = ++preIndexRunRef.current;
+    const scanIsCurrent = () => (
+      preIndexRunRef.current === scanRun
+      && selectedDevVideoUrlRef.current === scanVideoUrl
+    );
 
     setIsPreIndexing(true);
     setLoadedFromCache(false);
@@ -364,16 +371,17 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setIndexingStatusStr('Suche im Cache...');
 
     // Build stable IDB key: for uploads use File metadata, for built-ins use URL segment
-    const currentVideoObj = videoList.find(v => v.url === selectedDevVideoUrl);
+    const currentVideoObj = videoList.find(v => v.url === scanVideoUrl);
     const idbKey = vaganovaIdbCache.buildKey(
-      selectedDevVideoUrl,
+      scanVideoUrl,
       (currentVideoObj as any)?._file as File | undefined
     );
 
     await vaganovaFrameCache.preIndexVideo(
-      selectedDevVideoUrl,
+      scanVideoUrl,
       videoRef.current,
       (percent, step, total, fromCache) => {
+        if (!scanIsCurrent()) return;
         if (fromCache) {
           setLoadedFromCache(true);
           setIndexingStatusStr(`Aus Cache geladen (${step} Frames)`);
@@ -383,8 +391,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         }
         setIndexingProgress(percent);
       },
-      idbKey
+      idbKey,
+      scanIsCurrent,
     );
+
+    // A completed scan belongs only to the source that started it.
+    if (!scanIsCurrent()) return;
 
     setIsPreIndexing(false);
     setIsEngineReady(true);
@@ -393,16 +405,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
 
     // Auto-Analyse: KI-Cue-Points aus echten Frame-Daten generieren
-    const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
-    if (autoCuePoints.length > 0) {
-      // KI-Cue-Points: alte KI_AUTO-Einträge entfernen, neue einsetzen
-      setCuePoints(prev => {
-        const nonKi = prev.filter(p => p.dataSource !== 'KI_AUTO');
-        const merged = [...nonKi, ...autoCuePoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
-        vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
-        return merged;
-      });
-    }
+    const { autoCuePoints, report } = analyzeFrameCacheForHighlights(scanVideoUrl);
+    // KI-Cue-Points immer ersetzen, damit gesperrte Altbefunde nicht bestehen bleiben.
+    const merged = replaceAutoCuePoints(
+      vaganovaPreAnalyzer.getCuePoints(scanVideoUrl),
+      autoCuePoints,
+    );
+    vaganovaPreAnalyzer.saveCuePoints(scanVideoUrl, merged);
+    setCuePoints(merged);
     setAnalysisReport(report);
 
     // ── Analyse-Toast zeigen ──────────────────────────────────────────
@@ -438,14 +448,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         // ABER: KI-Analyse (Cue-Points + Report) trotzdem generieren,
         // falls sie noch nicht vorliegen (z.B. nach Page-Reload)
         const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
-        if (autoCuePoints.length > 0) {
-          setCuePoints(prev => {
-            const nonKi = prev.filter(p => p.dataSource !== 'KI_AUTO');
-            const merged = [...nonKi, ...autoCuePoints].sort((a, b) => a.timeSeconds - b.timeSeconds);
-            vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
-            return merged;
-          });
-        }
+        const merged = replaceAutoCuePoints(
+          vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl),
+          autoCuePoints,
+        );
+        vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
+        setCuePoints(merged);
         if (report) setAnalysisReport(report);
       } else {
         // Automatisch starten – Nicole muss nichts tun
@@ -1120,6 +1128,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // Previously this cleared newVid.url which doesn't have a cache yet
       vaganovaFrameCache.clear(selectedDevVideoUrl);
       setVideoList(videoStore.getAllVideos());
+      preIndexRunRef.current += 1;
+      setIsPreIndexing(false);
+      selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(newVid.url));
       vaganovaKineticAI.reset();
@@ -1137,6 +1148,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     setDetectedLandmarks(null);
     setDetectedWorldLandmarks(null);
     setIsEngineReady(false);
+    preIndexRunRef.current += 1;
+    setIsPreIndexing(false);
+    selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
     setCuePoints(vaganovaPreAnalyzer.getCuePoints(url));
     setIsPlaying(true);
@@ -1499,14 +1513,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     // Finde den auffälligsten Messwert
     const checks: Array<{ condition: boolean; headline: string; status: 'GOOD' | 'CORRECTION' | 'WARNING'; diag: string; goal: string; practice: string }> = [
       {
-        condition: (va.valgusDriftL?.status === 'ERROR' || va.valgusDriftR?.status === 'ERROR'),
-        headline: 'Knie-Alignment – Außenrotation prüfen',
-        status: 'CORRECTION',
-        diag: `An diesem Frame zeigt das Knie eine mediale Deviation — die Verbindungslinie Hüfte–Knie–Zehenspitze bricht am Knie ein. Das passiert, wenn die Außenrotatoren der Hüfte die Rotation nicht aktiv halten. Gemessener Wert: ${(va.valgusDriftL?.status === 'ERROR' ? va.valgusDriftL : va.valgusDriftR)?.value?.toFixed(1) ?? '?'}°.`,
-        goal: 'Knie bleibt direkt über dem mittleren Zeh — die gerade Linie von Hüfte zu Knie zu Zehenspitze bleibt sauber. Die Rotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse.',
-        practice: 'Nur demi-plié an der Stange, sehr langsam. Im tiefsten Punkt anhalten, in den Spiegel schauen. Knie über dem 2./3. Zeh? Die Muskeln außen an der Hüfte sollen deutlich arbeiten. 10 Wdh. bewusst und langsam.',
-      },
-      {
         condition: (va.armLineQualityL?.status === 'ERROR' || va.armLineQualityR?.status === 'ERROR'),
         headline: 'Arm-Linie – Ellbogen und Handgelenk prüfen',
         status: 'CORRECTION',
@@ -1627,6 +1633,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   // TEACHER CRUD: Save Edit
   const handleSaveEdit = (cueId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const existingCue = cuePoints.find(cue => cue.id === cueId);
     const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
       poseName: editForm.poseName,
       headline: editForm.headline,
@@ -1635,6 +1642,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       diagnosisText: editForm.diagnosisText || undefined,
       goalText: editForm.goalText || undefined,
       practiceText: editForm.practiceText || undefined,
+      provenance: existingCue?.provenance === 'ki_suggestion'
+        ? 'nicole_edited'
+        : existingCue?.provenance,
     });
     setCuePoints(updated);
     setEditingCueId(null);
@@ -1860,8 +1870,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Inline-Edit für TEACHER_CREATED Cues: speichert ein einzelnes Feld on-blur
   const handleInlineCueEdit = (cueId: string, field: Partial<VaganovaCuePoint>) => {
-    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, field);
+    const existingCue = cuePoints.find(cue => cue.id === cueId);
+    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+      ...field,
+      provenance: existingCue?.provenance === 'ki_suggestion'
+        ? 'nicole_edited'
+        : existingCue?.provenance,
+    });
     setCuePoints(updated);
+  };
+
+  const persistCueUpdate = (
+    cueId: string,
+    updates: Partial<VaganovaCuePoint>,
+  ) => {
+    setCuePoints(prev => {
+      const updated = prev.map(cue => cue.id === cueId ? { ...cue, ...updates } : cue);
+      vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, updated);
+      return updated;
+    });
   };
 
   // Update the dataUrl of an annotation (after lightbox burn-in)
@@ -3975,19 +4002,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         KI-VORSCHLAG – Nicoles Entscheidung ausstehend
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const } : c)); }}
+                        <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'nicole_confirmed' }); }}
                           style={{ background: 'rgba(48,209,88,0.2)', border: '1px solid rgba(48,209,88,0.5)', color: '#30d158', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
                         >✓ Übernehmen</button>
                         <button onClick={(e) => { e.stopPropagation(); handleStartEdit(cue, e); }}
                           style={{ background: 'rgba(192,132,252,0.15)', border: '1px solid rgba(192,132,252,0.4)', color: '#c084fc', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
                         >✏ Bearbeiten</button>
-                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_rejected' as const } : c)); }}
+                        <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'nicole_rejected' }); }}
                           style={{ background: 'rgba(255,69,58,0.1)', border: '1px solid rgba(255,69,58,0.3)', color: '#ff453a', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}
                         >✕ Ablehnen</button>
-                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const, nicoleAction: 'strength' as const, status: 'GOOD' } : c)); }}
+                        <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'nicole_confirmed', nicoleAction: 'strength', status: 'GOOD' }); }}
                           style={{ background: 'rgba(48,209,88,0.1)', border: '1px solid rgba(48,209,88,0.3)', color: 'rgba(255,255,255,0.7)', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', cursor: 'pointer' }}
                         >⭐ Als Stärke</button>
-                        <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'nicole_confirmed' as const, nicoleAction: 'correction' as const, status: 'CORRECTION' } : c)); }}
+                        <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'nicole_confirmed', nicoleAction: 'correction', status: 'CORRECTION' }); }}
                           style={{ background: 'rgba(255,69,58,0.1)', border: '1px solid rgba(255,69,58,0.3)', color: 'rgba(255,255,255,0.7)', padding: '3px 8px', borderRadius: '5px', fontSize: '9px', cursor: 'pointer' }}
                         >⚠ Als Korrektur</button>
                       </div>
@@ -3998,10 +4025,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   {(cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Bestätigt</span>
-                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, learnerVisible: !c.learnerVisible } : c)); }}
+                      <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
                         style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
                       >{cue.learnerVisible ? '👁 Lernende: an' : '👁 Für Lernende'}</button>
-                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, parentVisible: !c.parentVisible } : c)); }}
+                      <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
                         style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
                       >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : '👨‍👩‍👧 Für Eltern'}</button>
                     </div>
@@ -4011,7 +4038,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   {cue.provenance === 'nicole_rejected' && (
                     <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>✕ Von Nicole abgelehnt</span>
-                      <button onClick={(e) => { e.stopPropagation(); setCuePoints(prev => prev.map(c => c.id === cue.id ? { ...c, provenance: 'ki_suggestion' as const } : c)); }}
+                      <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'ki_suggestion' }); }}
                         style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: '8px', cursor: 'pointer' }}
                       >↩ Rückgängig</button>
                     </div>

@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VaganovaPreAnalyzer – Cue-Point Management Service
 //
-import { vaganovaAngleCalculator } from './vaganovaAngleCalculator';
+import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaFrameCache } from './vaganovaFrameCache';
+import { BUILD_POLICY } from '../config/buildPolicy';
 
 // ⚠️  AUDIT FIX (2026-08-10): Previous version faked AI analysis by switching
 //     on video filename and returning fabricated angle values (14°, 88°, 8°)
@@ -53,6 +54,10 @@ export interface VaganovaCuePoint {
   kiSuggestionData?: {
     originalHeadline: string;
     originalCueMetaphor: string;
+    originalDiagnosisText?: string;
+    originalGoalText?: string;
+    originalPracticeText?: string;
+    originalTechnicalAnalysis?: string;
     metrics: string[];          // z.B. ['spineTilt: ERROR 8.3°', 'pelvicTilt: WARNING 4.1°']
     ampelStatus: 'CORRECT' | 'WARNING' | 'ERROR';
     generatedAt: string;        // ISO 8601
@@ -232,10 +237,37 @@ export class VaganovaPreAnalyzerService {
   }
 }
 
+/** Replaces only unreviewed automatic results; reviewed, teacher and demo cues survive. */
+export function replaceAutoCuePoints(
+  existing: VaganovaCuePoint[],
+  generated: VaganovaCuePoint[],
+): VaganovaCuePoint[] {
+  const isReviewed = (point: VaganovaCuePoint) => (
+    point.provenance !== undefined
+    && point.provenance !== 'ki_suggestion'
+  );
+  const reviewedKeys = new Set(
+    existing
+      .filter(isReviewed)
+      .map(point => `${point.jointFocusId}:${point.timeSeconds.toFixed(3)}`),
+  );
+  const retained = existing.filter(point => (
+    point.dataSource !== 'KI_AUTO' || isReviewed(point)
+  ));
+  const newSuggestions = generated.filter(point => (
+    !reviewedKeys.has(`${point.jointFocusId}:${point.timeSeconds.toFixed(3)}`)
+  ));
+
+  return [
+    ...retained,
+    ...newSuggestions,
+  ].sort((a, b) => a.timeSeconds - b.timeSeconds);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTO-ANALYSE ENGINE
 // Analysiert alle gecachten Frames und generiert KI-Cue-Points + Report.
-// Basiert auf echten Messwerten aus vaganovaAngleCalculator.analyzeFullFrame().
+// Basiert auf echten Messwerten einer scan-lokalen VaganovaAngleCalculator-Instanz.
 // KEINE Demo-Werte, KEINE Fabrication.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -258,18 +290,15 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   type FrameScore = { timeMs: number; timeSec: number; value: number; side?: 'L' | 'R' };
 
   // ── Tracking per metric ──────────────────────────────────────────────────
-  let worstKneeL: FrameScore | null = null;     // max |valgusDriftL|
-  let worstKneeR: FrameScore | null = null;     // max |valgusDriftR|
   let worstArm: FrameScore | null = null;        // max arm line deviation
   let worstSpine: FrameScore | null = null;      // max |spineTilt|
   let worstPelvis: FrameScore | null = null;     // max |pelvicTilt|
-  let bestShoulder: FrameScore | null = null;    // closest to 180° = am horizontalsten
-  let bestCoG: FrameScore | null = null;         // min |plumbDeviation| = bestes Gleichgewicht
-  let bestMoment: FrameScore | null = null;      // frame with most OK metrics combined
 
   // Sample every Nth frame for performance (max 60 frames analyzed)
   const step = Math.max(1, Math.floor(frames.length / 60));
   let analyzedCount = 0;
+  // A scan must never train or contaminate the live, video-bound calculator.
+  const scanAngleCalculator = new VaganovaAngleCalculator();
 
   for (let i = 0; i < frames.length; i += step) {
     const f = frames[i];
@@ -278,23 +307,7 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
     if (!lm || lm.length < 33) continue;
     analyzedCount++;
 
-    const analysis = vaganovaAngleCalculator.analyzeFullFrame(lm, vw, vh);
-
-    // ── Worst knee valgus (per side) ──────────────────────────────────────
-    const kneeL = analysis.valgusDriftL?.value;
-    if (kneeL !== undefined && kneeL !== null) {
-      const kAbs = Math.abs(kneeL);
-      if (!worstKneeL || kAbs > worstKneeL.value) {
-        worstKneeL = { timeMs: f.timeMs, timeSec, value: kAbs, side: 'L' };
-      }
-    }
-    const kneeR = analysis.valgusDriftR?.value;
-    if (kneeR !== undefined && kneeR !== null) {
-      const kAbs = Math.abs(kneeR);
-      if (!worstKneeR || kAbs > worstKneeR.value) {
-        worstKneeR = { timeMs: f.timeMs, timeSec, value: kAbs, side: 'R' };
-      }
-    }
+    const analysis = scanAngleCalculator.analyzeFullFrame(lm, vw, vh);
 
     // ── Worst arm line ──────────────────────────────────────────────────
     const armL = analysis.armLineQualityL?.value;
@@ -322,35 +335,6 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
       }
     }
 
-    // ── Best shoulder (closest to 180°) ──────────────────────────────────
-    const shoulder = analysis.shoulderSymmetry?.value;
-    if (shoulder !== undefined && shoulder !== null) {
-      const shoulderGoodness = 180 - Math.abs(shoulder - 180);
-      if (!bestShoulder || shoulderGoodness > bestShoulder.value) {
-        bestShoulder = { timeMs: f.timeMs, timeSec, value: shoulderGoodness };
-      }
-    }
-
-    // ── Best CoG (least plumb deviation) ─────────────────────────────────
-    const cog = analysis.plumbDeviation?.value;
-    if (cog !== undefined && cog !== null) {
-      const cogGoodness = 100 - Math.abs(cog);
-      if (!bestCoG || cogGoodness > bestCoG.value) {
-        bestCoG = { timeMs: f.timeMs, timeSec, value: cogGoodness };
-      }
-    }
-
-    // ── Best overall moment (count how many metrics are OK) ──────────────
-    let okCount = 0;
-    if (analysis.spineTilt && Math.abs(analysis.spineTilt.value) < 5) okCount++;
-    if (analysis.pelvicTilt && Math.abs(analysis.pelvicTilt.value) < 8) okCount++;
-    if (analysis.shoulderSymmetry && Math.abs(analysis.shoulderSymmetry.value - 180) < 5) okCount++;
-    if (analysis.valgusDriftL && Math.abs(analysis.valgusDriftL.value) < 3) okCount++;
-    if (analysis.valgusDriftR && Math.abs(analysis.valgusDriftR.value) < 3) okCount++;
-    if (analysis.plumbDeviation && Math.abs(analysis.plumbDeviation.value) < 5) okCount++;
-    if (!bestMoment || okCount > bestMoment.value) {
-      bestMoment = { timeMs: f.timeMs, timeSec, value: okCount };
-    }
   }
 
   // ── BUILD CANDIDATE POOLS ──────────────────────────────────────────────────
@@ -366,64 +350,6 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
   const candidates: CueCandidate[] = [];
 
   // ── KORREKTUREN ──────────────────────────────────────────────────────────
-
-  // Knee valgus L
-  if (worstKneeL && worstKneeL.value > 3) {
-    const timeSec = worstKneeL.timeSec;
-    const v = worstKneeL.value;
-    candidates.push({
-      priority: v * 3,
-      category: 'CORRECTION',
-      cue: {
-        id: `ki-kneeL-${timeSec.toFixed(3)}`,
-        timeSeconds: timeSec,
-        timecodeStr: fmtTime(timeSec),
-        poseName: 'Linkes Knie-Alignment (KI erkannt)',
-        status: 'CORRECTION',
-        headline: `Linkes Knie kippt nach innen – ${v.toFixed(1)}°`,
-        cueMetaphor: '"Beide Knie sind wie zwei Scheinwerfer – beide zeigen gleichzeitig nach außen in den Raum."',
-        jointFocusId: 'left_knee',
-        dataSource: 'KI_AUTO',
-        diagnosisMetaphor: '"Das Knie ist wie eine Türangel — wenn sie locker wird, fällt die Tür nach innen. Hier gibt die Hüft-Angel kurz nach."',
-        kiNote: `An diesem Frame kippt das linke Knie ${v.toFixed(1)}° nach innen — gut sichtbar, wenn man auf die Verbindungslinie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie zusammen. Das passiert, wenn die Außenrotation aus der Hüfte nicht aktiv genug gehalten wird. Sehr häufig beim Plié und gut trainierbar.`,
-        diagnosisText: `Am tiefsten Punkt des Pliés kippt das linke Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Messwert: ${v.toFixed(1)}° mediale Deviation. Das ist ein rein muskuläres Thema und bei jungen Schülerinnen sehr häufig. Die gute Nachricht: Es korrigiert sich mit gezieltem Krafttraining vollständig.`,
-        goalText: 'Das Knie bleibt vom ersten Moment des Pliés bis zum tiefsten Punkt direkt über dem mittleren Zeh — die gedachte Linie von Hüfte zu Knie zu Zehenspitze bleibt eine gerade Linie. Die Außenrotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse oder ein Kippen des Fußes. Im Ergebnis öffnen sich die Knie wie Türen gleichmäßig nach außen, bleiben dabei stabil und kontrolliert. Das ist kein ästhetisches Ziel, sondern eine Frage der Gelenk-Gesundheit — langfristig schützt diese Ausrichtung das Kniegelenk.',
-        practiceText: 'Täglich an der Stange: Nur demi-plié, sehr langsam. Im tiefsten Punkt kurz anhalten und in den Spiegel schauen — ist das Knie über dem zweiten oder dritten Zeh? Wenn nicht: kurz aktiv nach außen drücken, ohne die Ferse zu heben. Die Muskeln außen an der Hüfte sollen dabei deutlich arbeiten — das ist der richtige Muskel. 10 Wiederholungen, bewusst und langsam. Erst wenn das im demi-plié sicher sitzt, kommt das grand plié dazu. Dieser Fehler ist ein reines Kraft-Thema und korrigiert sich mit gezieltem Training in wenigen Wochen vollständig.',
-        referenceImageKey: 'plie_knie_korrekt',
-        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° mediale Deviation (Knie-Valgus), linkes Knie. Sollwert: 0° — Patella lotrecht über 2. und 3. Zehe. Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nDer Fehler ist auf die linke untere Extremität isoliert. Das Fußlängsgewölbe ist mit hoher Wahrscheinlichkeit kollabiert (Pronation / "Rolling in") — dieser Fußfehler geht dem Knie-Einknicken voraus und ist der eigentliche Auslöser. Im Slow-Mo prüfen: An welchem Punkt im Plié beginnt das Gewölbe einzubrechen?\n\nKINEMATISCHE KETTE\nDas Knie selbst ist nicht der Verursacher. Die Kausalkette: Mangelnde Außenrotation (En-dehors) im Hüftgelenk → Hüfte überträgt die Torsion ans Knie → Knie weicht medial aus → Fuß proniert als Endkompensation. Die tiefen Außenrotatoren (M. piriformis, Mm. gemelli, M. gluteus maximus) und M. tibialis posterior (Fußgewölbe) sind die Schlüsselmuskeln.\n\nDIFFERENZIALDIAGNOSE\nPrimär Kraftdefizit (80%): Pelvitrochanteräre Muskulatur hält im tiefen Plié nicht mehr durch. Sekundär Koordination (20%): Aufmerksamkeit auf Rotation geht beim Absenken verloren.\n\nSOFORT-FOKUS\nRotation tief aus dem Hüftgelenk aktivieren — nicht das Knie manuell nach außen drücken. Gewicht bewusst auf die Fußaußenkante verlagern, Gewölbe aufrichten.`,
-      },
-      reportEntry: { label: 'Knie-Einfallen links', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
-    });
-  }
-
-  // Knee valgus R
-  if (worstKneeR && worstKneeR.value > 3) {
-    const timeSec = worstKneeR.timeSec;
-    const v = worstKneeR.value;
-    candidates.push({
-      priority: v * 3,
-      category: 'CORRECTION',
-      cue: {
-        id: `ki-kneeR-${timeSec.toFixed(3)}`,
-        timeSeconds: timeSec,
-        timecodeStr: fmtTime(timeSec),
-        poseName: 'Rechtes Knie-Alignment (KI erkannt)',
-        status: 'CORRECTION',
-        headline: `Rechtes Knie kippt nach innen – ${v.toFixed(1)}°`,
-        cueMetaphor: '"Beide Knie sind wie zwei Scheinwerfer – beide zeigen gleichzeitig nach außen in den Raum."',
-        jointFocusId: 'right_knee',
-        dataSource: 'KI_AUTO',
-        diagnosisMetaphor: '"Schau auf dein Knie im Spiegel: Zeigt es nach vorne über den Zeh — oder biegt es sich nach innen weg wie eine einknicke Brücke?"',
-        kiNote: `An diesem Frame kippt das rechte Knie ${v.toFixed(1)}° nach innen — gut sichtbar, wenn man auf die Verbindungslinie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie zusammen. Das ist ein klassisches Kraftdefizit in den tiefen Außenrotatoren der Hüfte — sehr häufig und gut trainierbar.`,
-        diagnosisText: `Am tiefsten Punkt des Pliés kippt das rechte Knie nach innen — das sieht man deutlich, wenn man auf die Linie Hüfte–Knie–Zehenspitze schaut: sie bricht am Knie ein. Das passiert, weil die kurze Hüftmuskulatur (die Außenrotatoren) an diesem Punkt die Rotation nicht mehr aktiv hält. Kein Aufmerksamkeitsfehler — die Muskeln brauchen einfach noch mehr Trainingszeit. Messwert: ${v.toFixed(1)}° mediale Deviation. Bei jungen Schülerinnen im Plié ist das sehr häufig und korrigiert sich mit gezieltem Krafttraining. Positiv: Der Oberkörper und die linke Seite sehen in diesem Frame solide aus — der Fehler ist isoliert.`,
-        goalText: 'Das Knie bleibt vom ersten Moment des Pliés bis zum tiefsten Punkt direkt über dem mittleren Zeh — die gedachte Linie von Hüfte zu Knie zu Zehenspitze bleibt eine gerade Linie. Die Außenrotation kommt aktiv aus der Hüfte, nicht durch Druck auf die Ferse oder ein Kippen des Fußes. Im Ergebnis öffnen sich die Knie wie Türen gleichmäßig nach außen, bleiben dabei stabil und kontrolliert. Das ist kein ästhetisches Ziel, sondern eine Frage der Gelenk-Gesundheit — langfristig schützt diese Ausrichtung das Kniegelenk.',
-        practiceText: 'Täglich an der Stange: Nur demi-plié, sehr langsam. Im tiefsten Punkt kurz anhalten und in den Spiegel schauen — ist das rechte Knie über dem zweiten oder dritten Zeh? Wenn nicht: kurz aktiv nach außen drücken, ohne die Ferse zu heben. Die Muskeln außen an der Hüfte sollen dabei deutlich arbeiten — das ist der richtige Muskel. 10 Wiederholungen, bewusst und langsam. Hilfreiche Übung: Im Sitzen einen Gummiball zwischen die Knie klemmen und nach außen drücken — das trainiert genau die Außenrotatoren, die hier fehlen. Dieser Fehler korrigiert sich mit gezieltem Training in wenigen Wochen vollständig.',
-        referenceImageKey: 'plie_knie_korrekt',
-        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${v.toFixed(1)}° mediale Deviation (Knie-Valgus), rechtes Knie. Sollwert: 0° — Patella lotrecht über 2. und 3. Zehe. Abweichung: ${v.toFixed(1)}°.\n\nGESAMTBILD DIESES FRAMES\nOberkörper und Carré bleiben in diesem Frame stabil — der Fehler ist auf die rechte untere Extremität isoliert. Das Fußlängsgewölbe ist mit hoher Wahrscheinlichkeit kollabiert (Pronation / "Rolling in"). Im Slow-Mo prüfen: An welchem Punkt im Plié beginnt das Gewölbe einzubrechen?\n\nKINEMATISCHE KETTE\nDas Knie selbst ist nicht der Verursacher. Die Kausalkette: Mangelnde Außenrotation (En-dehors) im Hüftgelenk → Hüfte überträgt die Torsion ans Knie → Knie weicht medial aus → Fuß proniert als Endkompensation. Die tiefen Außenrotatoren (M. piriformis, Mm. gemelli, M. gluteus maximus) und M. tibialis posterior (Fußgewölbe) sind die Schlüsselmuskeln.\n\nDIFFERENZIALDIAGNOSE\nPrimär Kraftdefizit (80%): Pelvitrochanteräre Muskulatur hält im tiefen Plié nicht mehr durch. Sekundär Koordination (20%): Aufmerksamkeit auf Rotation geht beim Absenken verloren. Im Slow-Mo prüfen: Passiert das Einknicken im ersten Drittel des Plié (Kraft) oder erst am Tiefpunkt (Ermüdung)?\n\nSOFORT-FOKUS\nRotation tief aus dem Hüftgelenk aktivieren — nicht das Knie manuell nach außen drücken. Gewicht bewusst auf die Fußaußenkante (kleiner Zeh) verlagern, Gewölbe aufrichten. Taktiler Hinweis: Druck am Trochanter major nach außen-oben.`,
-      },
-      reportEntry: { label: 'Knie-Einfallen rechts', timecode: fmtTime(timeSec), value: `${v.toFixed(1)}°` },
-    });
-  }
 
   // Arm line
   if (worstArm && worstArm.value > 10) {
@@ -510,87 +436,6 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
     });
   }
 
-  // ── STÄRKEN ──────────────────────────────────────────────────────────────
-
-  if (bestShoulder && bestShoulder.value > 150) {
-    const timeSec = bestShoulder.timeSec;
-    candidates.push({
-      priority: bestShoulder.value - 140,
-      category: 'GOOD',
-      cue: {
-        id: `ki-shoulder-good-${timeSec.toFixed(3)}`,
-        timeSeconds: timeSec,
-        timecodeStr: fmtTime(timeSec),
-        poseName: 'Schulter-Horizontalität (KI erkannt)',
-        status: 'GOOD',
-        headline: 'Schöne ruhige Schulter-Linie – genau so soll es sein',
-        cueMetaphor: '"Die Schultern sind ein Tablett, das du balancierst — kein Tropfen darf herunterfallen."',
-        jointFocusId: 'shoulder_line',
-        dataSource: 'KI_AUTO',
-        diagnosisMetaphor: '"Genau so soll es aussehen: Die Schultern liegen wie Flügel, die ruhig ausgebreitet sind — weder hochgezogen noch eingefallen."',
-        kiNote: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel — die Schulterblätter sitzen aktiv nach unten, ohne Anspannung im Nacken. Das gibt der Bewegung sofort mehr Eleganz.',
-        diagnosisText: 'An diesem Frame sind die Schultern wirklich schön ruhig und fast perfekt parallel — die Schulterblätter sitzen aktiv nach unten, ohne Anspannung im Nacken. Das gibt der Bewegung sofort mehr Eleganz und wirkt auf alle im Raum. Das ist eine echte Stärke: diese ruhige, breite Schulter-Linie bewusst im Körpergedächtnis verankern — so soll es immer aussehen. Gerade bei jungen Schülerinnen ist es selten, dass die Schultern so konsequent ruhig bleiben.',
-        goalText: 'Diese Schulter-Position als Referenz-Gefühl im Körpergedächtnis verankern. Hier liegt alles richtig: Die Schulterblätter sitzen breit und aktiv nach unten — nicht hochgezogen, nicht zusammengekniffen. Der Nacken ist lang und frei. Die horizontale Schulterlinie gibt der gesamten Oberkörperhaltung Würde und Ruhe. Dieses Gefühl kennen und auf Abruf reproduzieren können — das ist das Ziel.',
-        practiceText: 'Diesen Frame nutzen als persönliche Referenz. Bewusst im Körper spüren: Was passiert gerade mit den Schulterblättern? Wo liegt die Spannung? Dieses Körpergefühl als "Anker" speichern. Übung: Schultern hochziehen, drei Sekunden halten, dann langsam loslassen und tiefer sinken lassen als normal — das ist die richtige Position. Mehrmals täglich, auch ohne Tanzen: beim Sitzen, beim Gehen. Diese Schulterposition soll zur Normalstellung werden, nicht zur bewussten Anspannung.',
-        referenceImageKey: 'epaulement_ideal',
-        technicalAnalysis: `METRISCHE DIAGNOSE\nIstwert: ${(bestShoulder.value).toFixed(0)}° Schulter-Symmetriewert (180° = perfekte Horizontalität). Abweichung: nahe 0°. Das ist der beste gemessene Frame in dieser Aufnahme.\n\nGESAMTBILD DIESES FRAMES\nExzellente Gesamthaltung: Schulterblätter sitzen aktiv in Depression auf dem Thorax. Das Épaulement wird korrekt aus der BWS initiiert, nicht aus den Schultergelenken.\n\nKINEMATISCHE KETTE\nPerfekte Schulter-Horizontalität beweist exzellente Kernstabilität. Das Zusammenspiel von tiefer Bauchmuskulatur, Multifidus und unterem Trapezius funktioniert einwandfrei.\n\nSOFORT-FOKUS\nLob mit somatischer Aufgabe: "Merk dir das Gefühl des weiten Schlüsselbeins — das ist dein Anker-Moment."`,
-      },
-      reportEntry: { label: 'Schulter-Horizontalität', value: `${(bestShoulder.value).toFixed(0)}%` },
-    });
-  }
-
-  if (bestCoG && bestCoG.value > 80) {
-    const timeSec = bestCoG.timeSec;
-    candidates.push({
-      priority: bestCoG.value - 70,
-      category: 'GOOD',
-      cue: {
-        id: `ki-cog-good-${timeSec.toFixed(3)}`,
-        timeSeconds: timeSec,
-        timecodeStr: fmtTime(timeSec),
-        poseName: 'Körperschwerpunkt-Stabilität (KI erkannt)',
-        status: 'GOOD',
-        headline: 'Sehr gute Schwerpunkt-Kontrolle – Stabilität über Standfläche',
-        cueMetaphor: '"Stell dir vor, du hast einen Laserstrahl am Bauchnabel — er zeigt exakt zwischen deine Füße auf den Boden."',
-        jointFocusId: 'pelvis_core',
-        dataSource: 'KI_AUTO',
-        diagnosisMetaphor: '"Der Körperschwerpunkt steht wie ein ruhiger Anker genau über der Mitte der Standfläche — das gibt jeder Bewegung Sicherheit und Eleganz."',
-        kiNote: 'An diesem Frame liegt der projizierte Körperschwerpunkt stabil über der Standfläche — mit nur minimaler Abweichung. Die Rumpfstabilität arbeitet optimal mit dem Gleichgewicht zusammen.',
-        diagnosisText: 'An diesem Frame liegt der projizierte Körperschwerpunkt stabil über der Standfläche — mit nur minimaler Abweichung. Das ist eine echte Stärke: die Rumpfstabilität (Core) arbeitet hier optimal mit dem Gleichgewicht zusammen. Bei vielen jungen Schülerinnen driftet der Schwerpunkt im Plié seitlich ab — hier passiert das nicht. Dieses Gefühl der zentralen Balance bewusst verankern, es ist die Basis für alle Balancen und Drehungen, die später kommen.',
-        goalText: 'Der Schwerpunkt bleibt in jeder Phase der Bewegung — vom Aufstieg bis zum Tiefpunkt — ruhig über der Standfläche zentriert. Keine seitliche Drift, kein Kippen nach vorne oder hinten. Das ist die Basis für alle Balancen und Drehungen. Diese zentrierte Schwerpunktlage als Heimgefühl verankern — wenn der Schwerpunkt stimmt, fühlt sich jede Bewegung mühelos an.',
-        practiceText: 'Im Spiegel von vorne und von der Seite: Gibt es einen Moment, wo der Oberkörper seitlich ausweicht? Beim Plié bewusst spüren: Ist das Gewicht gleichmäßig auf beiden Füßen? Übung: Relevé mit geschlossenen Augen — 5 Sekunden halten. Wenn der Schwerpunkt zentriert ist, fühlt sich das mühelos an. Weitere Übung: Im Demi-plié die Augen schließen und spüren, ob das Gewicht gleichmäßig auf beiden Fußsohlen liegt. Die Zehen sollen locker bleiben, die Arbeit kommt aus der Mitte.',
-        technicalAnalysis: `METRISCHE DIAGNOSE\nDer projizierte Schwerpunkt liegt mit minimaler Abweichung über der Standfläche. Das zeigt eine gute Core-Stabilität und propriozeptive Kontrolle.\n\nGESAMTBILD DIESES FRAMES\nDie Schwerpunktstabilität ist ein Indikator für die Gesamtqualität der Haltung — wenn der Core arbeitet, profitiert jede andere Körperregion davon.\n\nKINEMATISCHE KETTE\nZentrierter Schwerpunkt = aktive tiefe Bauchmuskulatur (M. transversus abdominis) + koordinierte Glutealmuskulatur + gute propriozeptive Rückmeldung aus den Füßen.\n\nSOFORT-FOKUS\nDiese Qualität bewusst verankern. Verbale Bestätigung: "So fühlt sich Balance an — merk dir das Gefühl in den Fußsohlen."`,
-      },
-      reportEntry: { label: 'Körperschwerpunkt', value: 'Stabil' },
-    });
-  }
-
-  if (bestMoment && bestMoment.value >= 4) {
-    const timeSec = bestMoment.timeSec;
-    candidates.push({
-      priority: bestMoment.value * 3,
-      category: 'GOOD',
-      cue: {
-        id: `ki-best-moment-${timeSec.toFixed(3)}`,
-        timeSeconds: timeSec,
-        timecodeStr: fmtTime(timeSec),
-        poseName: 'Bester Gesamtmoment (KI erkannt)',
-        status: 'GOOD',
-        headline: `Bester Frame – ${bestMoment.value} von 6 Metriken im grünen Bereich`,
-        cueMetaphor: '"Dieser Moment ist dein persönlicher Referenz-Frame — so sieht dein Bestes aus. Merk dir das Gefühl."',
-        jointFocusId: 'pelvis_core',
-        dataSource: 'KI_AUTO',
-        diagnosisMetaphor: '"Das ist wie ein Foto von deinem besten Moment — alles stimmt gleichzeitig. So sieht es aus, wenn der ganze Körper zusammenarbeitet."',
-        kiNote: `An diesem Frame sind ${bestMoment.value} von 6 gemessenen Metriken gleichzeitig im grünen Bereich — das ist der beste Gesamtmoment in dieser Aufnahme.`,
-        diagnosisText: `An diesem Frame arbeitet alles zusammen: ${bestMoment.value} von 6 gemessenen Bereichen (Wirbelsäule, Becken, Schultern, linkes Knie, rechtes Knie, Schwerpunkt) sind gleichzeitig im grünen Bereich. Das ist der Moment, in dem der ganze Körper als Einheit funktioniert. Dieser Frame ist der persönliche Referenz-Moment — so sieht es aus, wenn Kraft, Koordination und Aufmerksamkeit zusammenwirken. Dieses Gefühl bewusst abspeichern.`,
-        goalText: 'Diesen Moment als inneres Bild verankern — so sieht das eigene Optimum aus. Das Ziel ist nicht, diesen Frame zu kopieren, sondern das Körpergefühl dieses Moments auf Abruf reproduzieren zu können. Wie fühlen sich die Fußsohlen an? Wo liegt die Spannung? Wie weit ist das Schlüsselbein? Je öfter dieses Gefühl bewusst herbeigerufen wird, desto mehr wird es zur normalen Haltung.',
-        practiceText: 'Diesen Frame im Video als persönlichen Referenzpunkt speichern. Vor jeder Unterrichtsstunde einmal ansehen und das Körpergefühl abrufen. Übung: In der Grundposition stehen, Augen schließen, das Bild dieses Frames vor dem inneren Auge sehen. Dann den Körper danach ausrichten — ohne Spiegel, rein nach Gefühl. Augen öffnen und im Spiegel vergleichen. Der Abstand zwischen innerem Bild und Realität wird mit der Zeit kleiner.',
-        technicalAnalysis: `METRISCHE DIAGNOSE\n${bestMoment.value}/6 Metriken gleichzeitig im Sollbereich: Wirbelsäule (<5° Neigung), Becken (<8° Kippung), Schultern (<5° Asymmetrie), Knie L (<3° Valgus), Knie R (<3° Valgus), Schwerpunkt (<5% Deviation).\n\nGESAMTBILD DIESES FRAMES\nDies ist der statistische Hochpunkt dieser Aufnahme. Als persönliche Baseline für Fortschrittstracking speichern — bei der nächsten Aufnahme vergleichen, ob dieser Wert konsistent oder verbessert ist.\n\nKINEMATISCHE KETTE\nWenn alle Metriken gleichzeitig grün sind, arbeiten alle Muskelketten als koordinierte Einheit: Core-Stabilität, Bein-Alignment, Schultergürtel-Depression und propriozeptive Balance funktionieren synchron.\n\nSOFORT-FOKUS\nDiesen Frame als Referenz-Moment dokumentieren und in der nächsten Stunde als Ausgangspunkt verwenden. Frage an die Schülerin: "Erinnerst du dich, wie sich dieser Moment angefühlt hat?"`,
-      },
-      reportEntry: { label: 'Bester Gesamtmoment', value: `${bestMoment.value}/6 Metriken OK` },
-    });
-  }
-
   // ── SELECT TOP 8: max 3 GOOD + max 5 CORRECTION ──────────────────────────
   const corrections = candidates
     .filter(c => c.category === 'CORRECTION')
@@ -603,8 +448,32 @@ export function analyzeFrameCacheForHighlights(videoUrl: string): {
     .slice(0, 3);
 
   const selected = [...corrections, ...goods];
+  const generatedAt = new Date().toISOString();
   const autoCuePoints = selected
-    .map(c => c.cue)
+    .map(c => ({
+      ...c.cue,
+      provenance: 'ki_suggestion' as const,
+      learnerVisible: false,
+      parentVisible: false,
+      kiSuggestionData: {
+        originalHeadline: c.cue.headline,
+        originalCueMetaphor: c.cue.cueMetaphor,
+        originalDiagnosisText: c.cue.diagnosisText,
+        originalGoalText: c.cue.goalText,
+        originalPracticeText: c.cue.practiceText,
+        originalTechnicalAnalysis: c.cue.technicalAnalysis,
+        metrics: [`${c.reportEntry.label}: ${c.reportEntry.value}`],
+        ampelStatus: (
+          c.cue.status === 'GOOD'
+            ? 'CORRECT'
+            : c.cue.status === 'WARNING'
+              ? 'WARNING'
+              : 'ERROR'
+        ) as 'CORRECT' | 'WARNING' | 'ERROR',
+        generatedAt,
+        policyVersion: BUILD_POLICY.policyVersion,
+      },
+    }))
     .sort((a, b) => a.timeSeconds - b.timeSeconds);
 
   const report: AutoAnalysisReport = {

@@ -18,6 +18,8 @@ interface CachedVideo {
 export class VaganovaFrameCacheService {
   private cache: Map<string, CachedVideo> = new Map();
   private isPreIndexingMap: Map<string, boolean> = new Map();
+  private scanTokenMap: Map<string, number> = new Map();
+  private nextScanToken = 0;
   /** Maps videoUrl → idb cache key (set when we know the key, i.e. after IDB lookup or scan). */
   private idbKeyMap: Map<string, string> = new Map();
 
@@ -38,21 +40,36 @@ export class VaganovaFrameCacheService {
    *
    * @param idbKey  Stable cache key (`vaganova_v1_${filename}_${size}`).
    *                Call `vaganovaIdbCache.buildKey(url, file?)` to construct it.
+   * @param shouldContinue  Source-identity guard. A false result aborts without
+   *                        publishing frames captured from a different video.
    */
   public async preIndexVideo(
     videoUrl: string,
     videoEl: HTMLVideoElement,
     onProgress?: (percent: number, step: number, total: number, fromCache?: boolean) => void,
-    idbKey?: string
+    idbKey?: string,
+    shouldContinue?: () => boolean,
   ): Promise<void> {
-    if (this.isPreIndexingMap.get(videoUrl)) return;
+    const scanToken = ++this.nextScanToken;
+    this.scanTokenMap.set(videoUrl, scanToken);
     this.isPreIndexingMap.set(videoUrl, true);
+    const ownsVideoScan = () => this.scanTokenMap.get(videoUrl) === scanToken;
+    const sourceIsCurrent = () => ownsVideoScan() && (shouldContinue?.() ?? true);
+    const finishOwnedScan = () => {
+      if (ownsVideoScan()) this.isPreIndexingMap.set(videoUrl, false);
+    };
+    const abortStaleScan = () => {
+      if (sourceIsCurrent()) return false;
+      finishOwnedScan();
+      return true;
+    };
 
     // ─── IDB Cache Lookup ────────────────────────────────────────────────────
     const key = idbKey ?? vaganovaIdbCache.buildKey(videoUrl);
     this.idbKeyMap.set(videoUrl, key);
 
     const cached = await vaganovaIdbCache.load(key);
+    if (abortStaleScan()) return;
     if (cached) {
       // Cache HIT — populate in-memory cache, skip the scan entirely
       this.evictOldest(videoUrl);
@@ -64,7 +81,7 @@ export class VaganovaFrameCacheService {
         vw: cached.vw ?? 640,
         vh: cached.vh ?? 480,
       });
-      this.isPreIndexingMap.set(videoUrl, false);
+      finishOwnedScan();
       if (onProgress) onProgress(100, cached.frames.length, cached.frames.length, true);
       return;
     }
@@ -93,6 +110,7 @@ export class VaganovaFrameCacheService {
     // Frames ohne valide Pose werden übersprungen (kein Entry für diesen Timestamp).
 
     for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+      if (abortStaleScan()) return;
       const timeSec = frameIdx * stepSec;
       const timeMs = timeSec * 1000;
 
@@ -122,6 +140,7 @@ export class VaganovaFrameCacheService {
         videoEl.addEventListener('seeked', onSeeked);
         videoEl.currentTime = timeSec;
       });
+      if (abortStaleScan()) return;
 
       // 2. Draw current video frame onto static off-screen canvas
       if (ctx) {
@@ -175,6 +194,7 @@ export class VaganovaFrameCacheService {
           complete();
         });
       });
+      if (abortStaleScan()) return;
 
       const percent = Math.round(((frameIdx + 1) / totalFrames) * 100);
       if (onProgress) {
@@ -186,11 +206,15 @@ export class VaganovaFrameCacheService {
       await new Promise<void>(r => setTimeout(r, 16));
     }
 
+    // The source may have changed during the final event-loop yield. Never
+    // restore playback state or publish frames for a superseded scan.
+    if (abortStaleScan()) return;
     videoEl.currentTime = originalTime;
     if (wasPlaying) videoEl.play().catch(() => {});
 
     // Sort frames by time (should already be sorted, but guarantee it)
     frames.sort((a, b) => a.timeMs - b.timeMs);
+    if (abortStaleScan()) return;
 
     const scanVw = videoEl.videoWidth || 640;
     const scanVh = videoEl.videoHeight || 480;
@@ -204,7 +228,7 @@ export class VaganovaFrameCacheService {
       vh: scanVh,
     });
 
-    this.isPreIndexingMap.set(videoUrl, false);
+    finishOwnedScan();
     if (onProgress) onProgress(100, totalFrames, totalFrames, false);
 
     // ─── Persist to IDB (non-blocking, fire-and-forget) ──────────────────────
@@ -323,9 +347,11 @@ export class VaganovaFrameCacheService {
     if (videoUrl) {
       this.cache.delete(videoUrl);
       this.isPreIndexingMap.delete(videoUrl);
+      this.scanTokenMap.delete(videoUrl);
     } else {
       this.cache.clear();
       this.isPreIndexingMap.clear();
+      this.scanTokenMap.clear();
     }
   }
 
@@ -348,6 +374,7 @@ export class VaganovaFrameCacheService {
     if (oldestUrl) {
       this.cache.delete(oldestUrl);
       this.isPreIndexingMap.delete(oldestUrl);
+      this.scanTokenMap.delete(oldestUrl);
     }
   }
 
@@ -366,4 +393,3 @@ export class VaganovaFrameCacheService {
 }
 
 export const vaganovaFrameCache = new VaganovaFrameCacheService();
-

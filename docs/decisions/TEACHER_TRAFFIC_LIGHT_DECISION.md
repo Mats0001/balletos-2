@@ -13,6 +13,13 @@
 > `individual_baseline` ausdrücklich keine Urteilsmetriken. `legL` und `legR`
 > bleiben daher neutral, bis ein von Nicole geprüfter, quell-/schülergebundener
 > DecisionGate Perspektive, Bewegungsphase und Richtungssemantik autorisiert.
+> Aus denselben nicht urteilsfähigen Werten werden auch keine automatischen
+> Knie-Cues und keine Knie-Anteile in einem positiven Gesamtmoment erzeugt.
+> Ein automatischer positiver Gesamtmoment sowie positive Schulter-/Schwerpunkt-
+> Cues bleiben insgesamt ausgesetzt, solange nicht jede Teilmessung über einen
+> eigenen positiven Evidenzvertrag verfügt.
+> Nicoles manuelle Marker, Demo-Beispiele und die neutrale Rohmesswertansicht
+> bleiben davon unberührt.
 > Die Arm-Heuristik ist ebenfalls vorläufig ausgesetzt: `armLineQuality` enthält
 > den tatsächlichen Ellbogenwinkel, wurde in der Ampel jedoch fälschlich als
 > Abweichung von 0° klassifiziert. Die hinterlegten Kandidatengrenzen gelten
@@ -118,7 +125,8 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
 | `src/services/teacherHeuristicEngine.ts` | `armL`/`armR` und `legL`/`legR` bis zu kontextgebundenen Gates → NEUTRAL |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
-| `src/services/vaganovaPreAnalyzer.ts` | VaganovaCuePoint: provenance, nicoleAction, learnerVisible, parentVisible, kiSuggestionData |
+| `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
+| `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
 
 ---
 
@@ -126,6 +134,8 @@ Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverände
 
 - [x] Nur durch den aktuellen Evidenzvertrag autorisierte Regionen → Rot/Gelb/Grün im Lehrer-Ampelmodus
 - [x] Bein-Shadow-Metriken ohne Richtungs-/Kontextfreigabe → NEUTRAL
+- [x] Bein-Shadow-Metriken erzeugen keine automatischen Knie-Cues oder positiven Kniezählungen
+- [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
 - [x] Arm-Kandidatengrenzen ohne Positions-/Perspektivfreigabe → NEUTRAL
 - [x] `not_measurable`/`blocked` → niemals Grün (NEUTRAL grau)
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
