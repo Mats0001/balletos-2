@@ -8,7 +8,7 @@
 > **Technischer P0-Nachtrag, 2026-08-12:** Die unten dokumentierte
 > Bein-Heuristik ist vorläufig ausgesetzt. Ein reproduzierter Quellwechsel zeigte,
 > dass die globale Baseline denselben Zielframe allein durch vorherige Frames Rot
-> statt Grün färben konnte. Zudem sind `research_observation` und die aktuelle
+> statt Grün färben konnte. Zudem waren `research_observation` und die frühere
 > vorzeichenbehaftete, aber richtungssemantisch nicht validierte
 > `individual_baseline` ausdrücklich keine Urteilsmetriken. `legL` und `legR`
 > bleiben daher neutral, bis ein von Nicole geprüfter, quell-/schülergebundener
@@ -20,6 +20,16 @@
 > eigenen positiven Evidenzvertrag verfügt.
 > Nicoles manuelle Marker, Demo-Beispiele und die neutrale Rohmesswertansicht
 > bleiben davon unberührt.
+>
+> **BAS-Nachtrag, 2026-08-12:** Die frühere Knieachsen-„Baseline“ aus den
+> ersten 30 Calculator-Aufrufen wurde entfernt. Sie war weder an Video, Person,
+> eindeutige Medienzeit noch Bewegungsphase gebunden und konnte denselben Frame
+> abhängig von zuvor geöffneten Videos unterschiedlich anzeigen. Der verbleibende
+> 2D-Projektionswert ist rein und reproduzierbar, wird aber in allen sichtbaren
+> und entscheidenden Pfaden als `not_measurable` behandelt: keine Zahl, kein
+> Δ, keine Richtung, keine Schwelle und keine Ampelfarbe. Eine spätere
+> Vergleichsfunktion benötigt einen von Nicole gewählten Referenzframe samt
+> Video-/Person-/Zeit-/Perspektiv-/Spiegelungs- und Modellprovenienz.
 > Die Arm-Heuristik ist ebenfalls vorläufig ausgesetzt: `armLineQuality` enthält
 > den tatsächlichen Ellbogenwinkel, wurde in der Ampel jedoch fälschlich als
 > Abweichung von 0° klassifiziert. Die hinterlegten Kandidatengrenzen gelten
@@ -106,23 +116,15 @@ wrong_camera, occluded, unassigned_person, insufficient_temporal_data
 
 ## Lehrer-Ampel Bein-Heuristik (historischer Entwurf – technisch ausgesetzt)
 
-Da `knieFlexion` (research_observation) und `valgusDrift`
-(individual_baseline) keine direkten CORRECT/WARNING/ERROR-Status emittieren
-dürfen, sah der ursprüngliche Entwurf eine separate heuristische Einschätzung
-aus den Rohwerten vor:
-
-- `|knieFlexion| ≥ 165°` → CORRECT (gerades Standbein)
-- `|knieFlexion| ∈ [60°, 145°]` → CORRECT (Plié-Bereich)
-- `|knieFlexion| < 40°` → WARNING
-- `|valgusDrift_delta| < 5°` → CORRECT
-- `|valgusDrift_delta| ∈ [5°, 10°]` → WARNING
-- `|valgusDrift_delta| > 10°` → ERROR
-- Dominant: ERROR > WARNING > CORRECT > NEUTRAL
+Der ursprüngliche Entwurf kombinierte Beobachtungswerte zur Knieflexion mit
+einer aufrufbasierten Knieachsen-Baseline und festen Farbschwellen. Die
+numerischen Schwellen sind zurückgezogen; weder die historische Baseline noch
+ihre Delta-Ziele gehören weiter zum Laufzeit- oder Messvertrag.
 
 Diese Heuristik ist **nicht validiert** und seit dem P0-Nachtrag vom 2026-08-12
-nicht farbberechtigt. Die Rohmesswerte bleiben als neutrale Beobachtungswerte
-sichtbar; die Aussetzung verändert keine Messwerte.
-Die epistemologischen Klassen der zugrundeliegenden Messungen bleiben unverändert.
+nicht farbberechtigt. Der historische Knie-Δ-Wert wird nicht mehr erzeugt oder
+angezeigt; der interne 2D-Projektionswert bleibt `not_measurable` und ist keine
+Richtungs-, Valgus- oder Baseline-Messung.
 
 ---
 

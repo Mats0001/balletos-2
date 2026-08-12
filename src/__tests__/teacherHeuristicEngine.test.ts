@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TeacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import {
+  UnavailableVaganovaMeasurement,
   VaganovaFullAnalysis,
   VaganovaMeasurement,
 } from '../services/vaganovaAngleCalculator';
@@ -17,16 +18,22 @@ function measurement(value: number, confidence = 0.9): VaganovaMeasurement {
   };
 }
 
-function observation(
-  value: number,
-  measurementClass: 'research_observation' | 'individual_baseline',
-): VaganovaMeasurement {
+function observation(value: number): VaganovaMeasurement {
   return {
     value,
     confidence: 0.95,
-    unit: measurementClass === 'individual_baseline' ? 'delta_deg' : 'deg',
+    unit: 'deg',
     label: 'leg shadow metric',
-    measurement_class: measurementClass,
+    measurement_class: 'research_observation',
+  };
+}
+
+function unavailableKneeAxis(): UnavailableVaganovaMeasurement {
+  return {
+    confidence: 0.95,
+    label: 'projected knee axis (unscored)',
+    measurement_class: 'not_measurable',
+    not_measurable_reason: 'missing reference anchor',
   };
 }
 
@@ -124,13 +131,13 @@ describe('TeacherHeuristicEngine evidence gates', () => {
   });
 
   it.each([24, -24])(
-    'keeps research and directionally ambiguous baseline leg observations out of the traffic light (%s°)',
-    delta => {
+    'keeps research observations and unavailable knee-axis evidence out of the traffic light (%s°)',
+    kneeFlexion => {
       const packet = engine.compute(analysis({
-        knieFlexionL: observation(142, 'research_observation'),
-        knieFlexionR: observation(170, 'research_observation'),
-        valgusDriftL: observation(delta, 'individual_baseline'),
-        valgusDriftR: observation(-delta, 'individual_baseline'),
+        knieFlexionL: observation(kneeFlexion),
+        knieFlexionR: observation(kneeFlexion),
+        valgusDriftL: unavailableKneeAxis(),
+        valgusDriftR: unavailableKneeAxis(),
       }), skeleton, 1, 1000);
 
       expect(packet.legL).toBe('blocked');

@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { VaganovaFullAnalysis, VaganovaMeasurement, MeasurementClass } from '../services/vaganovaAngleCalculator';
+import {
+  isMeasurableVaganovaMeasurement,
+  VaganovaFullAnalysis,
+  VaganovaMeasurement,
+  MeasurementClass
+} from '../services/vaganovaAngleCalculator';
 import { AgeGroup } from '../types';
 
 interface Props {
@@ -52,7 +57,6 @@ export const CLASS_BADGE: Record<string, { label: string; color: string; bg: str
   vaganova_relation:          { label: 'VR',  color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
   pedagogical_nominal_angle:  { label: 'PED', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   research_observation:       { label: 'OBS', color: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
-  individual_baseline:        { label: 'BAS', color: '#34d399', bg: 'rgba(52,211,153,0.12)' },
   validated_system_threshold: { label: 'VAL', color: '#f9a8d4', bg: 'rgba(249,168,212,0.12)' },
   proxy_unvalidated:          { label: 'PRX', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
   not_measurable:             { label: '—',   color: '#6b7280', bg: 'rgba(107,114,128,0.12)' },
@@ -61,6 +65,7 @@ export const CLASS_BADGE: Record<string, { label: string; color: string; bg: str
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
 function formatVal(m: VaganovaMeasurement): string {
+  if (!isMeasurableVaganovaMeasurement(m)) return '–';
   if (m.unit === 'deg')       return `${Math.round(m.value)}°`;
   if (m.unit === 'delta_deg') return `${m.value > 0 ? '+' : ''}${m.value.toFixed(1)}°Δ`;
   if (m.unit === 'ratio')     return `${m.value > 0 ? '+' : ''}${m.value.toFixed(1)}%`;
@@ -157,7 +162,6 @@ const FILTERABLE_CLASSES: MeasurementClass[] = [
   'vaganova_relation',
   'pedagogical_nominal_angle',
   'research_observation',
-  'individual_baseline',
   'validated_system_threshold',
 ];
 
@@ -166,7 +170,6 @@ const CLASS_TOOLTIP: Record<string, string> = {
   vaganova_relation:          'VR — Vaganova-Relation: pädagogische Normwinkel der Vaganova-Methode',
   pedagogical_nominal_angle:  'PED — Pädagogischer Nominalwinkel: altersgerechte Sollograde',
   research_observation:       'OBS — Forschungs-Beobachtung: empirische Referenzwerte',
-  individual_baseline:        'BAS — Individuelle Baseline: schülerspezifischer Ausgangswert',
   validated_system_threshold: 'VAL — Validierter Schwellenwert: biomechanisch geprüfter Grenzwert',
   proxy_unvalidated:          'PRX — Proxy (unvalidiert): Näherungswert, kein absoluter Standard',
 };
@@ -266,8 +269,8 @@ export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isP
       <SectionHeader label={isPlie ? 'Beine · Plié' : 'Beine · Stand'} />
       <MetricRow m={va.knieFlexionL}       label="Knieflexion links"  targetKey={isPlie ? 'knieFlexionDemi' : undefined} showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.knieFlexionL)} />
       <MetricRow m={va.knieFlexionR}       label="Knieflexion rechts" targetKey={isPlie ? 'knieFlexionDemi' : undefined} showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.knieFlexionR)} />
-      <MetricRow m={va.valgusDriftL}       label="Knie-Drift links"   showTargets={false}          ageGroup={effectiveAgeGroup} hidden={isHidden(va.valgusDriftL)} />
-      <MetricRow m={va.valgusDriftR}       label="Knie-Drift rechts"  showTargets={false}          ageGroup={effectiveAgeGroup} hidden={isHidden(va.valgusDriftR)} />
+      <MetricRow m={va.valgusDriftL}       label="Knieachse links"     showTargets={false}          ageGroup={effectiveAgeGroup} hidden={isHidden(va.valgusDriftL)} />
+      <MetricRow m={va.valgusDriftR}       label="Knieachse rechts"    showTargets={false}          ageGroup={effectiveAgeGroup} hidden={isHidden(va.valgusDriftR)} />
 
       <SectionHeader label="Turnout · En Dehors" />
       <MetricRow m={va.turnoutL}           label="Turnout links"     targetKey="turnout"           showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.turnoutL)} />
@@ -277,9 +280,9 @@ export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isP
       <MetricRow m={va.plumbDeviation}     label="Lotabweichung"     showTargets={false}           ageGroup={effectiveAgeGroup} hidden={isHidden(va.plumbDeviation)} />
 
       {isPlie && (
-        <div style={{ marginTop: '8px', padding: '6px 8px', background: 'rgba(255,214,10,0.06)', border: '1px solid rgba(255,214,10,0.2)', borderRadius: '6px', fontSize: '9px', color: '#ffd60a', lineHeight: '1.4' }}>
-          ⚠ Plié: Knie-Drift zeigt nur <strong>relative Änderung</strong> zur Ausgangsposition (Asaeda 2024).
-          Kein absoluter Valgus-Grenzwert aus Webcam.
+        <div style={{ marginTop: '8px', padding: '6px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', fontSize: '9px', color: 'rgba(255,255,255,0.55)', lineHeight: '1.4' }}>
+          ○ Plié: Die projizierte Knieachse bleibt <strong>neutral und nicht messbar</strong>.
+          Referenzframe, Perspektive, Spiegelung und Bewegungsphase sind noch nicht bestätigt.
         </div>
       )}
     </div>

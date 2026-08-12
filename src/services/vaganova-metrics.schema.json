@@ -9,7 +9,7 @@
   "references": {
     "vaganova_primary": "Vaganova, А.Я. Основы классического танца, 6th ed., 2000. ISBN 978-5-8114-0397-8",
     "mediapipe_limits": "BlazePose GHUM Model Card, Google 2022 — monocular depth 'out of scope'",
-    "valgus_error": "Asaeda M. et al. 2024, PMC11399566 — MediaPipe vs Vicon: ~19° systematic error for absolute knee valgus",
+    "valgus_limit": "Asaeda M. et al. 2024, PMC11399566 — single-leg drop landing only; normalization at initial contact, not a ballet/Plié validation",
     "turnout_limits": "IADMS Turnout Resource Paper, Revision 2025 — 180° anatomically unrealistic for many individuals",
     "multi_segment_turnout": "Gorwa J. et al. 2020, PLoS ONE 10.1371/journal.pone.0230654 — foot angle ≠ hip rotation",
     "isb_coordinates": "Wu G. et al. 2002, J Biomech PMID 11934426 — ISB Joint Coordinate System"
@@ -18,19 +18,18 @@
     "vaganova_relation": "Relational technique rule from Vaganova pedagogy — often directional or boolean, not a precise degree target",
     "pedagogical_nominal_angle": "Vaganova spatial height convention (e.g. 90° = leg at hip height) — NOT an anatomical joint angle",
     "research_observation": "Group mean from biomechanical study — context only, NEVER use as individual threshold",
-    "individual_baseline": "Personal session-1 value — only relative deltas are meaningful, not absolute",
     "validated_system_threshold": "Threshold established after comparison against calibrated Mocap/Vicon reference",
     "not_measurable": "Cannot be reliably measured with current sensor; output must say so explicitly"
   },
   "capture_modes": {
     "home_screening": {
       "description": "Single iPad/smartphone camera, uncalibrated",
-      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle", "individual_baseline"],
+      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle"],
       "forbidden_outputs": ["absolute valgus degree", "anatomical hip rotation", "ground reaction force"]
     },
     "studio_biomechanics": {
       "description": "Two synchronized calibrated cameras + Ballet landmark set",
-      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle", "individual_baseline", "validated_system_threshold"]
+      "allowed_classes": ["vaganova_relation", "pedagogical_nominal_angle", "validated_system_threshold"]
     },
     "studio_kinetics": {
       "description": "Calibrated cameras + pressure plate/insoles",
@@ -65,27 +64,25 @@
       "target_type": "none",
       "anatomical_joint_angle": false,
       "note": "No canonical Vaganova knee-flexion value for plié. NIH group mean ~135° ±4.6° is observational, not a prescription. Do NOT use as error threshold.",
-      "source": { "work": "NIH/PubMed", "study": "Grand Plié kinematics", "doi": "10.1371/journal.pone.0230654" },
+      "source": { "work": "Fotaki et al. 2024", "study": "Grand Plié knee kinematics", "doi": "10.3390/sports12020054" },
       "mediapipe_landmarks_used": [23, 24, 25, 26, 27, 28],
       "mediapipe_validity": "requires_side_view",
       "validation_status": "not_system_validated"
     },
     {
-      "metric_id": "knee_drift_relative",
+      "metric_id": "projected_knee_axis_unscored",
       "movement_id": "plie_any",
-      "label_de": "Knie-Drift relativ zur Ausgangsposition",
-      "phase": "descent",
-      "measurement_class": "individual_baseline",
-      "coordinate_frame": "frontal_view",
-      "target_type": "delta",
-      "target": { "operator": "<=", "value": 5, "unit": "delta_deg", "reference": "session_baseline_frame_0_to_30" },
+      "label_de": "Projizierte Knieachsengeometrie (nicht bewertet)",
+      "phase": "any",
+      "measurement_class": "not_measurable",
+      "coordinate_frame": "uncalibrated_2d_camera",
+      "target_type": "none",
       "anatomical_joint_angle": false,
-      "mediapipe_absolute_error_vs_vicon": "~19 degrees (Asaeda 2024)",
-      "source": { "work": "Asaeda et al. 2024", "pmcid": "PMC11399566" },
+      "source_limit": { "work": "Asaeda et al. 2024", "pmcid": "PMC11399566", "context": "single-leg drop landing normalized at initial contact; not transferable as a Plié threshold" },
       "mediapipe_landmarks_used": [23, 24, 25, 26, 27, 28],
-      "mediapipe_validity": "frontal_view_relative_change_only",
-      "validation_status": "relative_only_valid",
-      "not_measurable_output": "Absoluter Valgus nicht messbar (Webcam). Nur relative Änderung wird angezeigt."
+      "mediapipe_validity": "no validated Plié view, mirror, phase, or reference-anchor contract",
+      "validation_status": "not_system_validated",
+      "not_measurable_output": "Nicht messbar: Referenzframe, Perspektive, Spiegelung und Bewegungsphase sind nicht bestätigt."
     },
     {
       "metric_id": "shoulder_horizontal",

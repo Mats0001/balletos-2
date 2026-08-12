@@ -16,7 +16,11 @@
  *   echtes 3D-Turnout, Pronation/Supination.
  */
 
-import { VaganovaFullAnalysis } from './vaganovaAngleCalculator';
+import {
+  isMeasurableVaganovaMeasurement,
+  VaganovaFullAnalysis,
+  VaganovaMeasurement
+} from './vaganovaAngleCalculator';
 import { ReconstructedSkeleton } from './vaganova3DKinematics';
 import {
   TeacherHeuristicState,
@@ -39,10 +43,10 @@ let _torsoLastLog = 0;
  *   – confidence < Mindest-Schwelle
  */
 function isEligible(
-  m: { measurement_class: string; confidence: number; value: number } | null | undefined,
+  m: VaganovaMeasurement | null | undefined,
   minConfidence = 0.35
-): boolean {
-  if (!m) return false;
+): m is Extract<VaganovaMeasurement, { measurement_class: Exclude<VaganovaMeasurement['measurement_class'], 'not_measurable'> }> {
+  if (!isMeasurableVaganovaMeasurement(m)) return false;
   if (!Number.isFinite(m.value) || !Number.isFinite(m.confidence)) return false;
   if (m.confidence < 0 || m.confidence > 1) return false;
   if (NEUTRAL_MEASUREMENT_CLASSES.has(m.measurement_class as any)) return false;
@@ -73,7 +77,7 @@ function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
 function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.spineTilt;
   if (!isEligible(m)) return 'blocked';
-  const deg = Math.abs(m!.value);
+  const deg = Math.abs(m.value);
   // Mit isotropischer vw/vh-Korrektur: Rauschboden ~1-2°.
   // Vaganova-Standard: Wirbelsäule lotrecht, Abweichung >4° ist sichtbar.
   if (deg <= 4)  return 'heuristic_match';
@@ -84,7 +88,7 @@ function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
 function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.shoulderSymmetry;
   if (!isEligible(m)) return 'blocked';
-  const deg = Math.abs(m!.value);
+  const deg = Math.abs(m.value);
   // Schulter-Symmetrie: Nicole sieht Asymmetrie ab ~3°.
   // Épaulement kann 3-5° erzeugen, darüber ist es Haltungsfehler.
   if (deg <= 5)  return 'heuristic_match';
@@ -95,7 +99,7 @@ function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
 function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
   if (!isEligible(m)) return 'blocked';
-  const deg = Math.abs(m!.value);
+  const deg = Math.abs(m.value);
   // Becken-Neigung: Vaganova verlangt neutrales Becken.
   // >5° sichtbare Neigung, >12° deutlicher Fehler.
   if (deg <= 5)  return 'heuristic_match';
@@ -115,9 +119,9 @@ function computeTorsoAlignment(va: VaganovaFullAnalysis): TeacherHeuristicState 
   const result = combineStates([spine, shoulder, pelvis]);
 
   // 🔍 DEBUG: Echte Winkelwerte + Einzelergebnisse (TEMPORÄR, entfernen nach Diagnose)
-  const spineVal = va.spineTilt ? Math.abs(va.spineTilt.value).toFixed(1) : 'N/A';
-  const shoulderVal = va.shoulderSymmetry ? Math.abs(va.shoulderSymmetry.value).toFixed(1) : 'N/A';
-  const pelvisVal = va.pelvicTilt ? Math.abs(va.pelvicTilt.value).toFixed(1) : 'N/A';
+  const spineVal = isMeasurableVaganovaMeasurement(va.spineTilt) ? Math.abs(va.spineTilt.value).toFixed(1) : 'N/A';
+  const shoulderVal = isMeasurableVaganovaMeasurement(va.shoulderSymmetry) ? Math.abs(va.shoulderSymmetry.value).toFixed(1) : 'N/A';
+  const pelvisVal = isMeasurableVaganovaMeasurement(va.pelvicTilt) ? Math.abs(va.pelvicTilt.value).toFixed(1) : 'N/A';
   
   // Nur alle 2 Sekunden loggen um Konsole nicht zu fluten
   const now = Date.now();
@@ -141,9 +145,9 @@ function computeArm(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeurist
 }
 
 function computeLeg(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
-  // The only current inputs are research_observation (knee flexion) and a
-  // directionally ambiguous individual_baseline delta. Both are display/shadow metrics and
-  // explicitly have no scoring authority. A context-aware DecisionGate must
+  // The only current inputs are a research_observation (knee flexion) and an
+  // explicitly not_measurable knee-axis projection. Neither has scoring
+  // authority. A context-aware DecisionGate must
   // authorize a future leg color; until then the teacher overlay stays neutral.
   return 'blocked';
 }
@@ -178,7 +182,7 @@ function computeCog(
 function computeHead(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.headTilt;
   if (!isEligible(m)) return 'blocked';
-  const deg = Math.abs(m!.value);
+  const deg = Math.abs(m.value);
   if (deg <= 5)  return 'heuristic_match';
   if (deg <= 15) return 'heuristic_attention';
   return 'heuristic_strong_attention';

@@ -7,7 +7,11 @@ import {
   TeacherOverlayRegionKey,
 } from '../services/skeletonCanvasRenderer';
 import type { ReconstructedSkeleton } from '../services/vaganova3DKinematics';
-import type { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
+import type {
+  UnavailableVaganovaMeasurement,
+  VaganovaFullAnalysis,
+  VaganovaMeasurement,
+} from '../services/vaganovaAngleCalculator';
 import { createBlockedPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
 
 const REGION_KEYS: TeacherOverlayRegionKey[] = [
@@ -101,11 +105,14 @@ const rawMeasurement = (
 
 function rawAnalysis(confidence: number): VaganovaFullAnalysis {
   const raw = rawMeasurement(confidence);
+  // Deliberately malformed runtime payload: the renderer must still ignore raw
+  // knee-axis status in favour of the trusted overlay packet.
+  const adversarialKneeAxis = raw as unknown as UnavailableVaganovaMeasurement;
   return {
     knieFlexionL: raw,
     knieFlexionR: raw,
-    valgusDriftL: raw,
-    valgusDriftR: raw,
+    valgusDriftL: adversarialKneeAxis,
+    valgusDriftR: adversarialKneeAxis,
     turnoutL: raw,
     turnoutR: raw,
     spineTilt: raw,

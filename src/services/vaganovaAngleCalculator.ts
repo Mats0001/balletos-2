@@ -6,7 +6,8 @@ import { PoseLandmark } from './realMediaPipePose';
  * from being used as health/error thresholds.
  *
  * Sources:
- *   - Asaeda et al. 2024 (MediaPipe vs Vicon: ~19° absolute valgus error)
+ *   - Asaeda et al. 2024 (18.83–19.68° discrepancy in its single-leg
+ *     drop-landing setup; not a universal ballet/Plié error model)
  *   - IADMS Turnout Resource Paper 2025
  *   - Gorwa et al. 2020 (PLoS ONE)
  *   - ISB Joint Coordinate System (Wu et al. 2002)
@@ -15,23 +16,38 @@ export type MeasurementClass =
   | 'vaganova_relation'          // Relational technique rule – often boolean or directional
   | 'pedagogical_nominal_angle'  // Vaganova spatial height (45°/90°), NOT anatomical joint angle
   | 'research_observation'       // Group mean from study – NEVER use as individual threshold
-  | 'individual_baseline'        // Personal session-1 value – reference for relative progress
   | 'validated_system_threshold' // Only after Mocap/Vicon validation protocol
   | 'not_measurable';            // Cannot be reliably measured with current sensor setup
 
-export interface VaganovaMeasurement {
+export interface MeasurableVaganovaMeasurement {
   value: number;                     // The measured value
   unit: 'deg' | 'ratio' | 'px' | 'delta_deg' | 'boolean_proxy';
   confidence: number;                // 0–1, based on landmark visibility
   label: string;                     // Human-readable German label
-  measurement_class: MeasurementClass; // Epistemological class – REQUIRED
-  // Status – only valid when measurement_class !== 'not_measurable'
+  measurement_class: Exclude<MeasurementClass, 'not_measurable'>;
   status?: 'CORRECT' | 'WARNING' | 'ERROR';
-  // For not_measurable: why, and what would be needed
-  not_measurable_reason?: string;
-  required_sensor?: string;
   norm?: string;                     // Human-readable norm description with source
   source_page?: string;              // e.g. "Vaganova 6th ed. p.47"
+}
+
+export interface UnavailableVaganovaMeasurement {
+  measurement_class: 'not_measurable';
+  confidence: number;
+  label: string;
+  value?: never;
+  unit?: never;
+  status?: never;
+  not_measurable_reason: string;
+  required_sensor?: string;
+}
+
+export type VaganovaMeasurement = MeasurableVaganovaMeasurement | UnavailableVaganovaMeasurement;
+
+export function isMeasurableVaganovaMeasurement(
+  measurement: VaganovaMeasurement | null | undefined
+): measurement is MeasurableVaganovaMeasurement {
+  return measurement?.measurement_class !== undefined
+    && measurement.measurement_class !== 'not_measurable';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +78,7 @@ export const VAGANOVA_NORMS = {
     advanced: { min: 80, max: 90 },
     minAcceptable: 45,  // below this = ERROR regardless of level
     maxSafe: 120,       // beyond this angle → compensated at knee, not hip
-    // Valgus rule: knee must track over mid-foot; pronation = ERROR
+    // Knee-foot relation requires Nicole-confirmed context; it is not scored here.
   },
 
   // ── PLIÉ ─────────────────────────────────────────────────────────────────
@@ -132,14 +148,6 @@ export const VAGANOVA_NORMS = {
     headTiltMax: 10,
   },
 
-  // ── VALGUS DRIFT / KNIE-ALIGNMENT ─────────────────────────────────────────
-  // Source: Clinical biomechanics; FPPA (Frontal Plane Projection Angle)
-  valgus: {
-    correct: 5,   // <5° FPPA deviation = CORRECT
-    warning: 10,  // 5–10° = WARNING
-    // >10° = ERROR
-  },
-
   // ── SPINE / APLOMB ─────────────────────────────────────────────────────────
   // Source: Vaganova pedagogy; neutral spine standards
   spine: {
@@ -193,8 +201,8 @@ export const VAGANOVA_NORMS = {
 export interface VaganovaFullAnalysis {
   knieFlexionL: VaganovaMeasurement | null;
   knieFlexionR: VaganovaMeasurement | null;
-  valgusDriftL: VaganovaMeasurement | null;  // relative delta, class: not_measurable (absolute)
-  valgusDriftR: VaganovaMeasurement | null;
+  valgusDriftL: UnavailableVaganovaMeasurement | null;
+  valgusDriftR: UnavailableVaganovaMeasurement | null;
   turnoutL: VaganovaMeasurement | null;
   turnoutR: VaganovaMeasurement | null;
   spineTilt: VaganovaMeasurement | null;
@@ -214,19 +222,6 @@ export interface VaganovaFullAnalysis {
 export class VaganovaAngleCalculator {
   private static _lastIsoWarn = 0;
   private static readonly GEOMETRY_EPSILON_PX = 0.000_001;
-  // ─── Baseline tracking for relative valgus drift (per Asaeda 2024) ───────
-  // Absolute valgus from webcam has ~19° systematic error vs Vicon.
-  // We track session-start values and only report RELATIVE change.
-  private valgusBaselineL: number | null = null;
-  private valgusBaselineR: number | null = null;
-  private baselineFrameCount = 0;
-  private static readonly BASELINE_FRAMES = 30; // ~2s at 15fps to establish baseline
-
-  public resetValgusBaseline(): void {
-    this.valgusBaselineL = null;
-    this.valgusBaselineR = null;
-    this.baselineFrameCount = 0;
-  }
 
   // Base Math Functions (private)
   // ─────────────────────────────────────────────────────────────────────────
@@ -340,7 +335,16 @@ export class VaganovaAngleCalculator {
     };
   }
 
-  public calcValgusDrift(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): VaganovaMeasurement | null {
+  /**
+   * Computes an unsigned 2D knee-axis projection for internal observability.
+   *
+   * This is deliberately NOT a valgus measurement or a session baseline. The
+   * current single-camera contract has no Nicole-confirmed reference frame,
+   * view/mirror identity, or movement-phase anchor. Therefore the value must
+   * remain not_measurable and must never carry a status, target, direction, or
+   * traffic-light authority.
+   */
+  public calcValgusDrift(landmarks: PoseLandmark[], side: 'L' | 'R', vw = 1, vh = 1): UnavailableVaganovaMeasurement | null {
     const [hipIdx, kneeIdx, ankleIdx] = side === 'L' ? [23, 25, 27] : [24, 26, 28];
     const conf = this.getConfidence(landmarks, [hipIdx, kneeIdx, ankleIdx]);
     if (conf < 0.3) return null;
@@ -349,10 +353,8 @@ export class VaganovaAngleCalculator {
     const knee = landmarks[kneeIdx];
     const ankle = landmarks[ankleIdx];
 
-    // TRUE Frontal Plane Projection Angle (FPPA) – pixel-space calculation.
-    // IMPORTANT: Asaeda et al. 2024 found ~19° systematic error vs Vicon.
-    // P0 FIX (2026-08-10): Scale to pixel space before vector math to correct
-    // aspect-ratio distortion (was: computing on normalized 0..1 coords).
+    // Pixel-space 2D projection. Scaling corrects display aspect-ratio
+    // distortion, but does not turn the proxy into an anatomical joint angle.
     const hx = hip.x * vw,   hy = hip.y * vh;
     const ax = ankle.x * vw, ay = ankle.y * vh;
     const kx = knee.x * vw,  ky = knee.y * vh;
@@ -373,53 +375,14 @@ export class VaganovaAngleCalculator {
     const dotProduct = haX * hkX + haY * hkY;
     const parallelDist = dotProduct / haLen;
     const rawAngle = Math.abs(Math.atan2(perpDist, parallelDist) * (180 / Math.PI));
-
-    // ── Baseline establishment (first BASELINE_FRAMES frames in standing position)
-    const isLeft = side === 'L';
-    if (this.baselineFrameCount < VaganovaAngleCalculator.BASELINE_FRAMES) {
-      // Accumulate running mean for each side independently.
-      // baselineFrameCount is incremented only in the R branch (once per analysis frame).
-      if (isLeft) {
-        this.valgusBaselineL = this.valgusBaselineL === null
-          ? rawAngle
-          : (this.valgusBaselineL * this.baselineFrameCount + rawAngle) / (this.baselineFrameCount + 1);
-      } else {
-        this.valgusBaselineR = this.valgusBaselineR === null
-          ? rawAngle
-          : (this.valgusBaselineR * this.baselineFrameCount + rawAngle) / (this.baselineFrameCount + 1);
-        this.baselineFrameCount++; // count frames, not calls
-      }
-      // Not enough baseline yet – report as not_measurable
-      return {
-        value: rawAngle, unit: 'deg', confidence: conf,
-        measurement_class: 'not_measurable',
-        label: `Knie-Alignment ${isLeft ? 'links' : 'rechts'} (Baseline wird aufgebaut…)`,
-        not_measurable_reason: 'Baseline-Aufbau läuft (erste 2 Sekunden). Absoluter Valgus aus Webcam: ~19° Systemfehler (Asaeda 2024).',
-        required_sensor: 'Vicon/Qualisys für absolute Winkel',
-        norm: 'Asaeda et al. 2024: MediaPipe Valgus vs. Vicon ≈ 19° Systemfehler bei absoluten Werten.'
-      };
-    }
-
-    // ── Relative delta from baseline (shadow metric – display only)
-    const baseline = isLeft ? this.valgusBaselineL! : this.valgusBaselineR!;
-    // BERATER FIX (2026-08-10): delta OHNE Math.abs() \u2013 Vorzeichen ist Information.
-    // Math.abs() l\u00f6scht die Richtung (medial vs. lateral) und macht es unm\u00f6glich,
-    // zwischen diesen Driftrichtungen zu unterscheiden. Deshalb kann daraus KEINE
-    // 'Valgus-Warnung' entstehen. Rohwert + Richtung als Shadow-Metrik anzeigen.
-    const delta = rawAngle - baseline;
+    if (!Number.isFinite(rawAngle)) return null;
 
     return {
-      value: Math.round(delta * 10) / 10,
-      unit: 'delta_deg',
       confidence: conf,
-      measurement_class: 'individual_baseline',
-      // P0: Umbenennung gem\u00e4\u00df Berater \u2013 kein Valgus/Verletzungsanspruch
-      label: `Projizierte Knieachsen-\u00c4nderung ${isLeft ? 'links' : 'rechts'} (\u0394 zur Ausgangsposition)`,
-      // status: deliberately omitted \u2013 Richtungsinformation war durch abs() verloren.
-      // Weder medial noch lateral kann ohne Richtungsvektor bewertet werden.
-      // Sprint 1 Step 5 (DecisionGate): erst dann m\u00f6glich wenn Richtungsvektor + Validierung vorliegen.
-      norm: 'Projizierter 2D-Proxy. Richtung (positiv=lateral, negativ=medial) erhalten. Asaeda 2024: absoluter Valgus aus Webcam \u00b119\u00b0 Systemfehler vs. Vicon.',
-      source_page: 'Asaeda et al. 2024, PMC11399566'
+      measurement_class: 'not_measurable',
+      label: `Projizierte Knieachsengeometrie ${side === 'L' ? 'links' : 'rechts'} (nicht bewertet)`,
+      not_measurable_reason: 'Kein gültiger Referenzanker: Perspektive, Spiegelung und Bewegungsphase sind nicht bestätigt.',
+      required_sensor: 'Nicole-bestätigter Referenzframe mit dokumentierter Perspektive, Spiegelung und Bewegungsphase; für biomechanische Winkel ein kalibriertes Referenzsystem'
     };
   }
 
@@ -751,11 +714,7 @@ export class VaganovaAngleCalculator {
     if (axisLength === null || axisLength <= VaganovaAngleCalculator.GEOMETRY_EPSILON_PX) {
       return null;
     }
-    const dx = Math.abs(hipMid.x - ankleMid.x);
-
     return {
-      value: dx,
-      unit: 'px',
       confidence: conf,
       measurement_class: 'not_measurable',
       label: 'Lotabweichung',

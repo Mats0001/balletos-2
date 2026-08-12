@@ -239,8 +239,8 @@ export function buildPausedTeacherOverlayEvidence(
       return createBlockedPacket(framePtsSeconds, input.streamEpoch);
     }
     const mutableLandmarks = landmarks.map(landmark => ({ ...landmark }));
-    // Keep the calculator isolated per frame. In particular, never invent a
-    // personal valgus baseline from an arbitrary 650ms pre-roll window.
+    // Keep the calculator isolated per frame. In particular, never derive an
+    // individual knee-axis reference from an arbitrary 650ms pre-roll window.
     const calculator = new VaganovaAngleCalculator();
     const skeleton = vaganova3DKinematics.solve(
       mutableLandmarks,

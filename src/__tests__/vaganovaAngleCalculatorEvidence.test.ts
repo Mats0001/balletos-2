@@ -98,4 +98,41 @@ describe('VaganovaAngleCalculator evidence validation', () => {
       ).toBeNull();
     }
   });
+
+  it('keeps the knee-axis slot unavailable and call-order independent', () => {
+    const calculator = new VaganovaAngleCalculator();
+    const target = validLandmarks();
+    const unrelated = validLandmarks();
+    unrelated[25] = { ...unrelated[25], x: 0.58 };
+    unrelated[26] = { ...unrelated[26], x: 0.42 };
+
+    const first = calculator.analyzeFullFrame(target, 960, 1280).valgusDriftL;
+    for (let i = 0; i < 100; i += 1) {
+      calculator.analyzeFullFrame(i % 2 === 0 ? unrelated : target, 960, 1280);
+    }
+    const afterHistory = calculator.analyzeFullFrame(target, 960, 1280).valgusDriftL;
+    const fresh = new VaganovaAngleCalculator().analyzeFullFrame(target, 960, 1280).valgusDriftL;
+
+    expect(first).toEqual(afterHistory);
+    expect(afterHistory).toEqual(fresh);
+    expect(first?.measurement_class).toBe('not_measurable');
+    expect(first).not.toHaveProperty('value');
+    expect(first).not.toHaveProperty('unit');
+    expect(first).not.toHaveProperty('status');
+    expect(JSON.stringify(first)).not.toMatch(/baseline|delta|medial|lateral|valgus/i);
+  });
+
+  it('does not infer a direction from mirrored knee-axis geometry', () => {
+    const leftOffset = validLandmarks();
+    const rightOffset = validLandmarks();
+    leftOffset[25] = { ...leftOffset[25], x: 0.36 };
+    rightOffset[25] = { ...rightOffset[25], x: 0.52 };
+
+    const calculator = new VaganovaAngleCalculator();
+    const first = calculator.calcValgusDrift(leftOffset, 'L', 960, 1280);
+    const mirrored = calculator.calcValgusDrift(rightOffset, 'L', 960, 1280);
+
+    expect(first).toEqual(mirrored);
+    expect(JSON.stringify([first, mirrored])).not.toMatch(/medial|lateral|valgus|direction/i);
+  });
 });

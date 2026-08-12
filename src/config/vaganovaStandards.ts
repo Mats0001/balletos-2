@@ -7,7 +7,6 @@ export interface VaganovaStandard {
 
 export interface VaganovaExerciseStandards {
   knieFlexion?: VaganovaStandard;
-  valgusDrift?: VaganovaStandard;
   turnout?: VaganovaStandard;
   spineTilt?: VaganovaStandard;
   epaulement?: VaganovaStandard;
@@ -20,14 +19,12 @@ export interface VaganovaExerciseStandards {
 export const vaganovaStandards: Record<string, VaganovaExerciseStandards> = {
   'demi_plie': {
     knieFlexion: { ideal: [120, 145], toleranz: 10, severity: 'warning', label: 'Knieflexion Demi-Plié' },
-    valgusDrift: { ideal: [0, 5], toleranz: 3, severity: 'danger', label: 'Valgus-Drift (Verletzungsgefahr!)' },
     turnout: { ideal: [140, 180], toleranz: 15, severity: 'correction', label: 'Ausdrehung En Dehors' },
     spineTilt: { ideal: [0, 3], toleranz: 2, severity: 'warning', label: 'Aplomb (Rumpfneigung)' },
     pelvicTilt: { ideal: [0, 2], toleranz: 2, severity: 'warning', label: 'Beckenstabilität' },
   },
   'grand_plie': {
     knieFlexion: { ideal: [70, 100], toleranz: 10, severity: 'warning', label: 'Knieflexion Grand Plié' },
-    valgusDrift: { ideal: [0, 5], toleranz: 3, severity: 'danger', label: 'Valgus-Drift (Verletzungsgefahr!)' },
     turnout: { ideal: [140, 180], toleranz: 15, severity: 'correction', label: 'Ausdrehung En Dehors' },
     spineTilt: { ideal: [0, 5], toleranz: 3, severity: 'warning', label: 'Aplomb (Rumpfneigung)' },
     pelvicTilt: { ideal: [0, 3], toleranz: 2, severity: 'warning', label: 'Beckenstabilität' },
@@ -57,7 +54,6 @@ export const vaganovaStandards: Record<string, VaganovaExerciseStandards> = {
   },
   'default': {
     knieFlexion: { ideal: [170, 180], toleranz: 10, severity: 'warning', label: 'Knieflexion' },
-    valgusDrift: { ideal: [0, 5], toleranz: 3, severity: 'danger', label: 'Valgus-Drift' },
     turnout: { ideal: [140, 180], toleranz: 15, severity: 'correction', label: 'Ausdrehung' },
     spineTilt: { ideal: [0, 3], toleranz: 2, severity: 'warning', label: 'Aplomb' },
     epaulement: { ideal: [10, 20], toleranz: 5, severity: 'info', label: 'Épaulement' },

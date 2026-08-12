@@ -7,7 +7,12 @@ import {
   HomeworkOutput
 } from '../types';
 import { PoseLandmark } from './realMediaPipePose';
-import { vaganovaAngleCalculator, VaganovaFullAnalysis } from './vaganovaAngleCalculator';
+import {
+  isMeasurableVaganovaMeasurement,
+  vaganovaAngleCalculator,
+  VaganovaFullAnalysis,
+  VaganovaMeasurement
+} from './vaganovaAngleCalculator';
 import { getStandards } from '../config/vaganovaStandards';
 import { BUILD_POLICY } from '../config/buildPolicy';
 
@@ -100,7 +105,8 @@ export class VaganovaEvidenceEngineService {
       reason: pelvisCheck.present.length === 2 ? 'Beckenachse neutral & messbar.' : 'Beckenpunkte nicht sichtbar.'
     };
 
-    // Region 6: Left Knee Alignment (Indices: 23, 25, 27, 31)
+    // Region 6: Left knee observation. Landmarks may be visible, but the
+    // current single-camera contract has no valid view/phase/reference anchor.
     const kneeLCheck = checkVis([23, 25, 27, 31]);
     const kneeLVerdict: RegionEvidence = {
       region: 'kneeLeft',
@@ -109,11 +115,13 @@ export class VaganovaEvidenceEngineService {
       allowedSources: ['pose'],
       confidence: kneeLCheck.confidence,
       stability: -1, // NOT_COMPUTED
-      verdict: kneeLCheck.present.length >= 3 ? 'measurable' : 'review',
-      reason: kneeLCheck.present.length >= 3 ? 'Knie-Fuß-Projektion links messbar.' : 'Linker Fuß/Knöchel verdeckt.'
+      verdict: 'blocked',
+      reason: kneeLCheck.present.length >= 3
+        ? 'Kniepunkte sichtbar; automatische Knieachsenbewertung ohne bestätigten Referenzanker gesperrt.'
+        : 'Knie-/Fußpunkte nicht ausreichend sichtbar; automatische Bewertung gesperrt.'
     };
 
-    // Region 7: Right Knee Alignment (Indices: 24, 26, 28, 32)
+    // Region 7: Right knee observation — same fail-closed contract as left.
     const kneeRCheck = checkVis([24, 26, 28, 32]);
     const kneeRVerdict: RegionEvidence = {
       region: 'kneeRight',
@@ -122,8 +130,10 @@ export class VaganovaEvidenceEngineService {
       allowedSources: ['pose'],
       confidence: kneeRCheck.confidence,
       stability: -1, // NOT_COMPUTED
-      verdict: kneeRCheck.present.length >= 3 ? 'measurable' : 'review',
-      reason: kneeRCheck.present.length >= 3 ? 'Knie-Fuß-Projektion rechts messbar.' : 'Rechter Fuß/Knöchel verdeckt.'
+      verdict: 'blocked',
+      reason: kneeRCheck.present.length >= 3
+        ? 'Kniepunkte sichtbar; automatische Knieachsenbewertung ohne bestätigten Referenzanker gesperrt.'
+        : 'Knie-/Fußpunkte nicht ausreichend sichtbar; automatische Bewertung gesperrt.'
     };
 
     // Region 8: Feet En Dehors (Indices: 27, 28, 31, 32)
@@ -155,36 +165,36 @@ export class VaganovaEvidenceEngineService {
    * Evaluate Ballet Checkpoints on top of Region Evidence
    */
   public computeCheckpoints(regionEvidences: RegionEvidence[], selectedJointId: string, landmarks: PoseLandmark[] | null, vw = 1, vh = 1): BalletCheckpoint[] {
-    const getEv = (r: string) => regionEvidences.find(e => e.region === r);
-
-    const headEv = getEv('head');
-    const kneeLEv = getEv('kneeLeft');
-    const armLEv = getEv('armLeft');
-    const pelvisEv = getEv('pelvis');
-    const feetEv = getEv('footLeft');
+    const getEvVerdict = (region: string) => regionEvidences.find(e => e.region === region)?.verdict;
 
     // P0 FIX: Pass video dimensions for aspect-ratio-correct angle calculation
     const analysis = landmarks ? vaganovaAngleCalculator.analyzeFullFrame(landmarks, vw, vh) : {} as Partial<VaganovaFullAnalysis>;
     // Audit fix: use exercise-specific standards, not always 'default'
     const standards = getStandards(selectedJointId || 'default');
 
-    // SOFORTPATCH (Berater 2026-08-10, Sprint 1 Step 1):
-    // getStatus() liefert ausnahmslos 'review' (NOT_SCORED).
-    // Begründung: Die EvidenceEngine darf ohne DecisionGate + validationArtifactId
-    // NIEMALS 'richtig' oder 'auffaellig' erzeugen. Fehlender Status darf nicht
-    // grün oder rot dargestellt werden.
+    // The EvidenceEngine must never convert missing/not_measurable evidence to
+    // review (orange), richtig (green), or auffaellig (red). Measurable values
+    // remain review-only until a DecisionGate authorizes their metric contract.
     // TODO Sprint 1 Step 5: Diese Funktion vollständig durch DecisionGate ersetzen.
     // Der DecisionGate konsumiert MetricDecision, niemals rohe measurement.value.
-    const getStatus = (_measurement: any, _standard: any, _evVerdict: any): 'richtig' | 'auffaellig' | 'review' => {
+    const isUsable = (measurement: VaganovaMeasurement | null | undefined, evidenceVerdict?: RegionEvidence['verdict']) => (
+      isMeasurableVaganovaMeasurement(measurement)
+      && evidenceVerdict === 'measurable'
+    );
+
+    const getStatus = (measurement: VaganovaMeasurement | null | undefined, evidenceVerdict?: RegionEvidence['verdict']): 'review' | 'nicht_auswertbar' => {
+      if (!isUsable(measurement, evidenceVerdict)) return 'nicht_auswertbar';
       // BUILD_POLICY.allowThresholdScoring === false → immer 'review'
       return 'review';
     };
 
-    const getMeasuredValue = (measurement: any) => {
-      return measurement ? `${measurement.value.toFixed(1)}° ${measurement.label}` : 'Messung fehlt';
+    const getMeasuredValue = (measurement: VaganovaMeasurement | null | undefined, evidenceVerdict?: RegionEvidence['verdict']) => {
+      if (!isMeasurableVaganovaMeasurement(measurement) || !isUsable(measurement, evidenceVerdict)) return 'Nicht messbar';
+      return `${measurement.value.toFixed(1)}° ${measurement.label}`;
     };
 
-    const getTargetValue = (standard: any, fallback: string) => {
+    const getTargetValue = (measurement: VaganovaMeasurement | null | undefined, evidenceVerdict: RegionEvidence['verdict'] | undefined, standard: any, fallback: string) => {
+      if (!isUsable(measurement, evidenceVerdict)) return 'Keine bewertbare Schwelle';
       return standard ? `${standard.ideal[0]}° - ${standard.ideal[1]}°` : fallback;
     };
 
@@ -193,9 +203,9 @@ export class VaganovaEvidenceEngineService {
         checkpointId: 'head_epaulement',
         name: 'Kopf & Épaulement (Cervical Axis)',
         region: 'head',
-        status: getStatus(analysis.epaulement, standards.epaulement, headEv?.verdict),
-        measuredValue: getMeasuredValue(analysis.epaulement),
-        targetValue: getTargetValue(standards.epaulement, '15.0° Vaganova Standard'),
+        status: getStatus(analysis.epaulement, getEvVerdict('head')),
+        measuredValue: getMeasuredValue(analysis.epaulement, getEvVerdict('head')),
+        targetValue: getTargetValue(analysis.epaulement, getEvVerdict('head'), standards.epaulement, '15.0° Vaganova Standard'),
         vaganovaRule: 'Der Kopf folgt der Handführung mit 15° Schrägung über der Schulterachse.',
         pedagogicalCue: 'Blick über die rechte Handspitze führen ("Wie ein stolzer Schwan").',
         minimumEvidenceLevel: 'E3'
@@ -204,9 +214,9 @@ export class VaganovaEvidenceEngineService {
         checkpointId: 'port_de_bras_arms',
         name: 'Port de Bras & Ellbogen-Bogen',
         region: 'armLeft',
-        status: getStatus(analysis.portDeBrasL, standards.portDeBras, armLEv?.verdict),
-        measuredValue: getMeasuredValue(analysis.portDeBrasL),
-        targetValue: getTargetValue(standards.portDeBras, '160°–170° Fließend'),
+        status: getStatus(analysis.portDeBrasL, getEvVerdict('armLeft')),
+        measuredValue: getMeasuredValue(analysis.portDeBrasL, getEvVerdict('armLeft')),
+        targetValue: getTargetValue(analysis.portDeBrasL, getEvVerdict('armLeft'), standards.portDeBras, '160°–170° Fließend'),
         vaganovaRule: 'Ellbogen gehoben halten, fließender Bogen von den Schultern bis zu den Fingerspitzen.',
         pedagogicalCue: 'Ellbogen nie abknicken lassen; Flügelspannung spüren.',
         minimumEvidenceLevel: 'E2'
@@ -215,31 +225,42 @@ export class VaganovaEvidenceEngineService {
         checkpointId: 'pelvis_core',
         name: 'Becken & Schwerpunkt (Pelvic Tilt & CoM)',
         region: 'pelvis',
-        status: getStatus(analysis.pelvicTilt, standards.pelvicTilt, pelvisEv?.verdict),
-        measuredValue: getMeasuredValue(analysis.pelvicTilt),
-        targetValue: getTargetValue(standards.pelvicTilt, '0.0° Absolut Horizontal'),
+        status: getStatus(analysis.pelvicTilt, getEvVerdict('pelvis')),
+        measuredValue: getMeasuredValue(analysis.pelvicTilt, getEvVerdict('pelvis')),
+        targetValue: getTargetValue(analysis.pelvicTilt, getEvVerdict('pelvis'), standards.pelvicTilt, '0.0° Absolut Horizontal'),
         vaganovaRule: 'Neutraler Beckenstand ohne Vorkippen (Anterior Tilt) oder seitlichen Hochstand.',
         pedagogicalCue: 'Bauchnabel sanft zur Wirbelsäule ziehen, Becken neutral verankern.',
         minimumEvidenceLevel: 'E2'
       },
       {
         checkpointId: 'left_knee',
-        name: 'Linkes Knie (Knie-Valgus Alignment)',
+        name: 'Linke Knieachse (2D-Beobachtung)',
         region: 'kneeLeft',
-        status: getStatus(analysis.valgusDriftL, standards.valgusDrift, kneeLEv?.verdict),
-        measuredValue: getMeasuredValue(analysis.valgusDriftL),
-        targetValue: getTargetValue(standards.valgusDrift, '0.0° (Spur über 2. Zeh)'),
-        vaganovaRule: 'Die Kniescheiben-Mitte muss im Plié exakt über dem 2. Zeh geführt werden.',
-        pedagogicalCue: 'Schwanenflügel-Metapher: "Öffne das linke Knie weit zur Wand wie ein Flügel".',
+        status: getStatus(analysis.valgusDriftL, getEvVerdict('kneeLeft')),
+        measuredValue: getMeasuredValue(analysis.valgusDriftL, getEvVerdict('kneeLeft')),
+        targetValue: getTargetValue(analysis.valgusDriftL, getEvVerdict('kneeLeft'), undefined, 'Keine bewertbare Schwelle'),
+        vaganovaRule: 'Der Einzelkamera-Proxy liefert ohne bestätigten Referenzframe, Perspektive und Bewegungsphase kein automatisches Urteil.',
+        pedagogicalCue: 'Nicole prüft die sichtbare Knie-Fuß-Linie und legt bei Bedarf einen Referenzframe fest.',
+        minimumEvidenceLevel: 'E2'
+      },
+      {
+        checkpointId: 'right_knee',
+        name: 'Rechte Knieachse (2D-Beobachtung)',
+        region: 'kneeRight',
+        status: getStatus(analysis.valgusDriftR, getEvVerdict('kneeRight')),
+        measuredValue: getMeasuredValue(analysis.valgusDriftR, getEvVerdict('kneeRight')),
+        targetValue: getTargetValue(analysis.valgusDriftR, getEvVerdict('kneeRight'), undefined, 'Keine bewertbare Schwelle'),
+        vaganovaRule: 'Der Einzelkamera-Proxy liefert ohne bestätigten Referenzframe, Perspektive und Bewegungsphase kein automatisches Urteil.',
+        pedagogicalCue: 'Nicole prüft die sichtbare Knie-Fuß-Linie und legt bei Bedarf einen Referenzframe fest.',
         minimumEvidenceLevel: 'E2'
       },
       {
         checkpointId: 'en_dehors_feet',
         name: 'Füße & En Dehors Auswärts-Drehung',
         region: 'footLeft',
-        status: getStatus(analysis.turnoutL, standards.turnout, feetEv?.verdict),
-        measuredValue: getMeasuredValue(analysis.turnoutL),
-        targetValue: getTargetValue(standards.turnout, '90° je Fuß'),
+        status: getStatus(analysis.turnoutL, getEvVerdict('footLeft')),
+        measuredValue: getMeasuredValue(analysis.turnoutL, getEvVerdict('footLeft')),
+        targetValue: getTargetValue(analysis.turnoutL, getEvVerdict('footLeft'), standards.turnout, '90° je Fuß'),
         vaganovaRule: 'Auswärts-Drehung entsteht zu 100% aus dem Hüftgelenk, nicht durch Verdrehen der Knöchel.',
         pedagogicalCue: 'Oberschenkel im Hüftgelenk nach außen rotieren.',
         minimumEvidenceLevel: 'E3'
@@ -314,7 +335,7 @@ export class VaganovaEvidenceEngineService {
     const safetyGate = this.evaluateSafetyGate(overallVerdict, teacherConfirmed);
 
     const activeCp = checkpointResults.find(c => c.checkpointId === selectedJointId) || checkpointResults[3];
-    const bestCp = checkpointResults.find(c => c.status === 'richtig') || activeCp;
+    const bestCp = checkpointResults.find(c => c.status === 'richtig');
     const worstCp = checkpointResults.find(c => c.status === 'auffaellig') || activeCp;
 
     const avgConfidence = landmarks && landmarks.length > 0 
@@ -342,9 +363,11 @@ export class VaganovaEvidenceEngineService {
       overallVerdict,
       findingHeadline: `${activeCp.name}: ${activeCp.measuredValue}`,
       whyRelevant: activeCp.vaganovaRule,
-      positiveNote: `Sehr gute Haltung bei: ${bestCp.name} (${bestCp.measuredValue}).`,
-      uncertaintyNote: `Positions-Treue gemessen mit ${avgConfidence}% Konfidenz.`,
-      historyComparison: 'Erste Messung – Baseline wird gespeichert',
+      positiveNote: bestCp
+        ? `Sehr gute Haltung bei: ${bestCp.name} (${bestCp.measuredValue}).`
+        : 'Keine automatische Stärke freigegeben – Nicole beurteilt den Frame.',
+      uncertaintyNote: `Pose-Landmark-Sichtbarkeit: ${avgConfidence}%. Das ist keine fachliche Messsicherheit.`,
+      historyComparison: 'Kein belastbarer Vergleich ohne bestätigte Session-Referenz.',
       nextCue: activeCp.pedagogicalCue,
       safetyGate,
       homework,

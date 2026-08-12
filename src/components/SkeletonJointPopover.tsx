@@ -2,7 +2,11 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Zap, Dumbbell, AlertTriangle, TrendingDown, CheckCircle, Copy, Check } from 'lucide-react';
 import { JointKnowledge } from '../services/skeletonJointKnowledge';
-import { VaganovaFullAnalysis, VaganovaMeasurement } from '../services/vaganovaAngleCalculator';
+import {
+  isMeasurableVaganovaMeasurement,
+  VaganovaFullAnalysis,
+  VaganovaMeasurement
+} from '../services/vaganovaAngleCalculator';
 
 interface Props {
   knowledge: JointKnowledge;
@@ -31,6 +35,26 @@ const REGION_COLORS: Record<string, string> = {
 };
 
 /** Maps landmark index to relevant VaganovaFullAnalysis fields */
+const LIVE_MEASUREMENT_KEYS: Record<number, Array<keyof VaganovaFullAnalysis>> = {
+  0:  ['headTilt', 'plumbDeviation'],
+  11: ['shoulderSymmetry', 'shoulderElevationL', 'epaulement'],
+  12: ['shoulderSymmetry', 'shoulderElevationR', 'epaulement'],
+  13: ['armLineQualityL', 'portDeBrasL'],
+  14: ['armLineQualityR', 'portDeBrasR'],
+  15: ['armLineQualityL', 'portDeBrasL'],
+  16: ['armLineQualityR', 'portDeBrasR'],
+  23: ['pelvicTilt', 'turnoutL', 'spineTilt'],
+  24: ['pelvicTilt', 'turnoutR', 'spineTilt'],
+  25: ['knieFlexionL', 'valgusDriftL', 'turnoutL'],
+  26: ['knieFlexionR', 'valgusDriftR', 'turnoutR'],
+  27: ['knieFlexionL', 'valgusDriftL'],
+  28: ['knieFlexionR', 'valgusDriftR'],
+  29: ['knieFlexionL', 'turnoutL'],
+  30: ['knieFlexionR', 'turnoutR'],
+  31: ['turnoutL', 'knieFlexionL'],
+  32: ['turnoutR', 'knieFlexionR'],
+};
+
 function getLiveMeasurements(
   idx: number,
   va: VaganovaFullAnalysis | null | undefined
@@ -40,26 +64,7 @@ function getLiveMeasurements(
     const m = va[key] as VaganovaMeasurement | null;
     return m ? { key, m } : null;
   };
-  const MAP: Record<number, Array<keyof VaganovaFullAnalysis>> = {
-    0:  ['headTilt', 'plumbDeviation'],
-    11: ['shoulderSymmetry', 'shoulderElevationL', 'epaulement'],
-    12: ['shoulderSymmetry', 'shoulderElevationR', 'epaulement'],
-    13: ['armLineQualityL', 'portDeBrasL'],
-    14: ['armLineQualityR', 'portDeBrasR'],
-    15: ['armLineQualityL', 'portDeBrasL'],
-    16: ['armLineQualityR', 'portDeBrasR'],
-    23: ['pelvicTilt', 'turnoutL', 'spineTilt'],
-    24: ['pelvicTilt', 'turnoutR', 'spineTilt'],
-    25: ['knieFlexionL', 'valgusDriftL', 'turnoutL'],
-    26: ['knieFlexionR', 'valgusDriftR', 'turnoutR'],
-    27: ['knieFlexionL', 'valgusDriftL'],
-    28: ['knieFlexionR', 'valgusDriftR'],
-    29: ['knieFlexionL', 'turnoutL'],
-    30: ['knieFlexionR', 'turnoutR'],
-    31: ['turnoutL', 'knieFlexionL'],
-    32: ['turnoutR', 'knieFlexionR'],
-  };
-  const keys = MAP[idx] ?? [];
+  const keys = LIVE_MEASUREMENT_KEYS[idx] ?? [];
   return keys.map(k => pick(k)).filter(Boolean) as Array<{ key: string; m: VaganovaMeasurement }>;
 }
 
@@ -71,7 +76,7 @@ function statusColor(status?: string) {
 }
 
 function formatValue(m: VaganovaMeasurement) {
-  if (m.measurement_class === 'not_measurable') return '–';
+  if (!isMeasurableVaganovaMeasurement(m)) return '–';
   const v = Math.abs(m.value);
   if (m.unit === 'deg' || m.unit === 'delta_deg') return `${v.toFixed(1)}°`;
   if (m.unit === 'ratio') return v.toFixed(2);
@@ -91,6 +96,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
 }) => {
   const color = REGION_COLORS[knowledge.region] ?? '#c084fc';
   const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
+  const expectedMeasurementKeys = LIVE_MEASUREMENT_KEYS[landmarkIndex] ?? [];
   const [copied, setCopied] = useState(false);
 
   const handleCopyAll = useCallback(() => {
@@ -100,7 +106,10 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     ];
     if (liveMeasurements.length > 0) {
       parts.push('LIVE-MESSUNG:');
-      liveMeasurements.forEach(({ m }) => parts.push(`  ${m.label}: ${formatValue(m)}${m.norm ? ' | ' + m.norm : ''}`));
+      liveMeasurements.forEach(({ m }) => {
+        const norm = isMeasurableVaganovaMeasurement(m) && m.norm ? ` | ${m.norm}` : '';
+        parts.push(`  ${m.label}: ${formatValue(m)}${norm}`);
+      });
       parts.push('');
     }
     parts.push(`BEFUND: ${knowledge.commonMistake}`);
@@ -150,7 +159,18 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   // Dominant live status for connector colour
   const hasError = liveMeasurements.some(({ m }) => m.status === 'ERROR');
   const hasWarning = liveMeasurements.some(({ m }) => m.status === 'WARNING');
+  const hasConfirmedCorrect = vaganovaAnalysis !== null
+    && vaganovaAnalysis !== undefined
+    && expectedMeasurementKeys.length > 0
+    && expectedMeasurementKeys.every(key => {
+      const measurement = vaganovaAnalysis[key];
+      return isMeasurableVaganovaMeasurement(measurement) && measurement.status === 'CORRECT';
+    });
+  const isNeutral = !hasError && !hasWarning && !hasConfirmedCorrect;
   const connectorColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : color;
+  const findingColor = hasError ? '#ff453a' : hasWarning ? '#ffd60a' : hasConfirmedCorrect ? '#30d158' : 'rgba(255,255,255,0.5)';
+  const findingBackground = hasError ? 'rgba(255,69,58,0.1)' : hasWarning ? 'rgba(255,214,10,0.08)' : hasConfirmedCorrect ? 'rgba(48,209,88,0.07)' : 'rgba(255,255,255,0.04)';
+  const findingBorder = hasError ? 'rgba(255,69,58,0.3)' : hasWarning ? 'rgba(255,214,10,0.25)' : hasConfirmedCorrect ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.12)';
 
   return createPortal(
     <>
@@ -294,22 +314,24 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
 
           {/* 1️⃣ WAS IST FALSCH – klar, direkt, vorne */}
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'flex-start', background: hasError ? 'rgba(255,69,58,0.1)' : hasWarning ? 'rgba(255,214,10,0.08)' : 'rgba(48,209,88,0.07)', border: `1px solid ${hasError ? 'rgba(255,69,58,0.3)' : hasWarning ? 'rgba(255,214,10,0.25)' : 'rgba(48,209,88,0.2)'}`, borderRadius: '8px', padding: '7px 9px' }}>
-            <AlertTriangle size={11} style={{ color: hasError ? '#ff453a' : hasWarning ? '#ffd60a' : '#30d158', flexShrink: 0, marginTop: '1px' }} />
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'flex-start', background: findingBackground, border: `1px solid ${findingBorder}`, borderRadius: '8px', padding: '7px 9px' }}>
+            {isNeutral
+              ? <span aria-hidden="true" style={{ color: findingColor, fontSize: '11px', flexShrink: 0 }}>○</span>
+              : <AlertTriangle size={11} style={{ color: findingColor, flexShrink: 0, marginTop: '1px' }} />}
             <div style={{ fontSize: '10px', color: '#ffffff', lineHeight: 1.5, fontWeight: 600 }}>
-              <span style={{ fontSize: '8px', fontWeight: 800, color: hasError ? '#ff453a' : hasWarning ? '#ffd60a' : '#30d158', textTransform: 'uppercase', letterSpacing: '0.7px', display: 'block', marginBottom: '2px' }}>
-                {hasError ? '⚠ Typischer Fehler hier' : hasWarning ? '⚠ Achtung' : '✓ Richtig ausgeführt'}
+              <span style={{ fontSize: '8px', fontWeight: 800, color: findingColor, textTransform: 'uppercase', letterSpacing: '0.7px', display: 'block', marginBottom: '2px' }}>
+                {hasError ? '⚠ Typischer Fehler hier' : hasWarning ? '⚠ Achtung' : hasConfirmedCorrect ? '✓ Richtig ausgeführt' : '○ Nicht automatisch bewertet'}
               </span>
               {knowledge.commonMistake}
             </div>
           </div>
 
-          {/* 2️⃣ WARUM IST DAS FALSCH */}
-          <Section icon={<Zap size={9} />} label="Warum ist das problematisch?" color={color} highlight>
+          {/* 2️⃣ PÄDAGOGISCHER KONTEXT ODER BEGRÜNDUNG */}
+          <Section icon={<Zap size={9} />} label={isNeutral ? 'Pädagogischer Kontext' : 'Warum ist das problematisch?'} color={color} highlight>
             {knowledge.howAndWhy}
           </Section>
 
-          {/* 3️⃣ SO KORRIGIEREN */}
+          {/* 3️⃣ NÄCHSTER SCHRITT – bei neutraler Evidenz nur nach Nicoles Urteil */}
           <Section icon={<Dumbbell size={9} />} label={knowledge.exerciseTitle} color="#30d158">
             {knowledge.exercise}
           </Section>
