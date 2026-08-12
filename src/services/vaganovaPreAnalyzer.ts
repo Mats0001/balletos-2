@@ -4,6 +4,23 @@
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaFrameCache } from './vaganovaFrameCache';
 import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
+import type { CueReviewAudit, CueReviewContent, CueReviewEditablePatch, CueReviewExpectedState } from '../types/cueReviewAudit';
+import {
+  approveCueReviewAudit,
+  canonicalJson,
+  contentFromGroundedDraft,
+  createGroundedCueReviewAudit,
+  createLegacyCueReviewAudit,
+  cueReviewAuditIsValid,
+  freezeCueReviewAudit,
+  projectCueReviewAudit,
+  rejectCueReviewAudit,
+  reopenCueReviewAudit,
+  reviseCueReviewAudit,
+  setCueReviewAudience,
+} from './cueReviewAudit';
+import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 
 // ⚠️  AUDIT FIX (2026-08-10): Previous version faked AI analysis by switching
 //     on video filename and returning fabricated angle values (14°, 88°, 8°)
@@ -72,6 +89,100 @@ export interface VaganovaCuePoint {
 
   /** Forensische Technik-Analyse für Nicole (Nur-Lehrer-Ansicht) */
   technicalAnalysis?: string; // Vollanalyse: Metriken, Gesamtbild, kinematische Kette, Differenzialdiagnose, Sofort-Fokus
+
+  /** V3 application-enforced origin/revision/audience audit. */
+  reviewAudit?: CueReviewAudit;
+}
+
+type NewTeacherCuePoint = Omit<VaganovaCuePoint, 'id' | 'reviewAudit'> & { reviewAudit?: never };
+type LegacyCueUpdate = Partial<Omit<VaganovaCuePoint, 'reviewAudit'>> & { reviewAudit?: never };
+
+function cueReviewContentIsRuntimeValid(content: unknown): content is CueReviewContent {
+  if (!content || typeof content !== 'object') return false;
+  const value = content as CueReviewContent;
+  const optionalString = (item: unknown) => item === undefined || typeof item === 'string';
+  return typeof value.poseName === 'string'
+    && (value.status === 'GOOD' || value.status === 'CORRECTION' || value.status === 'WARNING' || value.status === 'NEUTRAL')
+    && typeof value.headline === 'string' && typeof value.cueMetaphor === 'string'
+    && typeof value.jointFocusId === 'string'
+    && optionalString(value.diagnosisText) && optionalString(value.diagnosisMetaphor)
+    && optionalString(value.goalText) && optionalString(value.practiceText)
+    && optionalString(value.technicalAnalysis) && optionalString(value.referenceImageKey)
+    && (value.nicoleAction === undefined || value.nicoleAction === 'strength' || value.nicoleAction === 'correction');
+}
+
+function cuePointIsRuntimeValid(point: unknown): point is VaganovaCuePoint {
+  if (!point || typeof point !== 'object') return false;
+  const value = point as VaganovaCuePoint;
+  return typeof value.id === 'string' && Number.isFinite(value.timeSeconds)
+    && typeof value.timecodeStr === 'string' && cueReviewContentIsRuntimeValid(cueReviewContentFromPoint(value))
+    && (value.scorePercent === undefined || Number.isFinite(value.scorePercent))
+    && (value.isCustom === undefined || typeof value.isCustom === 'boolean')
+    && (value.isEdited === undefined || typeof value.isEdited === 'boolean')
+    && (value.isDemoFixture === undefined || typeof value.isDemoFixture === 'boolean')
+    && (value.dataSource === undefined || value.dataSource === 'TEACHER_CREATED' || value.dataSource === 'DEMO_FIXTURE' || value.dataSource === 'KI_AUTO')
+    && (value.provenance === undefined || value.provenance === 'ki_suggestion' || value.provenance === 'nicole_confirmed'
+      || value.provenance === 'nicole_edited' || value.provenance === 'nicole_rejected')
+    && (value.kiNote === undefined || typeof value.kiNote === 'string')
+    && (value.kiSuggestionData === undefined || (
+      typeof value.kiSuggestionData === 'object' && value.kiSuggestionData !== null
+      && typeof value.kiSuggestionData.originalHeadline === 'string'
+      && typeof value.kiSuggestionData.originalCueMetaphor === 'string'
+      && Array.isArray(value.kiSuggestionData.metrics) && value.kiSuggestionData.metrics.every(item => typeof item === 'string')
+      && ['CORRECT', 'WARNING', 'ERROR', 'NEUTRAL'].includes(value.kiSuggestionData.ampelStatus)
+      && typeof value.kiSuggestionData.generatedAt === 'string'
+      && typeof value.kiSuggestionData.policyVersion === 'string'
+    ))
+    && (value.learnerVisible === undefined || typeof value.learnerVisible === 'boolean')
+    && (value.parentVisible === undefined || typeof value.parentVisible === 'boolean');
+}
+
+export function cueReviewContentFromPoint(point: VaganovaCuePoint): CueReviewContent {
+  return {
+    poseName: point.poseName,
+    status: point.status,
+    headline: point.headline,
+    cueMetaphor: point.cueMetaphor,
+    jointFocusId: point.jointFocusId,
+    diagnosisText: point.diagnosisText,
+    diagnosisMetaphor: point.diagnosisMetaphor,
+    goalText: point.goalText,
+    practiceText: point.practiceText,
+    technicalAnalysis: point.technicalAnalysis,
+    referenceImageKey: point.referenceImageKey,
+    nicoleAction: point.nicoleAction,
+  };
+}
+
+export function projectAuditedCuePoint(point: VaganovaCuePoint): VaganovaCuePoint {
+  if (!point.reviewAudit || !cueReviewAuditIsValid(point.reviewAudit)) {
+    return point.reviewAudit
+      ? { ...point, learnerVisible: false, parentVisible: false }
+      : point;
+  }
+  const projection = projectCueReviewAudit(point.reviewAudit);
+  const frozenAudit = freezeCueReviewAudit(point.reviewAudit);
+  const timeSeconds = frozenAudit.origin.anchor.mediaTimeUs / 1_000_000;
+  const minutes = Math.floor(timeSeconds / 60);
+  const seconds = (timeSeconds % 60).toFixed(3).padStart(6, '0');
+  return {
+    ...point,
+    id: frozenAudit.recordId,
+    timeSeconds,
+    timecodeStr: `${String(minutes).padStart(2, '0')}:${seconds}`,
+    ...projection.content,
+    dataSource: 'TEACHER_CREATED',
+    isCustom: true,
+    isDemoFixture: false,
+    scorePercent: undefined,
+    kiNote: undefined,
+    kiSuggestionData: undefined,
+    provenance: projection.provenance === 'nicole_draft' ? undefined : projection.provenance,
+    learnerVisible: projection.learnerVisible,
+    parentVisible: projection.parentVisible,
+    isEdited: projection.revisionNumber > 1,
+    reviewAudit: frozenAudit,
+  };
 }
 
 export interface AutoAnalysisReport {
@@ -159,19 +270,42 @@ export class VaganovaPreAnalyzerService {
     return `balletos_cuepoints_v2_${encodeURIComponent(videoUrl)}`;
   }
 
+  private getQuarantineKey(videoUrl: string): string {
+    return `${this.getStorageKey(videoUrl)}_audit_quarantine`;
+  }
+
+  private getLegacyBackupKey(videoUrl: string): string {
+    return `${this.getStorageKey(videoUrl)}_legacy_backup`;
+  }
+
   /**
    * Returns cue points for a video.
    * Priority: 1) Teacher-saved data, 2) DEMO_FIXTURE for known demos, 3) []
    */
   public getCuePoints(videoUrl: string): VaganovaCuePoint[] {
     let points: VaganovaCuePoint[] = [];
+    let quarantinedAuditCount = 0;
+    let invalidStoredEntries: unknown[] = [];
     try {
       const stored = localStorage.getItem(this.getStorageKey(videoUrl));
       if (stored) {
-        points = JSON.parse(stored);
+        const parsed: unknown = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          points = parsed.filter(cuePointIsRuntimeValid);
+          invalidStoredEntries = parsed.filter(point => !cuePointIsRuntimeValid(point));
+        }
       }
     } catch (e) {
       console.warn('[VaganovaPreAnalyzer] Storage read error:', e);
+    }
+
+    if (invalidStoredEntries.length > 0) {
+      try {
+        localStorage.setItem(this.getQuarantineKey(videoUrl), JSON.stringify(invalidStoredEntries));
+        localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(points));
+      } catch (error) {
+        throw new Error(`Cue quarantine write failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     if (points.length === 0) {
@@ -182,6 +316,22 @@ export class VaganovaPreAnalyzerService {
       return [];
     }
 
+    const storedIdCounts = new Map<string, number>();
+    for (const point of points) storedIdCounts.set(point.id, (storedIdCounts.get(point.id) ?? 0) + 1);
+    const corruptAudits = points.filter(point => point.reviewAudit && (
+      !cueReviewAuditIsValid(point.reviewAudit) || point.reviewAudit.origin.videoSourceId !== videoUrl
+      || point.id !== point.reviewAudit.recordId
+      || (storedIdCounts.get(point.id) ?? 0) !== 1
+    ));
+    if (corruptAudits.length > 0) {
+      try { localStorage.setItem(this.getQuarantineKey(videoUrl), JSON.stringify(corruptAudits)); } catch (error) {
+        throw new Error(`Cue audit quarantine write failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      console.warn(`[VaganovaPreAnalyzer] ${corruptAudits.length} beschädigte Audit-Datensätze quarantänisiert.`);
+      points = points.filter(point => !corruptAudits.includes(point));
+      quarantinedAuditCount = corruptAudits.length;
+    }
+
     // ── DEDUP: Bereinige alte KI_AUTO-Duplikate ──────────────────────────
     // Vor dem Fix hatten KI_AUTO-IDs Date.now() → bei jedem Scan neue IDs,
     // Duplikate wurden nicht erkannt. Jetzt: pro noch unreviewtem KI-Vorschlag
@@ -189,7 +339,43 @@ export class VaganovaPreAnalyzerService {
     // als Auditspur stets vollständig erhalten.
     const seenPending = new Map<string, number>(); // key → index
     const cleaned: VaganovaCuePoint[] = [];
+    let migratedLegacy = 0;
     for (const p of points) {
+      const isReviewedLegacy = !p.reviewAudit && !p.isDemoFixture && (
+        p.provenance === 'nicole_confirmed'
+        || p.provenance === 'nicole_edited'
+        || p.provenance === 'nicole_rejected'
+      );
+      if (isReviewedLegacy) {
+        const snapshot = p.kiSuggestionData;
+        const originalContent: CueReviewContent = snapshot ? {
+          ...cueReviewContentFromPoint(p),
+          headline: snapshot.originalHeadline,
+          cueMetaphor: snapshot.originalCueMetaphor,
+          diagnosisText: snapshot.originalDiagnosisText,
+          goalText: snapshot.originalGoalText,
+          practiceText: snapshot.originalPracticeText,
+          technicalAnalysis: snapshot.originalTechnicalAnalysis,
+          status: snapshot.ampelStatus === 'CORRECT' ? 'GOOD'
+            : snapshot.ampelStatus === 'ERROR' ? 'CORRECTION'
+              : snapshot.ampelStatus === 'WARNING' ? 'WARNING' : 'NEUTRAL',
+        } : cueReviewContentFromPoint(p);
+        const reviewAudit = createLegacyCueReviewAudit({
+          recordId: p.id, videoSourceId: videoUrl,
+          mediaTimeUs: Math.round(p.timeSeconds * 1_000_000), targetId: p.jointFocusId,
+          originalContent, currentContent: cueReviewContentFromPoint(p),
+          legacyPayload: {
+            dataSource: p.dataSource ?? null, provenance: p.provenance ?? null,
+            kiSuggestionData: snapshot ?? null,
+          },
+          wasRejected: p.provenance === 'nicole_rejected',
+          generatedAt: snapshot?.generatedAt, policyVersion: snapshot?.policyVersion,
+        });
+        if (!cueReviewAuditIsValid(reviewAudit)) continue;
+        cleaned.push(projectAuditedCuePoint({ ...p, reviewAudit }));
+        migratedLegacy += 1;
+        continue;
+      }
       if (p.dataSource === 'KI_AUTO') {
         const reviewed = p.provenance === 'nicole_confirmed'
           || p.provenance === 'nicole_edited'
@@ -215,11 +401,14 @@ export class VaganovaPreAnalyzerService {
     }
 
     // Wenn wir Duplikate entfernt haben, sofort persistieren
-    if (cleaned.length < points.length) {
+    if (cleaned.length < points.length || migratedLegacy > 0 || quarantinedAuditCount > 0) {
       console.info(`[VaganovaPreAnalyzer] Bereinigt: ${points.length - cleaned.length} KI_AUTO-Duplikate entfernt`);
-      try {
-        localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(cleaned));
-      } catch (e) { /* ignore */ }
+      if (migratedLegacy > 0 && localStorage.getItem(this.getLegacyBackupKey(videoUrl)) === null) {
+        try { localStorage.setItem(this.getLegacyBackupKey(videoUrl), JSON.stringify(points)); } catch (error) {
+          throw new Error(`Cue legacy backup write failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      this.writeCuePoints(videoUrl, cleaned);
     }
 
     if (cleaned.length === 0) {
@@ -227,18 +416,40 @@ export class VaganovaPreAnalyzerService {
       if (fixtureKey) return DEMO_FIXTURES[fixtureKey];
     }
 
-    return cleaned;
+    return cleaned.map(projectAuditedCuePoint);
   }
 
-  public saveCuePoints(videoUrl: string, points: VaganovaCuePoint[]): void {
+  private writeCuePoints(videoUrl: string, points: VaganovaCuePoint[]): void {
     try {
       localStorage.setItem(this.getStorageKey(videoUrl), JSON.stringify(points));
     } catch (e) {
-      console.warn('[VaganovaPreAnalyzer] Storage write error:', e);
+      throw new Error(`Cue storage write failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  public addCuePoint(videoUrl: string, newCue: Omit<VaganovaCuePoint, 'id'>): VaganovaCuePoint[] {
+  /** Legacy/scanner writer may preserve, but never insert/change/remove, an audited record. */
+  public saveCuePoints(videoUrl: string, points: VaganovaCuePoint[]): void {
+    const existing = this.getCuePoints(videoUrl);
+    const existingById = new Map(existing.map(point => [point.id, point]));
+    if (new Set(points.map(point => point.id)).size !== points.length) {
+      throw new Error('Cue IDs must be unique.');
+    }
+    const incomingById = new Map(points.map(point => [point.id, point]));
+    for (const point of existing) {
+      if (!point.reviewAudit) continue;
+      const incoming = incomingById.get(point.id);
+      if (!incoming?.reviewAudit || canonicalJson(incoming) !== canonicalJson(point)) {
+        throw new Error('Generic cue writer cannot mutate or remove an audited review record.');
+      }
+    }
+    if (points.some(point => point.reviewAudit && !existingById.get(point.id)?.reviewAudit)) {
+      throw new Error('Generic cue writer cannot insert an audited review record.');
+    }
+    this.writeCuePoints(videoUrl, points);
+  }
+
+  public addCuePoint(videoUrl: string, newCue: NewTeacherCuePoint): VaganovaCuePoint[] {
+    if (Object.prototype.hasOwnProperty.call(newCue, 'reviewAudit')) throw new Error('Generic cue writer cannot insert reviewAudit.');
     const points = this.getCuePoints(videoUrl);
     const cue: VaganovaCuePoint = {
       ...newCue,
@@ -247,34 +458,141 @@ export class VaganovaPreAnalyzerService {
       dataSource: 'TEACHER_CREATED',
     };
     const updated = [...points, cue].sort((a, b) => a.timeSeconds - b.timeSeconds);
-    this.saveCuePoints(videoUrl, updated);
+    this.writeCuePoints(videoUrl, updated);
     return updated;
   }
 
-  public updateCuePoint(videoUrl: string, cueId: string, updates: Partial<VaganovaCuePoint>): VaganovaCuePoint[] {
+  public updateCuePoint(videoUrl: string, cueId: string, updates: LegacyCueUpdate): VaganovaCuePoint[] {
+    if (Object.prototype.hasOwnProperty.call(updates, 'reviewAudit')) throw new Error('Generic cue writer cannot insert reviewAudit.');
     const points = this.getCuePoints(videoUrl);
     const updated = points.map(p => {
       if (p.id === cueId) {
+        if (p.reviewAudit) throw new Error('Audited cues must use typed review commands.');
         return { ...p, ...updates, isEdited: true, dataSource: 'TEACHER_CREATED' as const };
       }
       return p;
     });
-    this.saveCuePoints(videoUrl, updated);
+    this.writeCuePoints(videoUrl, updated);
     return updated;
   }
 
   public deleteCuePoint(videoUrl: string, cueId: string): VaganovaCuePoint[] {
     const points = this.getCuePoints(videoUrl);
+    if (points.some(point => point.id === cueId && point.reviewAudit)) {
+      throw new Error('Audited cues cannot be physically deleted.');
+    }
     const updated = points.filter(p => p.id !== cueId);
-    this.saveCuePoints(videoUrl, updated);
+    this.writeCuePoints(videoUrl, updated);
     return updated;
   }
 
   public resetToDefaults(videoUrl: string): VaganovaCuePoint[] {
+    const current = this.getCuePoints(videoUrl);
+    if (current.some(point => point.reviewAudit)) {
+      throw new Error('Audited cues cannot be removed by reset.');
+    }
     try { localStorage.removeItem(this.getStorageKey(videoUrl)); } catch (e) {}
     const fixtureKey = getDemoFixtureKey(videoUrl);
     return fixtureKey ? DEMO_FIXTURES[fixtureKey] : [];
   }
+
+  public addGroundedTeacherDraft(
+    videoUrl: string,
+    draft: ReadyGroundedTeacherDraft,
+    target: SelectedSkeletonTarget,
+    poseName: string,
+  ): VaganovaCuePoint[] {
+    if (videoUrl !== draft.evidence.sourceId || videoUrl !== target.sourceId) {
+      throw new Error('Grounded draft can only be stored under its exact video source.');
+    }
+    const points = this.getCuePoints(videoUrl);
+    if (points.some(point => point.reviewAudit?.origin.anchor.mediaTimeUs === draft.evidence.mediaTimeUs
+      && point.reviewAudit.origin.anchor.targetId === target.targetId
+      && point.reviewAudit.origin.policyVersion === draft.evidence.policyVersion)) return points;
+    const content = contentFromGroundedDraft(draft, target, poseName);
+    const reviewAudit = createGroundedCueReviewAudit({ draft, target, content });
+    const projected = projectCueReviewAudit(reviewAudit);
+    const timeSeconds = draft.evidence.mediaTimeUs / 1_000_000;
+    const minutes = Math.floor(timeSeconds / 60);
+    const seconds = (timeSeconds % 60).toFixed(3).padStart(6, '0');
+    const cue: VaganovaCuePoint = projectAuditedCuePoint({
+      id: reviewAudit.recordId,
+      timeSeconds,
+      timecodeStr: `${String(minutes).padStart(2, '0')}:${seconds}`,
+      ...projected.content,
+      isCustom: true,
+      dataSource: 'TEACHER_CREATED',
+      learnerVisible: false,
+      parentVisible: false,
+      reviewAudit,
+    });
+    const updated = [...points, cue].sort((left, right) => left.timeSeconds - right.timeSeconds);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+
+  public transitionReviewedCue(videoUrl: string, cueId: string, transition: AuditTransition, expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = transitionAuditedCuePoint(this.getCuePoints(videoUrl), cueId, transition, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+
+  public reviseReviewedCue(videoUrl: string, cueId: string, patch: CueReviewEditablePatch, expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = reviseAuditedCuePoint(this.getCuePoints(videoUrl), cueId, patch, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+
+  public setReviewedAudience(videoUrl: string, cueId: string, audience: 'learner' | 'parent', visible: boolean, expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = setAuditedCueAudience(this.getCuePoints(videoUrl), cueId, audience, visible, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+}
+
+type AuditTransition = 'approve' | 'reject' | 'reopen';
+
+export function transitionAuditedCuePoint(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  transition: AuditTransition,
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => {
+    if (point.id !== cueId || !point.reviewAudit) return point;
+    const next = transition === 'approve'
+      ? approveCueReviewAudit(point.reviewAudit, expected)
+      : transition === 'reject'
+        ? rejectCueReviewAudit(point.reviewAudit, expected)
+        : reopenCueReviewAudit(point.reviewAudit, expected);
+    return projectAuditedCuePoint({ ...point, reviewAudit: next });
+  });
+}
+
+export function reviseAuditedCuePoint(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  patch: CueReviewEditablePatch,
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({ ...point, reviewAudit: reviseCueReviewAudit(point.reviewAudit, patch, expected) })
+    : point);
+}
+
+export function setAuditedCueAudience(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  audience: 'learner' | 'parent',
+  visible: boolean,
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({ ...point, reviewAudit: setCueReviewAudience(point.reviewAudit, audience, visible, expected) })
+    : point);
 }
 
 /** Replaces only unreviewed automatic results; reviewed, teacher and demo cues survive. */

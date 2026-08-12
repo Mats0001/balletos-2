@@ -20,7 +20,7 @@ interface Props {
   videoLeft: number;
   containerHeight: number;
   onClose: () => void;
-  onAddToCueManager?: () => void;
+  onAddToCueManager?: () => boolean | void;
   /** Live frame analysis – if provided, shows specific real-time measurements */
   vaganovaAnalysis?: VaganovaFullAnalysis | null;
   /** Landmark index for mapping to specific measurements */
@@ -465,9 +465,9 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         {/* FOOTER */}
         <div style={{ padding: '7px 10px', borderTop: `1px solid ${color}18`, display: 'flex', gap: '5px' }}>
           {onAddToCueManager && (
-            <button onClick={() => { onAddToCueManager(); onClose(); }}
+            <button onClick={() => { if (onAddToCueManager() !== false) onClose(); }}
               style={{ flex: 1, background: `linear-gradient(135deg, ${color}25 0%, ${color}12 100%)`, border: `1px solid ${color}45`, color, borderRadius: '6px', padding: '5px 7px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}>
-              + Zum Cue-Manager
+              {readyTorsoDraft ? 'Als Nicole-Entwurf übernehmen' : '+ Zum Cue-Manager'}
             </button>
           )}
           <button onClick={onClose}

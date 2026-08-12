@@ -10,6 +10,15 @@ import {
   replaceAutoCuePoints,
   vaganovaPreAnalyzer,
 } from '../services/vaganovaPreAnalyzer';
+import {
+  approveCueReviewAudit,
+  contentFromGroundedDraft,
+  createGroundedCueReviewAudit,
+  setCueReviewAudience,
+} from '../services/cueReviewAudit';
+import { cueReviewExpectedState } from '../services/cueReviewAudit';
+import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 
 function installMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -79,7 +88,7 @@ describe('legacy automatic claim gate', () => {
 });
 
 describe('stored cue safety migration', () => {
-  it('removes unreviewed legacy AI while preserving every Nicole, teacher and demo record', () => {
+  it('removes pending legacy AI, migrates Nicole decisions fail-closed and preserves teacher/demo records', () => {
     const storage = installMemoryStorage();
     const videoUrl = 'migration-source.mp4';
     const storageKey = `balletos_cuepoints_v2_${encodeURIComponent(videoUrl)}`;
@@ -105,10 +114,22 @@ describe('stored cue safety migration', () => {
     ]));
 
     const result = vaganovaPreAnalyzer.getCuePoints(videoUrl);
-    const expected = [confirmedA, confirmedB, edited, rejected, teacher, demo];
+    expect(result).toHaveLength(6);
+    expect(result.slice(0, 4).every(point => (
+      point.reviewAudit?.origin.kind === 'legacy_unverified'
+      && point.learnerVisible === false
+      && point.parentVisible === false
+    ))).toBe(true);
+    expect(result.slice(0, 3).every(point => point.provenance === undefined)).toBe(true);
+    expect(result[3].provenance).toBe('nicole_rejected');
+    expect(result.slice(4)).toEqual([teacher, demo]);
+    const persisted = JSON.parse(storage.getItem(storageKey) ?? 'null') as VaganovaCuePoint[];
+    expect(persisted).toHaveLength(6);
+    expect(persisted.slice(0, 4).every(point => point.reviewAudit?.origin.kind === 'legacy_unverified')).toBe(true);
+    expect(storage.getItem(`${storageKey}_legacy_backup`)).toContain('confirmed-a');
 
-    expect(result).toEqual(expected);
-    expect(JSON.parse(storage.getItem(storageKey) ?? 'null')).toEqual(expected);
+    const secondRead = vaganovaPreAnalyzer.getCuePoints(videoUrl);
+    expect(secondRead).toEqual(result);
   });
 
   it('keeps rich demo fixtures explicit and externally unpublished', () => {
@@ -202,5 +223,120 @@ describe('replaceAutoCuePoints', () => {
       [confirmed, rejected, edited],
       [duplicateConfirmed, duplicateRejected, duplicateEdited],
     )).toEqual([confirmed, rejected, edited]);
+  });
+});
+
+describe('audited cue persistence guard', () => {
+  const target: SelectedSkeletonTarget = {
+    targetId: 'bone.sternum_navel', kind: 'bone', anchorNormalized: { x: 0.5, y: 0.4 },
+    sourceId: 'audited-video.mp4', streamEpoch: 2, generation: 1, mediaTimeUs: 1_500_000,
+    frameStatus: 'exact_cache_frame',
+  };
+  const evidence: ReadyGroundedTeacherDraft['evidence'] = {
+    metricId: 'spine_tilt_aplomb', valueDeg: 3.1, confidence: 0.9,
+    measurementClass: 'vaganova_relation', heuristicState: 'heuristic_attention',
+    sourceId: target.sourceId, streamEpoch: target.streamEpoch, generation: target.generation,
+    mediaTimeUs: target.mediaTimeUs, videoWidth: 960, videoHeight: 1280,
+    policyVersion: 'policy-v1', source: 'exact_frame_cache',
+  };
+  const draft: ReadyGroundedTeacherDraft = {
+    kind: 'ready', target: 'spine_center', reviewState: 'pending_nicole',
+    learnerVisible: false, parentVisible: false, evidence,
+    sections: {
+      what: 'what', whyConditional: 'why', goalConditional: 'goal',
+      practiceForTeacherReview: 'practice', metaphor: 'metaphor', technical: 'technical',
+      limitations: 'limitations', sourceRefs: ['source'],
+    },
+    guide: { kind: 'image_vertical', anchor: 'pelvis_center', label: 'Aplomb-Orientierung (2D) · Nicole prüft', reviewState: 'pending_nicole', evidence },
+  };
+
+  it('roundtrips an audited draft and blocks generic mutation, deletion and reset', () => {
+    installMemoryStorage();
+    const created = vaganovaPreAnalyzer.addGroundedTeacherDraft(target.sourceId, draft, target, 'Plié');
+    const audited = created[0];
+
+    expect(audited.reviewAudit?.origin.kind).toBe('grounded_ai_draft');
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)[0].reviewAudit).toEqual(audited.reviewAudit);
+    expect(() => vaganovaPreAnalyzer.updateCuePoint(target.sourceId, audited.id, { headline: 'forged' })).toThrow(/typed review/i);
+    expect(() => vaganovaPreAnalyzer.deleteCuePoint(target.sourceId, audited.id)).toThrow(/physically deleted/i);
+    expect(() => vaganovaPreAnalyzer.resetToDefaults(target.sourceId)).toThrow(/reset/i);
+    expect(() => vaganovaPreAnalyzer.saveCuePoints(target.sourceId, [])).toThrow(/remove/i);
+    expect(() => vaganovaPreAnalyzer.saveCuePoints(target.sourceId, [{ ...audited, timeSeconds: 99 }])).toThrow(/mutate/i);
+    expect(() => vaganovaPreAnalyzer.saveCuePoints(target.sourceId, [audited, audited])).toThrow(/unique/i);
+    expect(() => vaganovaPreAnalyzer.addGroundedTeacherDraft('other-video.mp4', draft, target, 'Plié')).toThrow(/exact video source/i);
+    const teacher = cue('plain', 'TEACHER_CREATED', 4);
+    vaganovaPreAnalyzer.saveCuePoints('plain.mp4', [teacher]);
+    expect(() => vaganovaPreAnalyzer.saveCuePoints('plain.mp4', [{ ...teacher, reviewAudit: audited.reviewAudit }])).toThrow(/cannot insert/i);
+    expect(() => vaganovaPreAnalyzer.updateCuePoint('plain.mp4', teacher.id, { reviewAudit: audited.reviewAudit } as never)).toThrow(/cannot insert reviewAudit/i);
+    expect(() => vaganovaPreAnalyzer.addCuePoint('plain.mp4', { ...teacher, reviewAudit: audited.reviewAudit } as never)).toThrow(/cannot insert reviewAudit/i);
+  });
+
+  it('persists approval and audiences but revokes both after a new teacher revision', () => {
+    installMemoryStorage();
+    const [created] = vaganovaPreAnalyzer.addGroundedTeacherDraft(target.sourceId, draft, target, 'Plié');
+    let points = vaganovaPreAnalyzer.transitionReviewedCue(target.sourceId, created.id, 'approve', cueReviewExpectedState(created.reviewAudit!));
+    points = vaganovaPreAnalyzer.setReviewedAudience(target.sourceId, created.id, 'learner', true, cueReviewExpectedState(points[0].reviewAudit!));
+    points = vaganovaPreAnalyzer.setReviewedAudience(target.sourceId, created.id, 'parent', true, cueReviewExpectedState(points[0].reviewAudit!));
+    expect(points[0]).toMatchObject({ learnerVisible: true, parentVisible: true });
+
+    const changed = vaganovaPreAnalyzer.reviseReviewedCue(target.sourceId, created.id, {
+      headline: 'Nicoles Revision 2',
+    }, cueReviewExpectedState(points[0].reviewAudit!));
+    expect(changed[0]).toMatchObject({ learnerVisible: false, parentVisible: false, headline: 'Nicoles Revision 2' });
+    expect(changed[0].reviewAudit?.revisions).toHaveLength(2);
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)[0]).toMatchObject({ learnerVisible: false, parentVisible: false });
+  });
+
+  it('keeps an audited review byte-identical through automatic replacement', () => {
+    const content = contentFromGroundedDraft(draft, target, 'Plié');
+    const reviewAudit = createGroundedCueReviewAudit({ draft, target, content });
+    const approval = approveCueReviewAudit(reviewAudit, cueReviewExpectedState(reviewAudit));
+    const learner = setCueReviewAudience(approval, 'learner', true, cueReviewExpectedState(approval));
+    const approved = setCueReviewAudience(learner, 'parent', true, cueReviewExpectedState(learner));
+    const reviewed: VaganovaCuePoint = {
+      ...cue('audit', 'TEACHER_CREATED', 1.5, 'nicole_confirmed'),
+      reviewAudit: approved, learnerVisible: true, parentVisible: true,
+    };
+    expect(replaceAutoCuePoints([reviewed], [cue('pending', 'KI_AUTO', 4)])).toEqual([reviewed, cue('pending', 'KI_AUTO', 4)]);
+  });
+
+  it('fails explicitly on storage write failure instead of showing a false success', () => {
+    const storage = installMemoryStorage();
+    vi.spyOn(storage, 'setItem').mockImplementation(() => { throw new Error('quota exceeded'); });
+    expect(() => vaganovaPreAnalyzer.addGroundedTeacherDraft(target.sourceId, draft, target, 'Plié'))
+      .toThrow(/storage write failed.*quota exceeded/i);
+  });
+
+  it('fails closed for malformed storage shapes', () => {
+    const storage = installMemoryStorage();
+    const key = `balletos_cuepoints_v2_${encodeURIComponent(target.sourceId)}`;
+    storage.setItem(key, JSON.stringify({ forged: true }));
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+    storage.setItem(key, JSON.stringify([{ id: 'bad', timeSeconds: 'not-a-number' }]));
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+  });
+
+  it('quarantines malformed nested audits without throwing', () => {
+    const storage = installMemoryStorage();
+    const key = `balletos_cuepoints_v2_${encodeURIComponent(target.sourceId)}`;
+    const created = vaganovaPreAnalyzer.addGroundedTeacherDraft(target.sourceId, draft, target, 'Plié');
+    const corrupted = JSON.parse(JSON.stringify(created));
+    corrupted[0].reviewAudit.events[0] = null;
+    storage.setItem(key, JSON.stringify(corrupted));
+    expect(() => vaganovaPreAnalyzer.getCuePoints(target.sourceId)).not.toThrow();
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+    expect(storage.getItem(`${key}_audit_quarantine`)).toContain(created[0].id);
+  });
+
+  it('quarantines malformed legacy text before migration in the same read', () => {
+    const storage = installMemoryStorage();
+    const key = `balletos_cuepoints_v2_${encodeURIComponent(target.sourceId)}`;
+    const malformed = { ...cue('legacy-malformed', 'KI_AUTO', 2, 'nicole_confirmed'), poseName: { bad: true } };
+    storage.setItem(key, JSON.stringify([malformed]));
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+    expect(storage.getItem(`${key}_audit_quarantine`)).toContain('legacy-malformed');
+    storage.setItem(key, JSON.stringify([{ ...cue('legacy-note', 'TEACHER_CREATED', 2), kiNote: { bad: true } }]));
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+    expect(storage.getItem(`${key}_audit_quarantine`)).toContain('legacy-note');
   });
 });

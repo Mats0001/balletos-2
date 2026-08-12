@@ -11,7 +11,7 @@ import { vaganovaPoseEngine } from '../services/vaganovaPoseEngine';
 import { vaganovaEvidenceEngine } from '../services/vaganovaEvidenceEngine';
 import { vaganovaMotionClassifier, MotionClassificationResult } from '../services/vaganovaMotionClassifier';
 import { vaganova3DKinematics, ReconstructedSkeleton } from '../services/vaganova3DKinematics';
-import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport, replaceAutoCuePoints, buildNeutralManualCueSuggestion, findAddedCuePoint } from '../services/vaganovaPreAnalyzer';
+import { vaganovaPreAnalyzer, VaganovaCuePoint, analyzeFrameCacheForHighlights, AutoAnalysisReport, replaceAutoCuePoints, buildNeutralManualCueSuggestion, cueReviewContentFromPoint, findAddedCuePoint } from '../services/vaganovaPreAnalyzer';
 import { vaganovaKineticAI } from '../services/vaganovaKineticAI';
 import { vaganovaCurriculumEngine, VaganovaCurriculumReport } from '../services/vaganovaCurriculumEngine';
 import { vaganovaFrameCache } from '../services/vaganovaFrameCache';
@@ -41,6 +41,8 @@ import {
   resolveSkeletonTargetAnchor,
 } from '../services/skeletonTargetRegistry';
 import type { SelectedSkeletonTarget, SkeletonTargetId } from '../types/skeletonTarget';
+import { cueReviewAuditIsValid, cueReviewExpectedState, projectCueReviewAudit } from '../services/cueReviewAudit';
+import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -1808,7 +1810,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const handleSaveEdit = (cueId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const existingCue = cuePoints.find(cue => cue.id === cueId);
-    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+    if (!existingCue) return;
+    const patch: CueReviewEditablePatch = {
       poseName: editForm.poseName,
       headline: editForm.headline,
       cueMetaphor: editForm.cueMetaphor,
@@ -1816,17 +1819,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       diagnosisText: editForm.diagnosisText || undefined,
       goalText: editForm.goalText || undefined,
       practiceText: editForm.practiceText || undefined,
-      provenance: existingCue?.provenance === 'ki_suggestion'
-        ? 'nicole_edited'
-        : existingCue?.provenance,
-    });
-    setCuePoints(updated);
-    setEditingCueId(null);
+    };
+    try {
+      const updated = existingCue.reviewAudit
+        ? vaganovaPreAnalyzer.reviseReviewedCue(selectedDevVideoUrl, cueId, patch, cueReviewExpectedState(existingCue.reviewAudit))
+        : vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+          ...patch,
+          provenance: existingCue.provenance === 'ki_suggestion' ? 'nicole_edited' : existingCue.provenance,
+        });
+      setCuePoints(updated);
+      setEditingCueId(null);
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Revision konnte nicht gespeichert werden.');
+    }
   };
 
   // TEACHER CRUD: Delete Cue-Point
   const handleDeleteCuePoint = (cueId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (cuePoints.some(cue => cue.id === cueId && cue.reviewAudit)) {
+      showAnalyseToast('Auditierte Nicole-Entwürfe bleiben als Revisionsspur erhalten.');
+      return;
+    }
     if (confirm('Diesen Messpunkt wirklich löschen?')) {
       const updated = vaganovaPreAnalyzer.deleteCuePoint(selectedDevVideoUrl, cueId);
       setCuePoints(updated);
@@ -2046,15 +2061,76 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   };
 
   // Inline-Edit für TEACHER_CREATED Cues: speichert ein einzelnes Feld on-blur
-  const handleInlineCueEdit = (cueId: string, field: Partial<VaganovaCuePoint>) => {
+  const handleInlineCueEdit = (cueId: string, field: CueReviewEditablePatch) => {
     const existingCue = cuePoints.find(cue => cue.id === cueId);
-    const updated = vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
-      ...field,
-      provenance: existingCue?.provenance === 'ki_suggestion'
-        ? 'nicole_edited'
-        : existingCue?.provenance,
-    });
+    if (!existingCue) return;
+    try {
+      const updated = existingCue.reviewAudit
+        ? vaganovaPreAnalyzer.reviseReviewedCue(selectedDevVideoUrl, cueId, field, cueReviewExpectedState(existingCue.reviewAudit))
+        : vaganovaPreAnalyzer.updateCuePoint(selectedDevVideoUrl, cueId, {
+          ...field,
+          provenance: existingCue.provenance === 'ki_suggestion' ? 'nicole_edited' : existingCue.provenance,
+        });
+      setCuePoints(updated);
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Revision konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleReviewedCueTransition = (cueId: string, transition: 'approve' | 'reject' | 'reopen') => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.transitionReviewedCue(
+        selectedDevVideoUrl, cueId, transition, cueReviewExpectedState(cue.reviewAudit),
+      ));
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Review konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleReviewedAudience = (cueId: string, audience: 'learner' | 'parent', visible: boolean) => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.setReviewedAudience(
+        selectedDevVideoUrl, cueId, audience, visible, cueReviewExpectedState(cue.reviewAudit),
+      ));
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Freigabe konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleTakeOverGroundedDraft = () => {
+    if (groundedTeacherDraft.kind !== 'ready' || !selectedSkeletonTarget) return false;
+    let updated: VaganovaCuePoint[];
+    try {
+      updated = vaganovaPreAnalyzer.addGroundedTeacherDraft(
+        selectedDevVideoUrl,
+        groundedTeacherDraft,
+        selectedSkeletonTarget,
+        motionClass.detectedPoseName,
+      );
+    } catch (error) {
+      showAnalyseToast(error instanceof Error ? error.message : 'Nicole-Entwurf konnte nicht gespeichert werden.');
+      return false;
+    }
     setCuePoints(updated);
+    const created = updated.find(cue => cue.reviewAudit?.origin.anchor.mediaTimeUs === groundedTeacherDraft.evidence.mediaTimeUs
+      && cue.reviewAudit.origin.anchor.targetId === selectedSkeletonTarget.targetId);
+    if (created) {
+      setExpandedCueIds(previous => new Set(previous).add(created.id));
+      setEditingCueId(created.id);
+      setEditForm({
+        poseName: created.poseName, headline: created.headline, cueMetaphor: created.cueMetaphor,
+        status: created.status, diagnosisText: created.diagnosisText ?? '', goalText: created.goalText ?? '',
+        practiceText: created.practiceText ?? '',
+      });
+    }
+    return Boolean(created);
   };
 
   const persistCueUpdate = (
@@ -3067,6 +3143,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   selectedTarget={target}
                   selectedTargetIdentity={selectedSkeletonTarget}
                   groundedTeacherDraft={groundedTeacherDraft}
+                  onAddToCueManager={groundedTeacherDraft.kind === 'ready'
+                    ? handleTakeOverGroundedDraft
+                    : undefined}
                   onClose={() => clearSkeletonSelection()}
                 />
               );
@@ -3856,6 +3935,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
             ) : cuePoints.map((cue) => {
               const isSelected = selectedFrameTime === cue.timecodeStr;
               const isEditing = editingCueId === cue.id;
+              const auditProjection = cue.reviewAudit && cueReviewAuditIsValid(cue.reviewAudit)
+                ? projectCueReviewAudit(cue.reviewAudit)
+                : null;
 
               if (isEditing) {
                 return (
@@ -3872,11 +3954,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 800, color: '#c084fc' }}>✏️ Marker bei {cue.timecodeStr} bearbeiten</span>
+                      <span style={{ fontSize: '10px', fontWeight: 800, color: '#c084fc' }}>
+                        {auditProjection ? `✏️ Nicole-Entwurf · Revision ${auditProjection.revisionNumber}` : `✏️ Marker bei ${cue.timecodeStr} bearbeiten`}
+                      </span>
                       <button onClick={() => setEditingCueId(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
                         <X size={12} />
                       </button>
                     </div>
+
+                    {auditProjection && (
+                      <div style={{ background: 'rgba(100,210,255,0.07)', border: '1px solid rgba(100,210,255,0.25)', borderRadius: '7px', padding: '7px 9px', fontSize: '8.5px', color: 'rgba(255,255,255,0.68)', lineHeight: 1.45 }}>
+                        {cue.reviewAudit?.origin.integrity === 'legacy_unverified'
+                          ? '⚠ Legacy-Import · ursprünglicher KI-Stand nicht vollständig verifizierbar.'
+                          : '🔒 KI-Snapshot lokal integritätsgeprüft · exakter Analyseframe.'} Änderungen erzeugen eine neue Nicole-Revision. Lernenden-/Elternfreigaben werden dabei automatisch widerrufen.
+                      </div>
+                    )}
 
                     <input
                       type="text"
@@ -3964,7 +4056,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                       onClick={(e) => handleSaveEdit(cue.id, e)}
                       style={{ background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)', color: '#fff', border: 'none', padding: '6px', borderRadius: '6px', fontSize: '10px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginTop: '4px' }}
                     >
-                      <Save size={12} /> Speichern
+                      <Save size={12} /> {auditProjection ? 'Als neue Nicole-Revision speichern' : 'Speichern'}
                     </button>
                   </div>
                 );
@@ -4035,6 +4127,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                             style={{ color: '#ffd60a', fontSize: '7px', fontWeight: 900, flexShrink: 0, border: '1px solid rgba(255,214,10,0.45)', borderRadius: '4px', padding: '1px 4px' }}
                           >DEMO · keine Messung</span>
                         )}
+                        {auditProjection && (
+                          <span title={cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'Legacy-Import – erneute Nicole-Prüfung erforderlich' : 'Lokal integritätsgeprüfter KI-Snapshot mit Lehrerrevisionen'} style={{ color: cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? '#ffd60a' : '#64d2ff', fontSize: '7px', fontWeight: 900, flexShrink: 0, border: `1px solid ${cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'rgba(255,214,10,0.4)' : 'rgba(100,210,255,0.4)'}`, borderRadius: '4px', padding: '1px 4px' }}>
+                            NICOLE · R{auditProjection.revisionNumber} · {cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'LEGACY UNVERIFIZIERT' : 'KI-SNAPSHOT ✓'}
+                          </span>
+                        )}
                       </span>
                     </div>
                     {/* Rechts: Status-Dot + Edit/Delete – eigener Klick-Bereich, kein Toggle */}
@@ -4057,8 +4154,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         style={{ background: 'transparent', border: 'none', color: '#c084fc', cursor: 'pointer', padding: '2px' }}>
                         <Edit2 size={11} />
                       </button>
-                      <button onClick={(e) => handleDeleteCuePoint(cue.id, e)} title="Löschen"
-                        style={{ background: 'transparent', border: 'none', color: '#ff453a', cursor: 'pointer', padding: '2px' }}>
+                      <button onClick={(e) => handleDeleteCuePoint(cue.id, e)} title={cue.reviewAudit ? 'Auditierte Revisionen können nicht gelöscht werden' : 'Löschen'} disabled={Boolean(cue.reviewAudit)}
+                        style={{ background: 'transparent', border: 'none', color: cue.reviewAudit ? 'rgba(255,255,255,0.18)' : '#ff453a', cursor: cue.reviewAudit ? 'not-allowed' : 'pointer', padding: '2px' }}>
                         <Trash2 size={11} />
                       </button>
                     </div>
@@ -4293,21 +4390,51 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     </div>
                   )}
 
+                  {auditProjection && (
+                    <div style={{ background: 'rgba(100,210,255,0.055)', border: '1px solid rgba(100,210,255,0.2)', borderRadius: '8px', padding: '7px 9px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      <div style={{ fontSize: '8px', color: '#64d2ff', fontWeight: 900, letterSpacing: '0.5px' }}>
+                        {cue.reviewAudit!.origin.integrity === 'legacy_unverified'
+                          ? `⚠ LEGACY-IMPORT · URSPRÜNGLICHER KI-STAND NICHT VOLLSTÄNDIG VERIFIZIERBAR · NICOLE-REVISION ${auditProjection.revisionNumber}`
+                          : `🔒 KI-SNAPSHOT LOKAL INTEGRITÄTSGEPRÜFT · NICOLE-REVISION ${auditProjection.revisionNumber}`}
+                      </div>
+                      <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.45)', lineHeight: 1.4 }}>
+                        Frame {(cue.reviewAudit!.origin.anchor.mediaTimeUs / 1_000_000).toFixed(3)}s · {cue.reviewAudit!.origin.policyVersion} · {cue.reviewAudit!.origin.integrity === 'legacy_unverified' ? 'Legacy-Ursprung unverifiziert; erneute Nicole-Prüfung erforderlich.' : 'KI-Original bleibt unverändert.'}
+                      </div>
+                      {auditProjection.provenance === 'nicole_rejected' ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '8px', color: '#ff453a', fontWeight: 800 }}>Von Nicole abgelehnt</span>
+                          <button onClick={(e) => { e.stopPropagation(); handleReviewedCueTransition(cue.id, 'reopen'); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.5)', padding: '3px 7px', borderRadius: '5px', fontSize: '8px', cursor: 'pointer' }}>↩ Neu prüfen</button>
+                        </div>
+                      ) : !auditProjection.isApproved ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '8px', color: '#ffd60a', fontWeight: 800 }}>Nicoles Entscheidung ausstehend</span>
+                          <button onClick={(e) => { e.stopPropagation(); handleReviewedCueTransition(cue.id, 'approve'); }} style={{ background: 'rgba(48,209,88,0.16)', border: '1px solid rgba(48,209,88,0.4)', color: '#30d158', padding: '3px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}>✓ Fachlich freigeben</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleReviewedCueTransition(cue.id, 'reject'); }} style={{ background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.25)', color: '#ff453a', padding: '3px 7px', borderRadius: '5px', fontSize: '8px', cursor: 'pointer' }}>✕ Ablehnen</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Diese Nicole-Revision ist fachlich freigegeben.</span>
+                          <button onClick={(e) => { e.stopPropagation(); handleReviewedCueTransition(cue.id, 'reopen'); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.5)', padding: '3px 7px', borderRadius: '5px', fontSize: '8px', cursor: 'pointer' }}>Freigabe widerrufen</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Freigabe nach Nicole-Bestätigung */}
-                  {(cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (
+                  {((cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (!auditProjection || auditProjection.isApproved)) && (
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Bestätigt</span>
-                      <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
+                      <button onClick={(e) => { e.stopPropagation(); auditProjection ? handleReviewedAudience(cue.id, 'learner', !cue.learnerVisible) : persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
                         style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
                       >{cue.learnerVisible ? '👁 Lernende: an' : '👁 Für Lernende'}</button>
-                      <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
+                      <button onClick={(e) => { e.stopPropagation(); auditProjection ? handleReviewedAudience(cue.id, 'parent', !cue.parentVisible) : persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
                         style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
                       >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : '👨‍👩‍👧 Für Eltern'}</button>
                     </div>
                   )}
 
                   {/* Abgelehnter Vorschlag – kollabiert, grau, zur Nachvollziehbarkeit */}
-                  {cue.provenance === 'nicole_rejected' && (
+                  {cue.provenance === 'nicole_rejected' && !auditProjection && (
                     <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>✕ Von Nicole abgelehnt</span>
                       <button onClick={(e) => { e.stopPropagation(); persistCueUpdate(cue.id, { provenance: 'ki_suggestion' }); }}
@@ -4341,8 +4468,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px' }}>
             <button
-              onClick={() => setCuePoints(vaganovaPreAnalyzer.resetToDefaults(selectedDevVideoUrl))}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-sub)', fontSize: '9px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+              onClick={cuePoints.some(cue => cue.reviewAudit) ? undefined : () => setCuePoints(vaganovaPreAnalyzer.resetToDefaults(selectedDevVideoUrl))}
+              disabled={cuePoints.some(cue => cue.reviewAudit)}
+              title={cuePoints.some(cue => cue.reviewAudit) ? 'Auditierte Nicole-Revisionen bleiben erhalten.' : undefined}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-sub)', fontSize: '9px', fontWeight: 600, cursor: cuePoints.some(cue => cue.reviewAudit) ? 'not-allowed' : 'pointer', opacity: cuePoints.some(cue => cue.reviewAudit) ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: '4px' }}
             >
               <RotateCcw size={10} /> KI-Standwerte zurücksetzen
             </button>
