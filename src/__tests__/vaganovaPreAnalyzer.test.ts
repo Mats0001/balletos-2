@@ -233,7 +233,7 @@ describe('audited cue persistence guard', () => {
     frameStatus: 'exact_cache_frame',
   };
   const evidence: ReadyGroundedTeacherDraft['evidence'] = {
-    metricId: 'spine_tilt_aplomb', valueDeg: 3.1, confidence: 0.9,
+    metricId: 'spine_tilt_aplomb', valueDeg: 3.1, confidence: 0.9, landmarkVisibility: 0.95,
     measurementClass: 'vaganova_relation', heuristicState: 'heuristic_attention',
     sourceId: target.sourceId, streamEpoch: target.streamEpoch, generation: target.generation,
     mediaTimeUs: target.mediaTimeUs, videoWidth: 960, videoHeight: 1280,

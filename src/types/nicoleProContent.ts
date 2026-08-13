@@ -88,10 +88,17 @@ export interface NicoleProEvidencePacketV1 {
   metricId: string;
   definitionVersion: string;
   measurementStatus: NicoleProMeasurementStatus;
+  /** Confidence supplied by the metric implementation; not visibility or validation status. */
+  metricInputConfidence: number | null;
   value: number | null;
   unit: NicoleProMetricUnit;
   uncertainty: NicoleProMeasurementUncertainty;
   captureQuality: 'ready' | 'usable_with_caution' | 'needs_correction';
+  /** Existing teacher-policy result, kept separate from metric and landmark quality. */
+  teacherSignal: Readonly<{
+    state: 'match' | 'attention' | 'strong_attention';
+    certainty: 'supported' | 'uncertain' | 'weak_evidence';
+  }>;
   landmarkQuality: Readonly<NicoleProLandmarkQualityV1>;
   temporalRepeatability: Readonly<{
     status: 'stable' | 'variable' | 'not_assessed';
@@ -134,6 +141,8 @@ export interface NicoleProKnowledgeStatementV1 {
     frameAuthorities: readonly NicoleProEvidencePacketV1['frameAuthority'][];
     measurementStatuses: readonly NicoleProMeasurementStatus[];
     captureQualities: readonly NicoleProEvidencePacketV1['captureQuality'][];
+    teacherSignalStates: readonly NicoleProEvidencePacketV1['teacherSignal']['state'][];
+    teacherSignalCertainties: readonly NicoleProEvidencePacketV1['teacherSignal']['certainty'][];
     minimumPhaseConfidence: number;
     minimumLandmarkScore: number;
     valuePredicate: Readonly<{

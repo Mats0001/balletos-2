@@ -19,7 +19,10 @@ export type GroundedTeacherDraftBlockReason =
 export interface GroundedTeacherEvidence {
   metricId: GroundedMetricAdapterId;
   valueDeg: number;
+  /** Confidence of the metric calculation; not landmark visibility. */
   confidence: number;
+  /** Pose-packet average landmark visibility kept as a separate source fact. */
+  landmarkVisibility: number;
   measurementClass: 'vaganova_relation';
   heuristicState: Exclude<TeacherHeuristicState, 'blocked'>;
   sourceId: string;

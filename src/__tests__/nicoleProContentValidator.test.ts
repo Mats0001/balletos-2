@@ -19,9 +19,9 @@ const evidence: NicoleProEvidencePacketV1 = {
   analysisContextGeneration: 3,
   sourceId: '/clip.mp4',
   exerciseId: 'plie',
-  phaseId: 'bottom',
-  phaseLabel: 'Tiefster Punkt',
-  phaseConfidence: 0.9,
+  phaseId: 'paused_exact_frame',
+  phaseLabel: 'Pausierter Analyseframe',
+  phaseConfidence: 1,
   cycleIndex: 0,
   mediaTimeUs: 2_500_000,
   frameAuthority: 'exact_cache_frame',
@@ -32,10 +32,12 @@ const evidence: NicoleProEvidencePacketV1 = {
   metricId: 'shoulder_horizontal',
   definitionVersion: 'shoulder-horizontal-image-v1',
   measurementStatus: 'experimental',
+  metricInputConfidence: 0.91,
   value: 4.2,
   unit: 'deg',
   uncertainty: { kind: 'not_characterized' },
   captureQuality: 'ready',
+  teacherSignal: { state: 'attention', certainty: 'supported' },
   landmarkQuality: {
     status: 'measured',
     score: 0.94,
@@ -94,7 +96,11 @@ function claim(
   const needsEvidence = type !== 'clinical_claim';
   const needsKnowledge = type !== 'clinical_claim';
   const statement = knowledge.statements.find(item => item.claimType === type);
-  const projectedText = statement?.textTemplate.replace('{value}', '4,2°') ?? text;
+  const projectedText = statement?.textTemplate
+    .split('{value}').join('4,2°')
+    .split('{phaseLabel}').join(evidence.phaseLabel)
+    .split('{side}').join(evidence.side)
+    .split('{view}').join(evidence.view) ?? text;
   return {
     schemaVersion: 1,
     claimId,
@@ -107,7 +113,7 @@ function claim(
     polarity: statement?.polarity ?? 'neutral',
     evidenceIds: needsEvidence ? [evidence.evidenceId] : [],
     knowledgeRuleIds: needsKnowledge ? [knowledge.ruleId] : [],
-    conceptIds: needsKnowledge ? ['shoulder_line_continuity', 'teacher_review_action'] : [],
+    conceptIds: statement ? [...new Set([statement.subjectConceptId, statement.objectConceptId])] : [],
     numericEvidenceRefs: [],
     relatedClaimIds: [],
     hypothesisPriority: type === 'teacher_hypothesis' ? 1 : null,
@@ -186,6 +192,29 @@ describe('Nicole-Pro content contract V1', () => {
       authorityFor([limited]),
       context,
     ).valid).toBe(true);
+  });
+
+  it('rejects a solid supported signal when the metric input confidence requires uncertainty', () => {
+    const inconsistent: NicoleProEvidencePacketV1 = {
+      ...evidence,
+      metricInputConfidence: 0.2,
+      teacherSignal: { state: 'attention', certainty: 'supported' },
+    };
+    expect(createNicoleProValidationAuthority({
+      currentContext: context,
+      assessment: {
+        schemaVersion: 1,
+        contextFingerprint: context.fingerprint,
+        contextGeneration: context.generation,
+        value: {
+          analysisArtifactId: evidence.analysisArtifactId,
+          sourceId: evidence.sourceId,
+          exerciseId: evidence.exerciseId,
+          policyVersion: evidence.policyVersion,
+          evidence: [inconsistent],
+        },
+      },
+    })).toBeNull();
   });
 
   it('requires the product-supplied validation authority', () => {
@@ -342,6 +371,7 @@ describe('Nicole-Pro content contract V1', () => {
     const blocked: NicoleProEvidencePacketV1 = {
       ...evidence,
       measurementStatus: 'not_measurable',
+      metricInputConfidence: null,
       value: null,
       unit: 'qualitative',
       captureQuality: 'needs_correction',

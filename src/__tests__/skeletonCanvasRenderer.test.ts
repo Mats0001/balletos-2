@@ -466,6 +466,7 @@ describe('trusted skeleton color contract', () => {
         metricId: 'shoulder_horizontal',
         valueDeg: 7.5,
         confidence: 0.92,
+        landmarkVisibility: 0.95,
         measurementClass: 'vaganova_relation',
         heuristicState: 'heuristic_attention',
         sourceId: 'clip-a',

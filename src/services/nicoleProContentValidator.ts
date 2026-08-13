@@ -23,57 +23,181 @@ import {
 
 export const NICOLE_PRO_VALIDATOR_VERSION = 'nicole-pro-validator-v1' as const;
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID = 'balletos-nicole-pro-knowledge' as const;
-export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.0.0' as const;
+export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.1.0' as const;
 
-const SHOULDER_EVIDENCE_CONSTRAINT: NicoleProKnowledgeStatementV1['evidenceConstraint'] = Object.freeze({
-  exerciseIds: Object.freeze(['plie'] as const),
-  phaseIds: Object.freeze(['bottom'] as const),
-  sides: Object.freeze(['bilateral'] as const),
-  views: Object.freeze(['frontal'] as const),
-  metrics: Object.freeze([Object.freeze({
+interface GroundedRuleProfile {
+  key: string;
+  ruleId: string;
+  metricId: string;
+  definitionVersion: string;
+  side: NicoleProEvidencePacketV1['side'];
+  subjectConceptId: string;
+  finding: string;
+  metric: string;
+  interpretation: string;
+  hypotheses: readonly Readonly<{ key: string; conceptId: string; text: string; test: string }>[];
+  target: string;
+  cue: string;
+  practice: string;
+  success: string;
+  metaphor: string;
+  limitation: string;
+}
+
+const PERMITTED_TEACHER_CLAIMS = Object.freeze([
+  'visual_observation', 'metric_observation', 'biomechanical_interpretation',
+  'teacher_hypothesis', 'differentiation_test', 'teaching_target',
+  'immediate_cue', 'practice', 'success_criterion', 'metaphor', 'technical_limitation',
+] as const);
+
+function createGroundedKnowledgeRule(profile: GroundedRuleProfile): NicoleProKnowledgeRuleV1 {
+  const constraint: NicoleProKnowledgeStatementV1['evidenceConstraint'] = {
+    exerciseIds: ['plie'],
+    phaseIds: ['paused_exact_frame'],
+    sides: [profile.side],
+    views: ['frontal'],
+    metrics: [{ metricId: profile.metricId, definitionVersion: profile.definitionVersion }],
+    frameAuthorities: ['exact_cache_frame'],
+    measurementStatuses: ['experimental', 'limited'],
+    captureQualities: ['ready', 'usable_with_caution'],
+    teacherSignalStates: ['attention', 'strong_attention'],
+    teacherSignalCertainties: ['supported', 'uncertain', 'weak_evidence'],
+    minimumPhaseConfidence: 1,
+    minimumLandmarkScore: 0.3,
+    valuePredicate: { kind: 'absolute_greater_than', threshold: 0, unit: 'deg' },
+  };
+  const statement = (
+    suffix: string,
+    claimType: Exclude<NicoleProClaimType, 'clinical_claim'>,
+    relation: NicoleProKnowledgeStatementV1['relation'],
+    modality: NicoleProKnowledgeStatementV1['modality'],
+    objectConceptId: string,
+    textTemplate: string,
+    relatedStatementIds: readonly string[] = [],
+  ): NicoleProKnowledgeStatementV1 => ({
+    statementId: `${profile.key}:${suffix}`,
+    claimType,
+    subjectConceptId: profile.subjectConceptId,
+    relation,
+    objectConceptId,
+    modality,
+    polarity: 'neutral',
+    relatedStatementIds,
+    evidenceConstraint: constraint,
+    textTemplate,
+  });
+  const hypotheses = profile.hypotheses.map((hypothesis) => statement(
+    `hypothesis:${hypothesis.key}`, 'teacher_hypothesis', 'may_be_consistent_with',
+    'possible', hypothesis.conceptId, hypothesis.text,
+  ));
+  const tests = profile.hypotheses.map((hypothesis) => statement(
+    `test:${hypothesis.key}`, 'differentiation_test', 'test_by', 'instruction',
+    hypothesis.conceptId, hypothesis.test, [`${profile.key}:hypothesis:${hypothesis.key}`],
+  ));
+  return {
+    schemaVersion: 1,
+    ruleId: profile.ruleId,
+    version: '1.0.0',
+    status: 'curated_internal',
+    permittedClaimTypes: PERMITTED_TEACHER_CLAIMS,
+    conceptIds: [
+      profile.subjectConceptId,
+      'teacher_review_action',
+      ...profile.hypotheses.map(item => item.conceptId),
+    ],
+    sourceRefs: [`BalletOS Nicole-Pro knowledge review queue: ${profile.key}`],
+    requiresNicoleCalibration: true,
+    requiresExternalValidation: false,
+    statements: [
+      statement('finding', 'visual_observation', 'observed_as', 'direct_observation', 'teacher_review_action', profile.finding),
+      statement('metric', 'metric_observation', 'observed_as', 'direct_observation', 'teacher_review_action', profile.metric),
+      statement('interpretation', 'biomechanical_interpretation', 'may_influence', 'conditional', 'teacher_review_action', profile.interpretation),
+      ...hypotheses,
+      ...tests,
+      statement('target', 'teaching_target', 'target_is', 'instruction', 'teacher_review_action', profile.target),
+      statement('cue', 'immediate_cue', 'cue_with', 'instruction', 'teacher_review_action', profile.cue),
+      statement('practice', 'practice', 'practice_with', 'instruction', 'teacher_review_action', profile.practice),
+      statement('success', 'success_criterion', 'success_when', 'instruction', 'teacher_review_action', profile.success),
+      statement('metaphor', 'metaphor', 'imagine_as', 'instruction', 'teacher_review_action', profile.metaphor),
+      statement('limits', 'technical_limitation', 'limited_by', 'technical_boundary', 'teacher_review_action', profile.limitation),
+    ],
+  };
+}
+
+const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
+  {
+    key: 'shoulder-line',
+    ruleId: 'knowledge:shoulder-line:teacher-v1',
     metricId: 'shoulder_horizontal',
     definitionVersion: 'shoulder-horizontal-image-v1',
-  })]),
-  frameAuthorities: Object.freeze(['exact_cache_frame'] as const),
-  measurementStatuses: Object.freeze(['validated', 'experimental', 'limited'] as const),
-  captureQualities: Object.freeze(['ready', 'usable_with_caution'] as const),
-  minimumPhaseConfidence: 0.5,
-  minimumLandmarkScore: 0.3,
-  valuePredicate: Object.freeze({ kind: 'absolute_greater_than', threshold: 0, unit: 'deg' }),
-});
+    side: 'bilateral',
+    subjectConceptId: 'shoulder_line_continuity',
+    finding: 'Im {phaseLabel} ist die projizierte Schulterlinie gegenüber der Bildhorizontalen sichtbar geneigt.',
+    metric: 'Die projizierte Schulterlinie weicht in diesem Bild um {value} von der Bildhorizontalen ab.',
+    interpretation: 'Falls Nicole in dieser Phase eine ruhig organisierte Schulterlinie erwartet, kann die sichtbare Neigung die Verbindung von Schultergürtel, Rumpf und Armführung unterbrechen.',
+    hypotheses: [
+      { key: 'arm-timing', conceptId: 'shoulder_arm_timing', text: 'Das Muster kann mit dem Timing von Schultergürtel und Armführung vereinbar sein.', test: 'Nicole wiederholt die Passage langsamer und lässt den Ellbogen führen, während der Schultergürtel breit und ruhig bleibt; stabilisiert sich die Linie, prüft sie eine Koordinationsaufgabe zwischen Armführung und Schultergürtel.' },
+      { key: 'epaulement', conceptId: 'intentional_epaulement', text: 'Ein beabsichtigtes Épaulement oder eine Körperrotation kann die sichtbare Schulterlinie verändern.', test: 'Nicole vergleicht denselben Moment frontal und leicht seitlich; bleibt die Linie nur in einer Ansicht geneigt, prüft sie zuerst Perspektive und beabsichtigtes Épaulement.' },
+      { key: 'weight-transfer', conceptId: 'upper_body_weight_transfer', text: 'Eine Gewichtsverlagerung über Becken und Rumpf kann sich bis in die Schulterlinie fortsetzen.', test: 'Nicole lässt die Bewegung mit kleinerer Tiefe wiederholen und beobachtet Becken-, Rumpf- und Schulterlinie gemeinsam; stabilisieren sie sich zusammen, wird die ganze Kette weiter geprüft.' },
+    ],
+    target: 'Ziel ist eine zur Phase passende, ruhig getragene Schulterlinie, die das Épaulement unterstützt statt zufällig zu kippen.',
+    cue: 'Schlüsselbeine breit – der Ellbogen führt, die Schulter folgt ruhig.',
+    practice: 'Die Passage langsam bis zum markierten Frame wiederholen, nur eine Hypothese verändern und die Schulterlinie im direkten Vorher-nachher-Vergleich prüfen.',
+    success: 'Erfolg ist sichtbar, wenn die Schulterlinie bei gleicher Phase und Ansicht wiederholbar ruhiger wird, ohne die beabsichtigte Armform zu verlieren.',
+    metaphor: 'Die Schlüsselbeine tragen ein breites Tablett: offen und ruhig, während die Arme frei darum herum tanzen.',
+    limitation: 'Die frontale Bildprojektion trennt beabsichtigtes Épaulement, Körperrotation und Kameraperspektive nicht sicher; sie bestimmt keine Muskel- oder Gelenkursache.',
+  },
+  {
+    key: 'spine-aplomb',
+    ruleId: 'knowledge:spine-aplomb:teacher-v1',
+    metricId: 'spine_tilt_aplomb',
+    definitionVersion: 'spine-center-image-vertical-v1',
+    side: 'center',
+    subjectConceptId: 'projected_spine_aplomb',
+    finding: 'Im {phaseLabel} ist die projizierte Rumpfachse gegenüber der Bildvertikalen sichtbar geneigt.',
+    metric: 'Die projizierte Rumpfachse weicht in diesem Bild um {value} von der Bildvertikalen ab.',
+    interpretation: 'Falls Nicole in dieser Phase Aplomb erwartet, kann die sichtbare Neigung die Stapelung von Becken, Rumpf und Schultergürtel verändern.',
+    hypotheses: [
+      { key: 'intentional-line', conceptId: 'intentional_torso_inclination', text: 'Die Neigung kann zur gewählten Phase oder zu einem beabsichtigten Épaulement gehören.', test: 'Nicole markiert den Bewegungsmoment und prüft, ob dieselbe Rumpflinie bei korrekter Aufgabe ausdrücklich gewünscht ist.' },
+      { key: 'weight-transfer', conceptId: 'torso_weight_transfer_timing', text: 'Das Muster kann mit dem Timing der Gewichtsverlagerung vereinbar sein.', test: 'Nicole lässt die Passage kleiner und langsamer wiederholen; richtet sich die Rumpfachse bei gleicher Fußaufgabe früher auf, prüft sie das Timing der Gewichtsübernahme.' },
+      { key: 'camera-view', conceptId: 'torso_camera_projection', text: 'Eine schräge Kamera oder Körperrotation kann eine scheinbare Rumpfneigung erzeugen.', test: 'Nicole kontrolliert Kamerahorizont und Frontansicht und vergleicht einen zweiten Versuch aus identischer Position.' },
+    ],
+    target: 'Ziel ist eine zur Phase passende Rumpfachse, bei der Schultermitte und Beckenmitte kontrolliert miteinander organisiert bleiben.',
+    cue: 'Scheitel lang, Brustbein über der Beckenmitte – getragen, nicht starr.',
+    practice: 'Die Passage in kleinerem Bewegungsumfang wiederholen, am markierten Moment kurz halten und Rumpfachse sowie Gewichtsverlagerung gemeinsam vergleichen.',
+    success: 'Erfolg ist sichtbar, wenn die Rumpfachse bei gleicher Phase und Ansicht wiederholbar näher an Nicoles gewünschter Linie bleibt.',
+    metaphor: 'Ein goldener Faden führt durch die Körperblöcke: lang gestapelt wie ruhige Bausteine, ohne festzufrieren.',
+    limitation: 'Die Bildlinie ist eine zweidimensionale Projektion und keine dreidimensionale Wirbelsäulenmessung; Ursache, Kraft und Gewebebelastung sind daraus nicht bestimmbar.',
+  },
+  {
+    key: 'pelvis-line',
+    ruleId: 'knowledge:pelvis-line:teacher-v1',
+    metricId: 'projected_hip_line_obliquity',
+    definitionVersion: 'pelvis-line-image-v1',
+    side: 'bilateral',
+    subjectConceptId: 'projected_pelvis_line',
+    finding: 'Im {phaseLabel} ist die projizierte Beckenlinie zwischen den sichtbaren Hüftpunkten gegenüber der Bildhorizontalen geneigt.',
+    metric: 'Die projizierte Beckenlinie weicht in diesem Bild um {value} von der Bildhorizontalen ab.',
+    interpretation: 'Falls Nicole in dieser Phase ein ruhig organisiertes Becken erwartet, kann die sichtbare Neigung die darüber aufgebauten Rumpf- und Beinlinien verändern.',
+    hypotheses: [
+      { key: 'weight-shift', conceptId: 'pelvis_weight_shift', text: 'Das Muster kann mit einer seitlichen Gewichtsverlagerung vereinbar sein.', test: 'Nicole lässt die Passage mit kleinerer Tiefe wiederholen und prüft, ob stützende Basis und Beckenlinie gleichzeitig ruhiger werden.' },
+      { key: 'torso-compensation', conceptId: 'pelvis_torso_coordination', text: 'Eine Veränderung der Rumpforganisation kann sich gemeinsam mit der sichtbaren Beckenlinie zeigen.', test: 'Nicole gibt nur einen Rumpf-Cue und beobachtet, ob sich Becken- und Rumpfachse gemeinsam verändern; erst dann entscheidet sie über die nächste Korrektur.' },
+      { key: 'camera-view', conceptId: 'pelvis_camera_projection', text: 'Körperrotation, Bewegungstiefe oder Kameraperspektive können die projizierte Beckenlinie verändern.', test: 'Nicole prüft Frontansicht, Bewegungstiefe und einen zweiten Versuch aus identischer Kameraposition, bevor sie die Linie fachlich bewertet.' },
+    ],
+    target: 'Ziel ist eine zur Aufgabe passende Beckenorganisation, die stützende Basis, beide Beine und Rumpf klar miteinander verbindet.',
+    cue: 'Trag die Beckenschale ruhig über der stützenden Basis – beweglich, aber nicht auslaufend.',
+    practice: 'Die Passage langsam und kleiner wiederholen, sichtbare Fußorganisation und Beckenlinie am markierten Frame gemeinsam prüfen und nur eine Variable verändern.',
+    success: 'Erfolg ist sichtbar, wenn die Beckenlinie bei gleicher Phase und Ansicht wiederholbar ruhiger wird und der Bewegungsweg kontrolliert bleibt.',
+    metaphor: 'Das Becken ist eine gefüllte Schale: Du trägst sie ruhig durch die Bewegung, ohne sie starr festzuhalten.',
+    limitation: 'Die Verbindung sichtbarer Hüftpunkte ist keine anatomische dreidimensionale Beckenmessung; Perspektive, Rotation und Bewegungsphase müssen von Nicole geprüft werden.',
+  },
+];
 
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1: NicoleProTrustedKnowledgeRegistryV1 = cloneAndDeepFreeze({
   schemaVersion: 1,
   registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
   registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
-  rules: Object.freeze([Object.freeze({
-    schemaVersion: 1,
-    ruleId: 'knowledge:shoulder-line:teacher-v1',
-    version: '1.0.0',
-    status: 'curated_internal',
-    permittedClaimTypes: Object.freeze([
-      'visual_observation', 'metric_observation', 'biomechanical_interpretation',
-      'teacher_hypothesis', 'differentiation_test', 'teaching_target',
-      'immediate_cue', 'practice', 'success_criterion', 'metaphor', 'technical_limitation',
-    ] as const),
-    conceptIds: Object.freeze(['shoulder_line_continuity', 'teacher_review_action']),
-    sourceRefs: Object.freeze(['BalletOS Nicole-Pro knowledge review queue: shoulder line']),
-    requiresNicoleCalibration: true,
-    requiresExternalValidation: false,
-    statements: Object.freeze([
-      { statementId: 'statement:finding', claimType: 'visual_observation', subjectConceptId: 'shoulder_line_continuity', relation: 'observed_as', objectConceptId: 'teacher_review_action', modality: 'direct_observation', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Die sichtbare Schulterlinie verändert sich am tiefsten Phasenpunkt.' },
-      { statementId: 'statement:metric', claimType: 'metric_observation', subjectConceptId: 'shoulder_line_continuity', relation: 'observed_as', objectConceptId: 'teacher_review_action', modality: 'direct_observation', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Die projizierte Schulterlinie weicht im Bild um {value} ab.' },
-      { statementId: 'statement:interpretation', claimType: 'biomechanical_interpretation', subjectConceptId: 'shoulder_line_continuity', relation: 'may_influence', objectConceptId: 'teacher_review_action', modality: 'conditional', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Das kann die sichtbare Organisation von Schultergürtel und Armführung beeinflussen.' },
-      { statementId: 'statement:hypothesis', claimType: 'teacher_hypothesis', subjectConceptId: 'shoulder_line_continuity', relation: 'may_be_consistent_with', objectConceptId: 'teacher_review_action', modality: 'possible', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Eine mögliche Erklärung ist das Timing der Arm- und Schulterorganisation.' },
-      { statementId: 'statement:test', claimType: 'differentiation_test', subjectConceptId: 'shoulder_line_continuity', relation: 'test_by', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze(['statement:hypothesis']), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Nicole verändert im nächsten Versuch nur die Armhöhe und vergleicht die Schulterlinie.' },
-      { statementId: 'statement:target', claimType: 'teaching_target', subjectConceptId: 'shoulder_line_continuity', relation: 'target_is', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Die Schulterlinie soll zur gewählten Phase und zum Épaulement klar organisiert bleiben.' },
-      { statementId: 'statement:cue', claimType: 'immediate_cue', subjectConceptId: 'shoulder_line_continuity', relation: 'cue_with', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Schlüsselbeine breit, Ellbogen führt.' },
-      { statementId: 'statement:practice', claimType: 'practice', subjectConceptId: 'shoulder_line_continuity', relation: 'practice_with', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Den Übergang langsam wiederholen und nur eine sichtbare Variable verändern.' },
-      { statementId: 'statement:success', claimType: 'success_criterion', subjectConceptId: 'shoulder_line_continuity', relation: 'success_when', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Erfolg ist eine wiederholbar ruhigere Schulterlinie bei gleicher Aufgabe.' },
-      { statementId: 'statement:metaphor', claimType: 'metaphor', subjectConceptId: 'shoulder_line_continuity', relation: 'imagine_as', objectConceptId: 'teacher_review_action', modality: 'instruction', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Die Schlüsselbeine tragen ein breites, ruhiges Tablett.' },
-      { statementId: 'statement:limits', claimType: 'technical_limitation', subjectConceptId: 'shoulder_line_continuity', relation: 'limited_by', objectConceptId: 'teacher_review_action', modality: 'technical_boundary', polarity: 'neutral', relatedStatementIds: Object.freeze([]), evidenceConstraint: SHOULDER_EVIDENCE_CONSTRAINT, textTemplate: 'Die Bildprojektion bestimmt keine individuelle Ursache.' },
-    ] as const),
-  })]),
+  rules: GROUNDED_RULE_PROFILES.map(createGroundedKnowledgeRule),
 });
 
 declare const trustedAuthorityBrand: unique symbol;
@@ -249,8 +373,8 @@ function validateEvidence(
     'schemaVersion', 'evidenceId', 'analysisArtifactId', 'analysisContextFingerprint',
     'analysisContextGeneration', 'sourceId', 'exerciseId', 'phaseId', 'phaseLabel',
     'phaseConfidence', 'cycleIndex', 'mediaTimeUs', 'frameAuthority', 'side', 'view',
-    'videoWidth', 'videoHeight', 'metricId', 'definitionVersion', 'measurementStatus',
-    'value', 'unit', 'uncertainty', 'captureQuality', 'landmarkQuality',
+    'videoWidth', 'videoHeight', 'metricId', 'definitionVersion', 'measurementStatus', 'metricInputConfidence',
+    'value', 'unit', 'uncertainty', 'captureQuality', 'teacherSignal', 'landmarkQuality',
     'temporalRepeatability', 'policyVersion', 'evidenceSource',
   ])) {
     issue(issues, 'invalid_evidence', path, 'Evidence contains unknown fields.');
@@ -281,6 +405,13 @@ function validateEvidence(
   }
   const numericMeasurement = ['validated', 'experimental', 'limited'].includes(evidence.measurementStatus);
   if (numericMeasurement) {
+    if (!finiteUnitInterval(evidence.metricInputConfidence) || evidence.metricInputConfidence <= 0) {
+      issue(issues, 'invalid_evidence', `${path}.metricInputConfidence`, 'Numeric metric evidence requires its own finite input confidence.');
+    }
+  } else if (evidence.metricInputConfidence !== null) {
+    issue(issues, 'invalid_evidence', `${path}.metricInputConfidence`, 'Qualitative/not-measurable evidence must not carry metric input confidence.');
+  }
+  if (numericMeasurement) {
     if (typeof evidence.value !== 'number' || !Number.isFinite(evidence.value) || !NUMERIC_UNITS.has(evidence.unit)) {
       issue(issues, 'invalid_evidence', path, 'Numeric metric status requires a finite value and numeric unit.');
     }
@@ -305,6 +436,17 @@ function validateEvidence(
   }
   if (evidence.captureQuality === 'needs_correction' && evidence.measurementStatus !== 'not_measurable') {
     issue(issues, 'invalid_evidence', `${path}.captureQuality`, 'A blocked recording cannot support a movement measurement.');
+  }
+  if (!isObject(evidence.teacherSignal)
+    || !hasOnlyKeys(evidence.teacherSignal, ['state', 'certainty'])
+    || !['match', 'attention', 'strong_attention'].includes(String(evidence.teacherSignal.state))
+    || !['supported', 'uncertain', 'weak_evidence'].includes(String(evidence.teacherSignal.certainty))) {
+    issue(issues, 'invalid_evidence', `${path}.teacherSignal`, 'Teacher signal must remain separate and explicit.');
+  } else if (numericMeasurement
+    && typeof evidence.metricInputConfidence === 'number'
+    && evidence.metricInputConfidence < 0.35
+    && evidence.teacherSignal.certainty === 'supported') {
+    issue(issues, 'invalid_evidence', `${path}.teacherSignal`, 'Low metric input confidence cannot claim supported teacher evidence.');
   }
   if (!isObject(evidence.temporalRepeatability)
     || !hasOnlyKeys(evidence.temporalRepeatability, ['status', 'comparableCycleCount'])
@@ -352,7 +494,7 @@ function validateStatement(
     || !hasOnlyKeys(evidenceConstraint, [
       'exerciseIds', 'phaseIds', 'sides', 'views', 'metrics', 'frameAuthorities',
       'measurementStatuses', 'captureQualities', 'minimumPhaseConfidence',
-      'minimumLandmarkScore', 'valuePredicate',
+      'teacherSignalStates', 'teacherSignalCertainties', 'minimumLandmarkScore', 'valuePredicate',
     ])
     || !Array.isArray(evidenceConstraint.exerciseIds) || evidenceConstraint.exerciseIds.length === 0
     || evidenceConstraint.exerciseIds.some(item => !EXERCISE_IDS.has(String(item)))
@@ -368,6 +510,10 @@ function validateStatement(
     || evidenceConstraint.measurementStatuses.some(item => !['validated', 'experimental', 'limited', 'qualitative_only', 'not_measurable'].includes(String(item)))
     || !Array.isArray(evidenceConstraint.captureQualities) || evidenceConstraint.captureQualities.length === 0
     || evidenceConstraint.captureQualities.some(item => !['ready', 'usable_with_caution', 'needs_correction'].includes(String(item)))
+    || !Array.isArray(evidenceConstraint.teacherSignalStates) || evidenceConstraint.teacherSignalStates.length === 0
+    || evidenceConstraint.teacherSignalStates.some(item => !['match', 'attention', 'strong_attention'].includes(String(item)))
+    || !Array.isArray(evidenceConstraint.teacherSignalCertainties) || evidenceConstraint.teacherSignalCertainties.length === 0
+    || evidenceConstraint.teacherSignalCertainties.some(item => !['supported', 'uncertain', 'weak_evidence'].includes(String(item)))
     || !finiteUnitInterval(evidenceConstraint.minimumPhaseConfidence)
     || !finiteUnitInterval(evidenceConstraint.minimumLandmarkScore)
     || !isObject(evidenceConstraint.valuePredicate)
@@ -434,18 +580,27 @@ function validateKnowledgeRule(
   return true;
 }
 
-function displayValue(evidence: NicoleProEvidencePacketV1): string | null {
+const DISPLAY_DECIMALS_BY_DEFINITION = new Map<string, number>([
+  ['shoulder_horizontal:shoulder-horizontal-image-v1:deg', 1],
+  ['spine_tilt_aplomb:spine-center-image-vertical-v1:deg', 1],
+  ['projected_hip_line_obliquity:pelvis-line-image-v1:deg', 1],
+]);
+
+/** Definition-bound display precision. Raw experimental values never leak as pseudo-precision. */
+export function formatNicoleProEvidenceValue(evidence: NicoleProEvidencePacketV1): string | null {
   if (typeof evidence.value !== 'number') return null;
-  const normalized = Number.isInteger(evidence.value)
-    ? String(evidence.value)
-    : String(evidence.value).replace('.', ',');
+  const decimals = DISPLAY_DECIMALS_BY_DEFINITION.get(
+    `${evidence.metricId}:${evidence.definitionVersion}:${evidence.unit}`,
+  );
+  if (decimals === undefined) return null;
+  const normalized = evidence.value.toFixed(decimals).replace('.', ',');
   if (evidence.unit === 'deg') return `${normalized}°`;
   if (evidence.unit === 'percent') return `${normalized}%`;
   return normalized;
 }
 
 function renderStatement(statement: NicoleProKnowledgeStatementV1, evidence: NicoleProEvidencePacketV1): string | null {
-  const value = displayValue(evidence);
+  const value = formatNicoleProEvidenceValue(evidence);
   if (statement.textTemplate.includes('{value}') && value === null) return null;
   return statement.textTemplate
     .split('{value}').join(value ?? '')
@@ -469,6 +624,8 @@ function evidenceMatchesStatement(
     && constraint.frameAuthorities.includes(evidence.frameAuthority)
     && constraint.measurementStatuses.includes(evidence.measurementStatus)
     && constraint.captureQualities.includes(evidence.captureQuality)
+    && constraint.teacherSignalStates.includes(evidence.teacherSignal.state)
+    && constraint.teacherSignalCertainties.includes(evidence.teacherSignal.certainty)
     && evidence.phaseConfidence >= constraint.minimumPhaseConfidence
     && evidence.landmarkQuality.status === 'measured'
     && typeof evidence.landmarkQuality.score === 'number'
@@ -476,6 +633,24 @@ function evidenceMatchesStatement(
     && typeof evidence.value === 'number'
     && evidence.unit === constraint.valuePredicate.unit
     && Math.abs(evidence.value) > constraint.valuePredicate.threshold;
+}
+
+export function projectNicoleProStatementText(
+  statement: NicoleProKnowledgeStatementV1,
+  evidence: NicoleProEvidencePacketV1,
+): string | null {
+  return renderStatement(statement, evidence);
+}
+
+export function nicoleProStatementMatchesEvidence(
+  statement: NicoleProKnowledgeStatementV1,
+  evidence: NicoleProEvidencePacketV1,
+): boolean {
+  return evidenceMatchesStatement(evidence, statement);
+}
+
+export function nicoleProStatementSemanticKey(statement: NicoleProKnowledgeStatementV1): string {
+  return `${statement.subjectConceptId}:${statement.relation}:${statement.objectConceptId}`;
 }
 
 function numericValueFromToken(token: string): number | null {
@@ -620,6 +795,7 @@ function validateClaim(
     }
     const evidence = evidenceById.get(reference.evidenceId);
     const numberValue = numericValueFromToken(reference.token);
+    const expectedDisplayToken = evidence ? formatNicoleProEvidenceValue(evidence) : null;
     if (!evidence
       || reference.evidenceId !== claim.primaryEvidenceId
       || !claim.evidenceIds.includes(reference.evidenceId)
@@ -627,7 +803,8 @@ function validateClaim(
       || evidence.definitionVersion !== reference.definitionVersion
       || typeof evidence.value !== 'number'
       || numberValue === null
-      || Math.abs(numberValue - evidence.value) > 1e-9
+      || expectedDisplayToken === null
+      || reference.token !== expectedDisplayToken
       || !unitMatchesToken(evidence.unit, reference.token)
       || !claim.text.includes(reference.token)) {
       issue(issues, 'unsupported_number', `${path}.numericEvidenceRefs`, 'Numeric reference does not exactly match cited metric evidence.');

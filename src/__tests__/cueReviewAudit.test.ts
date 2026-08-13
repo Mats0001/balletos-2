@@ -34,7 +34,7 @@ const target: SelectedSkeletonTarget = {
 };
 
 const evidence: ReadyGroundedTeacherDraft['evidence'] = {
-  metricId: 'spine_tilt_aplomb', valueDeg: 4.2, confidence: 0.91,
+  metricId: 'spine_tilt_aplomb', valueDeg: 4.2, confidence: 0.91, landmarkVisibility: 0.95,
   measurementClass: 'vaganova_relation', heuristicState: 'heuristic_attention',
   sourceId: target.sourceId, streamEpoch: target.streamEpoch, generation: target.generation,
   mediaTimeUs: target.mediaTimeUs, videoWidth: 960, videoHeight: 1280,

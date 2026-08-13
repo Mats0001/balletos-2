@@ -220,11 +220,13 @@ function createEvidence(
 
   if (!packet || !overlay || !isMeasurableVaganovaMeasurement(measurement)) return null;
   if (!isGroundedHeuristicState(profile.overlayState)) return null;
+  if (!Number.isFinite(packet.avgVisibility) || packet.avgVisibility <= 0 || packet.avgVisibility > 1) return null;
 
   return Object.freeze({
     metricId: profile.metricId,
     valueDeg: Math.abs(measurement.value),
     confidence: measurement.confidence,
+    landmarkVisibility: packet.avgVisibility,
     measurementClass: 'vaganova_relation',
     heuristicState: profile.overlayState,
     sourceId: runtime.sourceId,
@@ -254,8 +256,9 @@ function buildSections(
 ): GroundedTeacherDraftSections {
   const value = evidence.valueDeg.toFixed(1);
   const pts = (evidence.mediaTimeUs / 1_000_000).toFixed(3);
-  const visibility = Math.round(evidence.confidence * 100);
-  const technical = `${evidence.metricId} · ${value}° · Frame ${pts}s · exakter Cache-Frame · Landmark-Sichtbarkeit ${visibility}% · ${evidence.measurementClass}.`;
+  const measurementConfidence = Math.round(evidence.confidence * 100);
+  const landmarkVisibility = Math.round(evidence.landmarkVisibility * 100);
+  const technical = `${evidence.metricId} · ${value}° · Frame ${pts}s · exakter Cache-Frame · Messconfidence ${measurementConfidence}% · Landmark-Sichtbarkeit ${landmarkVisibility}% · ${evidence.measurementClass}.`;
 
   switch (evidence.metricId) {
     case 'shoulder_horizontal':
@@ -425,6 +428,9 @@ export function isGroundedTeacherGuideCurrent(
     && Number.isFinite(evidence.confidence)
     && evidence.confidence >= 0
     && evidence.confidence <= 1
+    && Number.isFinite(evidence.landmarkVisibility)
+    && evidence.landmarkVisibility > 0
+    && evidence.landmarkVisibility <= 1
     && finitePositive(evidence.videoWidth)
     && finitePositive(evidence.videoHeight)
     && evidence.sourceId === context.sourceId
@@ -444,7 +450,7 @@ export function groundedTeacherDraftFingerprint(draft: GroundedTeacherDraft): st
   const e = draft.evidence;
   return [
     'ready', draft.target, e.metricId, e.sourceId, e.streamEpoch, e.generation, e.mediaTimeUs,
-    e.videoWidth, e.videoHeight, e.policyVersion, e.valueDeg, e.confidence,
+    e.videoWidth, e.videoHeight, e.policyVersion, e.valueDeg, e.confidence, e.landmarkVisibility,
     e.heuristicState,
   ].join(':');
 }
