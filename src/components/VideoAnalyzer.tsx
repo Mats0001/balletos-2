@@ -44,10 +44,15 @@ import { cueReviewAuditIsValid, cueReviewExpectedState, projectCueReviewAudit } 
 import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
 import {
   getNicoleReferenceLine,
+  loadNicoleReferenceLines,
   projectNicoleReferenceGuide,
   saveNicoleReferenceLine,
 } from '../services/nicoleReferenceLine';
-import type { NicoleReferenceLineGuide } from '../types/nicoleReferenceLine';
+import type { NicoleReferenceLineGuide, NicoleReferencePhaseBinding } from '../types/nicoleReferenceLine';
+import {
+  compareNicolePhaseReferences,
+  type NicolePhaseReferenceComparison,
+} from '../services/nicolePhaseReferenceComparison';
 import {
   analyzeTeacherPhases,
   findTeacherPhaseAtTime,
@@ -242,6 +247,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
   const [analysisReport, setAnalysisReport] = useState<AutoAnalysisReport | null>(null);
   const [teacherPhaseAnalysis, setTeacherPhaseAnalysis] = useState<TeacherPhaseAnalysis | null>(null);
+  const [nicolePhaseComparisons, setNicolePhaseComparisons] = useState<readonly NicolePhaseReferenceComparison[]>([]);
+  const [nicoleReferenceStorageRevision, setNicoleReferenceStorageRevision] = useState(0);
   const teacherPhaseAnalysisRef = useRef<TeacherPhaseAnalysis | null>(null);
   const updateTeacherPhaseAnalysis = useCallback((analysis: TeacherPhaseAnalysis | null) => {
     teacherPhaseAnalysisRef.current = analysis;
@@ -635,16 +642,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   }, [selectedDevVideoUrl]);
 
   useEffect(() => {
-    if (isPreIndexing || !vaganovaFrameCache.hasCache(selectedDevVideoUrl)) return;
+    if (isPreIndexing || !vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
+      setNicolePhaseComparisons([]);
+      return;
+    }
     const cacheDimensions = vaganovaFrameCache.getVideoDimensions(selectedDevVideoUrl);
-    updateTeacherPhaseAnalysis(analyzeTeacherPhases({
-      frames: vaganovaFrameCache.getFrames(selectedDevVideoUrl),
+    const frames = vaganovaFrameCache.getFrames(selectedDevVideoUrl);
+    const analysis = analyzeTeacherPhases({
+      frames,
       videoWidth: cacheDimensions.vw,
       videoHeight: cacheDimensions.vh,
       exerciseLabel: exerciseName,
       levelLabel,
+    });
+    updateTeacherPhaseAnalysis(analysis);
+    setNicolePhaseComparisons(compareNicolePhaseReferences({
+      analysis,
+      frames,
+      videoSourceId: selectedDevVideoUrl,
+      videoWidth: cacheDimensions.vw,
+      videoHeight: cacheDimensions.vh,
+      records: loadNicoleReferenceLines(localStorage),
     }));
-  }, [exerciseName, isPreIndexing, levelLabel, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
+  }, [exerciseName, isPreIndexing, levelLabel, nicoleReferenceStorageRevision, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
 
   // 🚀 60 FPS CANVAS-BASED RENDER LOOP
   // Landmarks are stored in refs (no React re-render per frame).
@@ -2231,11 +2251,29 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       return false;
     }
     try {
+      const phaseAnalysis = teacherPhaseAnalysisRef.current;
+      const targetTimeMs = selected.mediaTimeUs / 1000;
+      const phase = phaseAnalysis?.gate.status === 'ready'
+        ? phaseAnalysis.phases.find(item => targetTimeMs >= item.startMs && targetTimeMs <= item.endMs)
+        : undefined;
+      const perspective = phaseAnalysis?.gate.detectedPerspective;
+      const phaseBinding: NicoleReferencePhaseBinding | undefined = phase && perspective
+        ? Object.freeze({
+          schemaVersion: 1,
+          exerciseId: 'plie',
+          phaseId: phase.id,
+          perspectivePlane: perspective === 'FRONTAL' ? 'frontal' : 'profile',
+          levelLabel: phaseAnalysis.levelLabel,
+          policyVersion: phaseAnalysis.policyVersion,
+          reviewState: 'nicole_approved',
+        })
+        : undefined;
       const record = saveNicoleReferenceLine({
         storage: localStorage,
         videoSourceId: selectedDevVideoUrl,
         selectedTarget: selected,
         posePacket,
+        phaseBinding,
         frame: {
           sourceId: cached.sourceId,
           streamEpoch: cached.streamEpoch,
@@ -2247,7 +2285,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       });
       const guide = projectNicoleReferenceGuide(record);
       updateNicoleReference(guide, Boolean(guide));
-      showAnalyseToast(`Nicole-Referenz V${record.versions.length} gespeichert · nur ${target.label}`);
+      setNicoleReferenceStorageRevision(value => value + 1);
+      showAnalyseToast(phaseBinding
+        ? `Nicole-Referenz V${record.versions.length} gespeichert · ${phase?.label} · ${target.label}`
+        : `Nicole-Referenz V${record.versions.length} gespeichert · ohne Phasenbindung · ${target.label}`);
       return true;
     } catch (error) {
       showAnalyseToast(error instanceof Error ? error.message : 'Nicole-Referenz konnte nicht gespeichert werden.');
@@ -2324,6 +2365,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     teacherPhaseAnalysis,
     currentPlayTime * 1000,
   );
+  const activeNicolePhaseComparisons = activeTeacherPhase
+    ? nicolePhaseComparisons.filter(comparison => comparison.phaseId === activeTeacherPhase.id)
+    : [];
   vaganovaKineticAI.updateTrails(sk, currentVidTime);
   const cog = vaganovaKineticAI.computeCenterOfGravity(sk);
 
@@ -3254,7 +3298,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                               {teacherPhaseAnalysis.exerciseLabel} · {teacherPhaseAnalysis.levelLabel} · {teacherPhaseAnalysis.framesAnalyzed} Frames
                             </div>
                             <div style={{ fontSize: '7px', opacity: 0.52, marginTop: '1px' }}>
-                              Pose · Zeitverlauf · Bildqualität · Geometrie
+                              Pose · Zeitverlauf · Bildqualität · Geometrie{nicolePhaseComparisons.length > 0 ? ' · Nicole-Linie' : ''}
                             </div>
                           </div>
                           <div style={{ fontSize: '8px', opacity: 0.7, textAlign: 'right' }}>
@@ -3287,6 +3331,31 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             );
                           })}
                         </div>
+                        {activeNicolePhaseComparisons.map(comparison => {
+                          const ready = comparison.status === 'ready' && comparison.medianAxisDeltaDeg !== null;
+                          return (
+                            <div
+                              key={`${comparison.recordId}:${comparison.versionId}`}
+                              title="Versionsgebundener 2D-Linienvergleich innerhalb derselben Aufnahme. Kein automatisches Richtig/Falsch."
+                              style={{
+                                marginTop: '6px', padding: '5px 6px', borderRadius: '7px',
+                                background: 'rgba(34,211,238,0.07)',
+                                border: `1px ${comparison.evidenceStyle} rgba(34,211,238,0.72)`,
+                                color: '#a5f3fc', fontSize: '7.5px', lineHeight: 1.35,
+                              }}
+                            >
+                              <div style={{ fontWeight: 900 }}>
+                                Nicole V{comparison.versionNumber} · {comparison.targetLabel}
+                              </div>
+                              <div style={{ opacity: 0.82 }}>
+                                {ready
+                                  ? `${comparison.medianAxisDeltaDeg!.toFixed(1)}° 2D-Achsenabstand · ${comparison.usableSampleCount}/${comparison.phaseSampleCount} Phasenframes`
+                                  : `nicht ausreichend sichtbar · ${comparison.usableSampleCount}/${comparison.phaseSampleCount} Phasenframes`}
+                              </div>
+                              <div style={{ opacity: 0.58 }}>gleiche Aufnahme · phasen- und versionsgebunden</div>
+                            </div>
+                          );
+                        })}
                         <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
                           Farbe = Phasenurteil · gestrichelt = Evidenz unsicher. Erst nach vollständigem Scan.
                         </div>

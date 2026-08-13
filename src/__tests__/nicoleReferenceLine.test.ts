@@ -86,6 +86,13 @@ describe('Nicole reference line contract', () => {
     expect(trySave({ posePacket: { ...posePacket, landmarks: lowVisibility } })).toThrow();
     const outsideFrame = poseLandmarks.map((point, index) => index === 15 ? { ...point, x: 99, y: -99 } : point);
     expect(trySave({ posePacket: { ...posePacket, landmarks: outsideFrame } })).toThrow();
+    expect(trySave({
+      phaseBinding: {
+        schemaVersion: 1, exerciseId: 'plie', phaseId: 'turn' as never,
+        perspectivePlane: 'frontal', levelLabel: 'MINIS', policyVersion: 'test',
+        reviewState: 'nicole_approved',
+      },
+    })).toThrow();
     expect(loadNicoleReferenceLines(storage)).toEqual([]);
   });
 

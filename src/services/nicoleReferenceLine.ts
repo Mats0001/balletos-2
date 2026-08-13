@@ -11,6 +11,7 @@ import type {
   NicoleReferenceLineGuide,
   NicoleReferenceLineRecord,
   NicoleReferenceLineVersion,
+  NicoleReferencePhaseBinding,
 } from '../types/nicoleReferenceLine';
 import {
   NICOLE_REFERENCE_DIGEST_ALGORITHM,
@@ -41,6 +42,7 @@ export interface SaveNicoleReferenceLineInput {
   selectedTarget: SelectedSkeletonTarget;
   posePacket: PosePacket;
   frame: NicoleReferenceFrameContext;
+  phaseBinding?: NicoleReferencePhaseBinding;
   now?: () => Date;
   createId?: () => string;
 }
@@ -57,6 +59,22 @@ function cloneFreeze<T>(value: T): T {
 const isFinitePositive = (value: unknown): value is number => (
   typeof value === 'number' && Number.isFinite(value) && value > 0
 );
+
+const PHASE_IDS = new Set(['setup', 'descent', 'bottom', 'ascent', 'finish']);
+
+export function nicoleReferencePhaseBindingIsValid(
+  value: unknown,
+): value is NicoleReferencePhaseBinding {
+  if (!value || typeof value !== 'object') return false;
+  const binding = value as NicoleReferencePhaseBinding;
+  return binding.schemaVersion === 1
+    && binding.exerciseId === 'plie'
+    && PHASE_IDS.has(binding.phaseId)
+    && (binding.perspectivePlane === 'frontal' || binding.perspectivePlane === 'profile')
+    && typeof binding.levelLabel === 'string' && binding.levelLabel.trim().length > 0
+    && typeof binding.policyVersion === 'string' && binding.policyVersion.length > 0
+    && binding.reviewState === 'nicole_approved';
+}
 
 function versionCore(version: Omit<NicoleReferenceLineVersion, 'versionDigest'>) {
   return version;
@@ -80,6 +98,7 @@ export function nicoleReferenceVersionIsValid(value: unknown): value is NicoleRe
     || !version.direction || !Number.isFinite(version.direction.x) || !Number.isFinite(version.direction.y)
     || !isFinitePositive(version.sourceSegmentLengthPx)
     || version.label !== 'Nicole-Referenzlinie'
+    || (version.phaseBinding !== undefined && !nicoleReferencePhaseBindingIsValid(version.phaseBinding))
     || version.digestAlgorithm !== NICOLE_REFERENCE_DIGEST_ALGORITHM
     || typeof version.versionDigest !== 'string' || version.versionDigest.length !== 64
   ) return false;
@@ -203,6 +222,7 @@ function makeVersion(
     direction: Object.freeze({ x: dx / length, y: dy / length }),
     sourceSegmentLengthPx: length,
     label: 'Nicole-Referenzlinie' as const,
+    ...(input.phaseBinding ? { phaseBinding: cloneFreeze(input.phaseBinding) } : {}),
     digestAlgorithm: NICOLE_REFERENCE_DIGEST_ALGORITHM,
   });
   return cloneFreeze({ ...core, versionDigest: sha256Canonical(versionCore(core)) });

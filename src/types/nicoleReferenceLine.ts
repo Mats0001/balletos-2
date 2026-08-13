@@ -3,6 +3,16 @@ import type { SkeletonTargetId } from './skeletonTarget';
 export const NICOLE_REFERENCE_SCHEMA_VERSION = 1 as const;
 export const NICOLE_REFERENCE_DIGEST_ALGORITHM = 'sha256-canonical-json-v1' as const;
 
+export interface NicoleReferencePhaseBinding {
+  schemaVersion: 1;
+  exerciseId: 'plie';
+  phaseId: 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
+  perspectivePlane: 'frontal' | 'profile';
+  levelLabel: string;
+  policyVersion: string;
+  reviewState: 'nicole_approved';
+}
+
 export interface NicoleReferenceLineVersion {
   schemaVersion: typeof NICOLE_REFERENCE_SCHEMA_VERSION;
   versionId: string;
@@ -16,6 +26,8 @@ export interface NicoleReferenceLineVersion {
   direction: Readonly<{ x: number; y: number }>;
   sourceSegmentLengthPx: number;
   label: 'Nicole-Referenzlinie';
+  /** Optional for legacy V1 lines; new post-analysis saves bind the line to its exact teaching phase. */
+  phaseBinding?: NicoleReferencePhaseBinding;
   digestAlgorithm: typeof NICOLE_REFERENCE_DIGEST_ALGORITHM;
   versionDigest: string;
 }
