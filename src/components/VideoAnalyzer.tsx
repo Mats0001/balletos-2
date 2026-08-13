@@ -69,6 +69,7 @@ import {
   findPreviousComparableAttempt,
   studentAttemptHistory,
 } from '../services/studentAttemptHistory';
+import { MOTION_REGISTRY, resolveMotionRegistryEntry } from '../services/motionRegistry';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -2744,14 +2745,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
             Übung
             <select
               aria-label="Übung für die Video-Analyse"
-              value={/tendu/i.test(exerciseName) ? 'tendu' : 'plie'}
+              value={resolveMotionRegistryEntry(exerciseName)?.id ?? 'plie'}
               onChange={(event) => {
-                const next = event.target.value === 'tendu'
-                  ? 'Battement Tendu'
-                  : 'Plié in der 1. Position';
-                onExerciseChange?.(next);
+                const next = MOTION_REGISTRY.find(entry => entry.id === event.target.value);
+                if (!next || next.phaseEngineStatus !== 'assessment_ready') return;
+                onExerciseChange?.(next.label);
                 clearSkeletonSelection('analysis_stale');
-                if (event.target.value !== 'tendu') setSplitScreenMode(false);
+                if (next.id !== 'tendu') setSplitScreenMode(false);
               }}
               style={{
                 background: 'rgba(25,20,35,0.9)', color: '#fff',
@@ -2760,8 +2760,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 fontFamily: 'Montserrat', outline: 'none', cursor: 'pointer', maxWidth: '150px',
               }}
             >
-              <option value="plie" style={{ background: '#1c1c1e' }}>Plié</option>
-              <option value="tendu" style={{ background: '#1c1c1e' }}>Battement Tendu</option>
+              {MOTION_REGISTRY.map(entry => (
+                <option
+                  key={entry.id}
+                  value={entry.id}
+                  disabled={entry.phaseEngineStatus !== 'assessment_ready'}
+                  style={{ background: '#1c1c1e' }}
+                >
+                  {entry.label}{entry.phaseEngineStatus === 'assessment_ready' ? '' : ' · Technikimport'}
+                </option>
+              ))}
             </select>
           </label>
 
