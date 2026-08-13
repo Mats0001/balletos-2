@@ -21,6 +21,7 @@ import type { CanonicalMotionPhaseId } from '../types/canonicalMotion';
 export type PliePhaseId = 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
 export type TenduPhaseId = CanonicalMotionPhaseId;
 export type TeacherPhaseId = PliePhaseId | TenduPhaseId;
+export type TenduDirection = 'devant' | 'a_la_seconde' | 'derriere' | 'undetermined';
 
 export interface FrameImageQuality {
   /** Normalized Laplacian edge energy, 0..1. */
@@ -71,6 +72,8 @@ export interface TeacherPhaseResult {
   startMs: number;
   endMs: number;
   representativeTimeMs: number;
+  /** Detection confidence for this temporal boundary, independent of colour. */
+  confidence: number;
   regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>;
   displayState: TeacherHeuristicState;
 }
@@ -81,6 +84,9 @@ export interface TeacherPhaseAnalysis {
   exerciseLabel: string;
   levelLabel: string;
   workingSide: 'left' | 'right' | null;
+  direction: TenduDirection | null;
+  directionConfidence: number;
+  phaseEngineConfidence: number;
   cycleCount: number;
   gate: RecordingGateResult;
   phases: readonly TeacherPhaseResult[];
@@ -103,6 +109,7 @@ interface PhaseBoundary {
   startIndex: number;
   endIndex: number;
   representativeIndex: number;
+  confidence?: number;
 }
 
 interface PoseSample {
@@ -283,6 +290,9 @@ function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
   boundaries: readonly PhaseBoundary[];
   workingSide: 'left' | 'right';
   cycleCount: number;
+  direction: TenduDirection;
+  directionConfidence: number;
+  confidence: number;
 }> | null {
   if (samples.length < 20) return null;
   const left = tenduFootPath(samples, 'left');
@@ -303,28 +313,32 @@ function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
   const rightRange = Math.max(...rightDistance);
   const workingSide = rightRange >= leftRange ? 'right' : 'left';
   const path = workingSide === 'right' ? rightDistance : leftDistance;
+  const pathPoints = workingSide === 'right' ? right : left;
   const range = Math.max(...path);
   if (!Number.isFinite(range) || range < 0.035) return null;
 
-  // Split the path into real excursions separated by a returned working foot.
-  // A short two-frame gap is bridged to tolerate landmark jitter near the
-  // low threshold, while a real closed-position interval starts a new cycle.
-  const lowThreshold = Math.max(0.012, range * 0.08);
+  // Schmitt-trigger hysteresis: an excursion needs three consecutive samples
+  // above the enter threshold and closes only after three below the lower exit
+  // threshold. This stops a restless child or landmark jitter from creating
+  // extra cycles around one threshold.
+  const enterThreshold = Math.max(0.014, range * 0.1);
+  const exitThreshold = Math.max(0.009, range * 0.06);
+  const minRun = 3;
   const excursionRanges: { start: number; end: number }[] = [];
   let cursor = 0;
   while (cursor < path.length) {
-    while (cursor < path.length && path[cursor] <= lowThreshold) cursor++;
-    if (cursor >= path.length) break;
+    while (cursor <= path.length - minRun && !path.slice(cursor, cursor + minRun).every(value => value > enterThreshold)) cursor++;
+    if (cursor > path.length - minRun) break;
     const start = cursor;
     let lastAbove = cursor;
     let belowRun = 0;
     while (cursor < path.length) {
-      if (path[cursor] > lowThreshold) {
+      if (path[cursor] > exitThreshold) {
         lastAbove = cursor;
         belowRun = 0;
       } else {
         belowRun++;
-        if (belowRun >= 3) break;
+        if (belowRun >= minRun) break;
       }
       cursor++;
     }
@@ -352,7 +366,15 @@ function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
       || returnEnd - fullEnd < 2
       || returnEnd >= path.length - 1
     ) return [];
-    return [{ extensionStart, fullStart, fullEnd, returnEnd, peakIndex }];
+    const risingSteps = path.slice(extensionStart + 1, peakIndex + 1)
+      .filter((value, offset) => value >= path[extensionStart + offset] - range * 0.025).length;
+    const fallingSteps = path.slice(peakIndex + 1, returnEnd + 1)
+      .filter((value, offset) => value <= path[peakIndex + offset] + range * 0.025).length;
+    const monotonicRatio = (risingSteps + fallingSteps) / Math.max(1, peakIndex - extensionStart + returnEnd - peakIndex);
+    const amplitudeConfidence = clamp01((peak - 0.035) / 0.09);
+    const shapeConfidence = clamp01((monotonicRatio - 0.55) / 0.4);
+    const confidence = clamp01(0.55 * amplitudeConfidence + 0.45 * shapeConfidence);
+    return [{ extensionStart, fullStart, fullEnd, returnEnd, peakIndex, confidence }];
   });
   if (cores.length === 0) return null;
 
@@ -369,14 +391,50 @@ function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
     if (core.extensionStart <= cycleStart || cycleEnd <= core.returnEnd) return;
     boundaries.push(
       { id: 'departure', cycleIndex, label: 'Ausgang', startIndex: cycleStart, endIndex: core.extensionStart - 1, representativeIndex: Math.floor((cycleStart + core.extensionStart - 1) / 2) },
-      { id: 'extension', cycleIndex, label: 'Abstreichen', startIndex: core.extensionStart, endIndex: core.fullStart - 1, representativeIndex: Math.floor((core.extensionStart + core.fullStart - 1) / 2) },
-      { id: 'full_extension', cycleIndex, label: 'Volle Streckung', startIndex: core.fullStart, endIndex: core.fullEnd, representativeIndex: core.peakIndex },
-      { id: 'return', cycleIndex, label: 'Rückweg', startIndex: core.fullEnd + 1, endIndex: core.returnEnd, representativeIndex: Math.floor((core.fullEnd + 1 + core.returnEnd) / 2) },
-      { id: 'closure', cycleIndex, label: 'Schluss', startIndex: core.returnEnd + 1, endIndex: cycleEnd, representativeIndex: Math.floor((core.returnEnd + 1 + cycleEnd) / 2) },
+      { id: 'extension', cycleIndex, label: 'Abstreichen', startIndex: core.extensionStart, endIndex: core.fullStart - 1, representativeIndex: Math.floor((core.extensionStart + core.fullStart - 1) / 2), confidence: core.confidence },
+      { id: 'full_extension', cycleIndex, label: 'Volle Streckung', startIndex: core.fullStart, endIndex: core.fullEnd, representativeIndex: core.peakIndex, confidence: core.confidence },
+      { id: 'return', cycleIndex, label: 'Rückweg', startIndex: core.fullEnd + 1, endIndex: core.returnEnd, representativeIndex: Math.floor((core.fullEnd + 1 + core.returnEnd) / 2), confidence: core.confidence },
+      { id: 'closure', cycleIndex, label: 'Schluss', startIndex: core.returnEnd + 1, endIndex: cycleEnd, representativeIndex: Math.floor((core.returnEnd + 1 + cycleEnd) / 2), confidence: core.confidence },
     );
   });
   const cycleCount = boundaries.filter(boundary => boundary.id === 'departure').length;
-  return cycleCount > 0 ? Object.freeze({ boundaries: Object.freeze(boundaries), workingSide, cycleCount }) : null;
+  if (cycleCount === 0) return null;
+
+  const strongestCore = cores.reduce((strongest, core) => path[core.peakIndex] > path[strongest.peakIndex] ? core : strongest);
+  const origin = startPoint(pathPoints);
+  const peakPoint = pathPoints[strongestCore.peakIndex];
+  const dx = peakPoint.x - origin.x;
+  const dy = peakPoint.y - origin.y;
+  const perspectiveCounts = samples.reduce<Record<PoseSample['perspective'], number>>((counts, sample) => {
+    counts[sample.perspective]++;
+    return counts;
+  }, { FRONTAL: 0, PROFILE_LEFT: 0, PROFILE_RIGHT: 0 });
+  const [dominantPerspective, dominantCount] = Object.entries(perspectiveCounts)
+    .sort((left, right) => right[1] - left[1])[0] as [PoseSample['perspective'], number];
+  const perspectiveConfidence = dominantCount / samples.length;
+  const horizontalDominance = Math.abs(dx) / Math.max(1e-6, Math.hypot(dx, dy));
+  let direction: TenduDirection = 'undetermined';
+  if (dominantPerspective === 'FRONTAL' && horizontalDominance >= 0.72) {
+    direction = 'a_la_seconde';
+  } else if (dominantPerspective !== 'FRONTAL' && horizontalDominance >= 0.58) {
+    const facingSign = dominantPerspective === 'PROFILE_RIGHT' ? 1 : -1;
+    direction = Math.sign(dx || facingSign) === facingSign ? 'devant' : 'derriere';
+  }
+  const sideConfidence = Math.abs(rightRange - leftRange) / Math.max(rightRange, leftRange, 1e-6);
+  const directionConfidence = direction === 'undetermined'
+    ? clamp01(0.35 * perspectiveConfidence * horizontalDominance)
+    : clamp01(perspectiveConfidence * horizontalDominance * (0.65 + 0.35 * sideConfidence));
+  const confidence = median(cores.map(core => core.confidence));
+  return Object.freeze({
+    boundaries: Object.freeze(boundaries.map(boundary => boundary.confidence === undefined
+      ? Object.freeze({ ...boundary, confidence })
+      : Object.freeze(boundary))),
+    workingSide,
+    cycleCount,
+    direction,
+    directionConfidence,
+    confidence,
+  });
 }
 
 export function summarizePhaseRegionStates(
@@ -566,6 +624,11 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     : detectPliePhases(samples);
   const workingSide = exerciseId === 'tendu' ? tenduDetection?.workingSide ?? null : null;
   const cycleCount = exerciseId === 'tendu' ? tenduDetection?.cycleCount ?? 0 : boundaries ? 1 : 0;
+  const direction = exerciseId === 'tendu' ? tenduDetection?.direction ?? 'undetermined' : null;
+  const directionConfidence = exerciseId === 'tendu' ? tenduDetection?.directionConfidence ?? 0 : 1;
+  const phaseEngineConfidence = exerciseId === 'tendu'
+    ? tenduDetection?.confidence ?? 0
+    : boundaries ? 0.9 : 0;
   const exerciseDisplayName = exerciseId === 'tendu' ? 'Tendu' : 'Plié';
   const completeCycleId: RecordingGateCheck['id'] = exerciseId === 'tendu'
     ? 'complete_tendu_cycle'
@@ -633,6 +696,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
         startMs: phaseSamples[0].frame.timeMs,
         endMs: phaseSamples[phaseSamples.length - 1].frame.timeMs,
         representativeTimeMs: samples[boundary.representativeIndex].frame.timeMs,
+        confidence: clamp01(boundary.confidence ?? phaseEngineConfidence),
         regions,
         displayState: phaseDisplayState(regions),
       };
@@ -645,6 +709,9 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     exerciseLabel: input.exerciseLabel,
     levelLabel: input.levelLabel,
     workingSide,
+    direction,
+    directionConfidence,
+    phaseEngineConfidence,
     cycleCount,
     gate,
     phases,

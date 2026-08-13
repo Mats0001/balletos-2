@@ -15,11 +15,12 @@ function regions(state = 'heuristic_attention_uncertain' as const) {
 
 const phase: TeacherPhaseResult = Object.freeze({
   id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300,
-  representativeTimeMs: 200, regions: regions(), displayState: 'heuristic_attention_uncertain',
+  representativeTimeMs: 200, confidence: 0.9, regions: regions(), displayState: 'heuristic_attention_uncertain',
 });
 const analysis: TeacherPhaseAnalysis = Object.freeze({
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',
-  workingSide: 'right', cycleCount: 1, framesAnalyzed: 80, policyVersion: 'test', phases: Object.freeze([phase]),
+  workingSide: 'right', direction: 'a_la_seconde', directionConfidence: 0.88, phaseEngineConfidence: 0.9,
+  cycleCount: 1, framesAnalyzed: 80, policyVersion: 'test', phases: Object.freeze([phase]),
   gate: Object.freeze({ status: 'ready', checks: Object.freeze([]), correctiveActions: Object.freeze([]), detectedPerspective: 'FRONTAL' }),
 });
 

@@ -11,6 +11,7 @@ afterEach(cleanup);
 
 const phase: TeacherPhaseResult = {
   id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300, representativeTimeMs: 200,
+  confidence: 0.9,
   displayState: 'heuristic_attention_uncertain',
   regions: Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, {
     state: 'heuristic_attention_uncertain', corridorResult: 'overlap', sampleCount: 4, agreement: .75, uncertainRatio: .25,
@@ -19,6 +20,7 @@ const phase: TeacherPhaseResult = {
 
 const analysis: TeacherPhaseAnalysis = {
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS', workingSide: 'right',
+  direction: 'a_la_seconde', directionConfidence: 0.88, phaseEngineConfidence: 0.9,
   cycleCount: 1,
   gate: { status: 'ready', checks: [], correctiveActions: [], detectedPerspective: 'FRONTAL' },
   phases: [phase], framesAnalyzed: 40, policyVersion: 'test',

@@ -28,6 +28,7 @@ function phase(
     startMs: cycleIndex * 1000,
     endMs: cycleIndex * 1000 + 500,
     representativeTimeMs: cycleIndex * 1000 + 250,
+    confidence: 0.9,
     regions,
     displayState: state,
   };
@@ -43,6 +44,9 @@ function analysis(
     exerciseLabel: 'Battement Tendu',
     levelLabel: 'MINIS',
     workingSide: 'right',
+    direction: 'a_la_seconde',
+    directionConfidence: 0.88,
+    phaseEngineConfidence: 0.9,
     cycleCount: 1,
     gate: { status, checks: [], correctiveActions: [], detectedPerspective: 'FRONTAL' },
     phases: status === 'needs_correction' ? [] : [phase(sourceState)],

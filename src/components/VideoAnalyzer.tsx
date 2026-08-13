@@ -3430,6 +3430,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             <div style={{ fontSize: '7px', opacity: 0.52, marginTop: '1px' }}>
                               Pose · Zeitverlauf · Bildqualität · Geometrie{nicolePhaseComparisons.length > 0 ? ' · Nicole-Linie' : ''}
                             </div>
+                            {teacherPhaseAnalysis.exerciseId === 'tendu' && (
+                              <div style={{ fontSize: '7px', color: '#a5f3fc', marginTop: '2px' }}>
+                                {teacherPhaseAnalysis.workingSide === 'left' ? 'Links' : 'Rechts'} · {
+                                  teacherPhaseAnalysis.direction === 'a_la_seconde' ? 'à la seconde'
+                                    : teacherPhaseAnalysis.direction === 'devant' ? 'devant'
+                                      : teacherPhaseAnalysis.direction === 'derriere' ? 'derrière'
+                                        : 'Richtung noch uneindeutig'
+                                } · Phasen {Math.round(teacherPhaseAnalysis.phaseEngineConfidence * 100)} %
+                              </div>
+                            )}
                             {!canCreateNicoleReferenceFromSource(selectedDevVideoUrl) && (
                               <div style={{ fontSize: '7px', color: '#fbbf24', marginTop: '2px' }}>
                                 Testaufnahme · keine Nicole-Referenzquelle
@@ -3481,7 +3491,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   event.stopPropagation();
                                   handleInspectTeacherPhase(phase.representativeTimeMs);
                                 }}
-                                title={`${phase.label} · ${evidenceLabel}`}
+                                title={`${phase.label} · Phasenerkennung ${Math.round(phase.confidence * 100)} % · ${evidenceLabel}`}
                                 style={{
                                   minWidth: 0, height: '28px', padding: '2px', cursor: 'pointer',
                                   background: active ? `${color}2d` : 'rgba(255,255,255,0.035)',

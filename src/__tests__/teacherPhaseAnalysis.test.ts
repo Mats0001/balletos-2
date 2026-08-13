@@ -105,6 +105,9 @@ describe('teacher phase-based post analysis', () => {
 
     expect(result.exerciseId).toBe('tendu');
     expect(result.workingSide).toBe('right');
+    expect(result.direction).toBe('a_la_seconde');
+    expect(result.directionConfidence).toBeGreaterThan(0.5);
+    expect(result.phaseEngineConfidence).toBeGreaterThan(0.5);
     expect(result.cycleCount).toBe(1);
     expect(result.gate.status).toBe('ready');
     expect(result.phases.map(phase => phase.id)).toEqual([
@@ -114,6 +117,47 @@ describe('teacher phase-based post analysis', () => {
       id: 'complete_tendu_cycle',
       passed: true,
     }));
+    expect(result.phases.every(phase => phase.confidence >= 0.5 && phase.confidence <= 1)).toBe(true);
+  });
+
+  it('uses hysteresis so near-closed foot jitter does not invent extra Tendu cycles', () => {
+    const frames = repeatedTenduCycleFrames().map((frame, index, all) => {
+      const landmarks = frame.landmarks!.map(point => ({ ...point }));
+      const local = index % fullTenduCycleFrames().length;
+      if (local >= 34 && local <= 38) {
+        const jitter = local % 2 === 0 ? 0.012 : 0.006;
+        landmarks[32].x += jitter;
+      }
+      return { ...frame, landmarks, timeMs: index * 33.333, imageQuality: {
+        sharpnessScore: 0.42, backgroundMotionScore: index === 0 ? null : 0.02,
+      } };
+    });
+    const result = analyzeTeacherPhases({
+      frames, videoWidth: 960, videoHeight: 1280,
+      exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',
+    });
+
+    expect(result.cycleCount).toBe(2);
+    expect(result.phases).toHaveLength(10);
+    expect(result.phaseEngineConfidence).toBeGreaterThan(0.45);
+  });
+
+  it('distinguishes devant from à la seconde only when the profile direction is stable', () => {
+    const frames = fullTenduCycleFrames().map(frame => {
+      const landmarks = frame.landmarks!.map(point => ({ ...point }));
+      landmarks[0].x = 0.56;
+      landmarks[11].x = 0.47; landmarks[12].x = 0.53;
+      landmarks[23].x = 0.48; landmarks[24].x = 0.52;
+      return { ...frame, landmarks };
+    });
+    const result = analyzeTeacherPhases({
+      frames, videoWidth: 960, videoHeight: 1280,
+      exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',
+    });
+
+    expect(result.gate.detectedPerspective).toBe('PROFILE_RIGHT');
+    expect(result.direction).toBe('devant');
+    expect(result.directionConfidence).toBeGreaterThan(0.5);
   });
 
   it('separates repeated Tendus into complete independently inspectable cycles', () => {
