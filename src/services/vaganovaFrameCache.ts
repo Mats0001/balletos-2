@@ -1,6 +1,7 @@
 import { PoseLandmark, realMediaPipePose, PoseResultsData } from './realMediaPipePose';
 import { FrameEntry, findBracketingFrames, interpolateFrame } from './frameInterpolator';
 import { vaganovaIdbCache } from './vaganovaIdbCache';
+import { calculateFrameImageQuality } from './teacherPhaseAnalysis';
 
 const MAX_CACHED_VIDEOS = 3; // LRU eviction after 3 videos
 
@@ -104,6 +105,11 @@ export class VaganovaFrameCacheService {
     canvas.width = videoEl.videoWidth || 640;
     canvas.height = videoEl.videoHeight || 480;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const qualityCanvas = document.createElement('canvas');
+    qualityCanvas.width = 64;
+    qualityCanvas.height = 36;
+    const qualityCtx = qualityCanvas.getContext('2d', { willReadFrequently: true });
+    let previousQualityLuma: Uint8Array | null = null;
 
     // FAIL-CLOSED (Berater 2026-08-11): no_pose frames sind echte Lücken.
     // Kein Carry-Forward – fehlende Evidenz wird als fehlend dargestellt.
@@ -146,6 +152,19 @@ export class VaganovaFrameCacheService {
       if (ctx) {
         ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
       }
+      let imageQuality: FrameEntry['imageQuality'];
+      if (qualityCtx) {
+        qualityCtx.drawImage(videoEl, 0, 0, qualityCanvas.width, qualityCanvas.height);
+        const pixels = qualityCtx.getImageData(0, 0, qualityCanvas.width, qualityCanvas.height);
+        const measured = calculateFrameImageQuality(
+          pixels.data,
+          qualityCanvas.width,
+          qualityCanvas.height,
+          previousQualityLuma,
+        );
+        previousQualityLuma = measured.luma;
+        imageQuality = measured.quality;
+      }
 
       // 3. Process static canvas through MediaPipe WASM with 500ms timeout
       await new Promise<void>((resolve) => {
@@ -161,7 +180,7 @@ export class VaganovaFrameCacheService {
         const wasmTimeout = setTimeout(() => {
           // FAIL-CLOSED: Timeout = no_pose → Frame überspringen
           // Kein Carry-Forward mit lastValidLandmarks (Berater 2026-08-11)
-          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
+          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null, imageQuality });
           complete();
         }, 500);
 
@@ -177,19 +196,19 @@ export class VaganovaFrameCacheService {
             });
 
             if (isInRange) {
-              frames.push({ timeMs, resultKind: 'pose', landmarks: data.landmarks });
+              frames.push({ timeMs, resultKind: 'pose', landmarks: data.landmarks, imageQuality });
             } else {
-              frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
+              frames.push({ timeMs, resultKind: 'no_pose', landmarks: null, imageQuality });
             }
             // FAIL-CLOSED: Garbage oder kein Pose → Frame überspringen
             // (kein Carry-Forward, kein Entry für diesen Timestamp)
           } else {
-            frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
+            frames.push({ timeMs, resultKind: 'no_pose', landmarks: null, imageQuality });
           }
           // FAIL-CLOSED: Kein Landmark-Set → Frame überspringen
           complete();
         }).catch(() => {
-          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null });
+          frames.push({ timeMs, resultKind: 'no_pose', landmarks: null, imageQuality });
           clearTimeout(wasmTimeout);
           complete();
         });

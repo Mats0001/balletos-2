@@ -20,11 +20,10 @@ import { vaganovaAngleCalculator, VaganovaFullAnalysis } from '../services/vagan
 import { vaganovaArmAnalyzer } from '../services/vaganovaArmAnalyzer';
 import { vaganovaFootAnalyzer } from '../services/vaganovaFootAnalyzer';
 import { renderSkeletonToCanvas, CanvasRenderOptions } from '../services/skeletonCanvasRenderer';
-import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import { createBlockedPacket, TeacherOverlayPacket } from '../types/teacherHeuristic';
 import { framePump, FrameTickEvent } from '../services/framePump';
 import { overlayStabilizer } from '../services/overlayStabilizer';
-import { buildPausedTeacherOverlayEvidence, clonePausedCacheLandmarks, findExactCachedPoseLandmarks, shouldRefreshAnalysisForPosePacket } from '../services/pausedTeacherOverlayEvidence';
+import { clonePausedCacheLandmarks, findExactCachedPoseLandmarks, shouldRefreshAnalysisForPosePacket } from '../services/pausedTeacherOverlayEvidence';
 import { capabilityTierManager, CapabilityManager } from '../services/capabilityTier';
 import { isPoseAnalysisCurrent, isPoseCaptureCurrent, isPoseResultLatest, makeNoPosePacket, shouldHoldNeutralSkeleton } from '../types/posePacket';
 import { VaganovaCurriculumModal } from './VaganovaCurriculumModal';
@@ -49,14 +48,27 @@ import {
   saveNicoleReferenceLine,
 } from '../services/nicoleReferenceLine';
 import type { NicoleReferenceLineGuide } from '../types/nicoleReferenceLine';
+import {
+  analyzeTeacherPhases,
+  findTeacherPhaseAtTime,
+  phaseToOverlayPacket,
+  type TeacherPhaseAnalysis,
+} from '../services/teacherPhaseAnalysis';
+import { heuristicColor, heuristicDash } from '../types/teacherHeuristic';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
   onSelectedCue?: (cue: VaganovaCuePoint | null) => void;
-  onExerciseChange?: (name: string) => void;
+  exerciseName: string;
+  levelLabel: string;
 }
 
-export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis, onSelectedCue, onExerciseChange }) => {
+export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
+  onVaganovaAnalysis,
+  onSelectedCue,
+  exerciseName,
+  levelLabel,
+}) => {
 
   // Video Controls State
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -173,7 +185,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     if (!button) return;
 
     const rect = button.getBoundingClientRect();
-    const menuWidth = 220;
+    const menuWidth = 270;
     const viewportMargin = 8;
     setOverlayMenuPosition({
       top: rect.top + rect.height * 1.1,
@@ -229,6 +241,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
   const [detectedWorldLandmarks, setDetectedWorldLandmarks] = useState<PoseLandmark[] | null>(null);
   const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
   const [analysisReport, setAnalysisReport] = useState<AutoAnalysisReport | null>(null);
+  const [teacherPhaseAnalysis, setTeacherPhaseAnalysis] = useState<TeacherPhaseAnalysis | null>(null);
+  const teacherPhaseAnalysisRef = useRef<TeacherPhaseAnalysis | null>(null);
+  const updateTeacherPhaseAnalysis = useCallback((analysis: TeacherPhaseAnalysis | null) => {
+    teacherPhaseAnalysisRef.current = analysis;
+    setTeacherPhaseAnalysis(analysis);
+  }, []);
 
   // AI & TEACHER EDITABLE CUE-POINTS STATE
   const [cuePoints, setCuePoints] = useState<VaganovaCuePoint[]>(
@@ -514,6 +532,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
     setIsPreIndexing(true);
     setAnalysisReport(null);
+    updateTeacherPhaseAnalysis(null);
     setLoadedFromCache(false);
     setIndexingProgress(0);
     setIndexingStatusStr('Suche im Cache...');
@@ -574,12 +593,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       setSummaryOpen(true); // Zusammenfassung automatisch aufklappen
     }
 
-    // ── Übungsname in Navbar aktualisieren ─────────────────────────────────────
-    // motionClass.detectedPoseName ist nach dem Scan bekannt
-    if (onExerciseChange) {
-      const perspLabel = motionClass.detectedPerspective === 'FRONTAL' ? 'Frontal' : 'Profil';
-      onExerciseChange(`${motionClass.detectedPoseName} (${perspLabel})`);
-    }
+    // Die automatisch erkannte Pose darf Nicoles explizite Übungsauswahl nicht
+    // überschreiben. Sie bleibt ein internes Analysesignal; das Aufnahme-Gate
+    // prüft die von Nicole gewählte Übung und Stufe.
   };
 
   // Auto-Scan: startet automatisch wenn Video geladen ist und kein Cache vorhanden
@@ -617,6 +633,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDevVideoUrl]);
+
+  useEffect(() => {
+    if (isPreIndexing || !vaganovaFrameCache.hasCache(selectedDevVideoUrl)) return;
+    const cacheDimensions = vaganovaFrameCache.getVideoDimensions(selectedDevVideoUrl);
+    updateTeacherPhaseAnalysis(analyzeTeacherPhases({
+      frames: vaganovaFrameCache.getFrames(selectedDevVideoUrl),
+      videoWidth: cacheDimensions.vw,
+      videoHeight: cacheDimensions.vh,
+      exerciseLabel: exerciseName,
+      levelLabel,
+    }));
+  }, [exerciseName, isPreIndexing, levelLabel, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
 
   // 🚀 60 FPS CANVAS-BASED RENDER LOOP
   // Landmarks are stored in refs (no React re-render per frame).
@@ -997,24 +1025,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     const canColor = CapabilityManager.canOutputColors(
                       capabilityTierManager.frameClock,
                     );
-                    if (canColor) {
-                      const analysisFramePtsSeconds = c.packetMediaTimeUs / 1_000_000;
-                      const rawPacket = teacherHeuristicEngine.compute(
-                        c.vagAn,
-                        c.sk,
-                        analysisFramePtsSeconds,
+                    const phase = canColor
+                      ? findTeacherPhaseAtTime(
+                        teacherPhaseAnalysisRef.current,
+                        c.packetMediaTimeUs / 1000,
+                      )
+                      : null;
+                    overlayPacket = phase
+                      ? phaseToOverlayPacket(
+                        phase,
+                        c.packetMediaTimeUs / 1_000_000,
                         streamEpochRef.current,
-                        {
-                          motion: c.motionCls,
-                          cogX: c.cogPt.x,
-                        },
-                      );
-                      overlayPacket = overlayStabilizer.stabilize(
-                        rawPacket, framePump.generation
-                      );
-                    } else {
-                      overlayPacket = undefined;
-                    }
+                      )
+                      : undefined;
                     stabilizedOverlayRef.current = overlayPacket ?? null;
                     lastStabilizedAnalysisTimeRef.current = c.packetMediaTimeUs;
                   }
@@ -1137,6 +1160,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   updateGroundedTeacherDraft(refreshedDraft);
                 }
 
+                const phaseTrafficLightReady = currentMode !== 'lehrer-ampel'
+                  || teacherPhaseAnalysisRef.current?.gate.status === 'ready';
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: renderState.showSkeleton,
                   showMotionTrails: renderState.showMotionTrails,
@@ -1182,7 +1207,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                   showFocusDim: !renderState.isPlaying && renderState.showFocusDim,
                   isPlie: c.motionCls.isPlie,
                   vaganovaAnalysis: c.vagAn,
-                  overlayMode: currentMode,
+                  overlayMode: phaseTrafficLightReady ? currentMode : 'lehrbuch',
                   overlayPacket,
                   overlayFrameContext: {
                     streamEpoch: streamEpochRef.current,
@@ -1374,23 +1399,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       worldLandmarksRef.current = worldLandmarks ?? null;
       cachedAnalysisRef.current = null;
       activeCueGlowTypeRef.current = undefined;
-      const cacheDimensions = vaganovaFrameCache.getVideoDimensions(capturedSourceId);
-      stabilizedOverlayRef.current = buildPausedTeacherOverlayEvidence({
-        source,
-        frames: vaganovaFrameCache.getFrames(capturedSourceId),
-        targetPtsSeconds: capturedTime,
-        streamEpoch: capturedEpoch,
-        generation: capturedGeneration,
-        videoWidth: capturedVideo.videoWidth || 0,
-        videoHeight: capturedVideo.videoHeight || 0,
-        cacheVideoWidth: cacheDimensions.vw,
-        cacheVideoHeight: cacheDimensions.vh,
-        canOutputColors: CapabilityManager.canOutputColors(
-          capabilityTierManager.frameClock,
-        ),
-      });
-      // The paused packet was derived from causal neighboring cache frames and
-      // the exact target. Reuse it rather than aging a still frame by wall time.
+      const phase = source === 'frame_cache'
+        ? findTeacherPhaseAtTime(teacherPhaseAnalysisRef.current, capturedTime * 1000)
+        : null;
+      stabilizedOverlayRef.current = phase
+        ? phaseToOverlayPacket(phase, capturedTime, capturedEpoch)
+        : null;
+      // Paused colours come from the completed phase analysis, never from a
+      // newly inferred isolated still frame.
       lastStabilizedAnalysisTimeRef.current = capturedMediaTimeUs;
       poseDropoutStartedAtRef.current = null;
       setDetectedLandmarks(landmarks);
@@ -1459,6 +1475,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       preIndexRunRef.current += 1;
       setIsPreIndexing(false);
       setAnalysisReport(null);
+      updateTeacherPhaseAnalysis(null);
       clearSkeletonSelection();
       selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
@@ -1481,6 +1498,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     preIndexRunRef.current += 1;
     setIsPreIndexing(false);
     setAnalysisReport(null);
+    updateTeacherPhaseAnalysis(null);
     clearSkeletonSelection();
     selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
@@ -2274,6 +2292,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     if (refVideoRef.current) refVideoRef.current.playbackRate = speed;
   };
 
+  const handleInspectTeacherPhase = (phaseTimeMs: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(phaseTimeMs)) return;
+    clearSkeletonSelection('analysis_stale', false);
+    video.pause();
+    video.currentTime = phaseTimeMs / 1000;
+    setIsPlaying(false);
+  };
+
   // AUTOMATIC MOTION & PERSPECTIVE KI-CLASSIFIER
   const motionClass: MotionClassificationResult = vaganovaMotionClassifier.classify(detectedLandmarks);
 
@@ -2293,6 +2320,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
   // Update Kinetic AI Trajectory & Center of Gravity
   const currentVidTime = videoRef.current ? videoRef.current.currentTime : 0;
+  const activeTeacherPhase = findTeacherPhaseAtTime(
+    teacherPhaseAnalysis,
+    currentPlayTime * 1000,
+  );
   vaganovaKineticAI.updateTrails(sk, currentVidTime);
   const cog = vaganovaKineticAI.computeCenterOfGravity(sk);
 
@@ -2925,7 +2956,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 style={{
                 position: 'fixed', top: overlayMenuPosition.top, left: overlayMenuPosition.left, zIndex: 10001,
                 background: '#1e1b2e', border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '10px', padding: '6px', width: '220px',
+                borderRadius: '10px', padding: '6px', width: '270px',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
               }}>
                 {/* Mode 1: Lehrer-Ampel */}
@@ -2945,13 +2976,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     {overlayMode === 'lehrer-ampel' && <span style={{ fontSize: '8px', color: '#30d158', marginLeft: 'auto' }}>⭐ Gespeichert</span>}
                   </div>
                   <div style={{ opacity: 0.65, fontSize: '9px', lineHeight: 1.4 }}>
-                    Vollständige pädagogische KI-Ampel. Keine grauen Regionen.
+                    Phasenbasierte Nachanalyse. Aufnahmefehler werden zuerst korrigiert, nicht farblich geraten.
                   </div>
                   <div style={{ marginTop: '5px', display: 'grid', gap: '2px', fontSize: '8px', lineHeight: 1.35 }}>
-                    <span><b style={{ color: '#30d158' }}>━━ Grün</b> · sichtbare Relation passt</span>
-                    <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · konkret beachten</span>
-                    <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · klare sichtbare Abweichung</span>
-                    <span><b style={{ color: '#ffd60a', letterSpacing: '1px' }}>┄┄ Gelb</b> · Kontext fehlt, Nicole prüft</span>
+                    <span><b style={{ color: '#30d158' }}>━━ Grün</b> · vollständig im Phasenkorridor</span>
+                    <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · Korridor überlappt die Grenze</span>
+                    <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · vollständig außerhalb</span>
+                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>┄┄</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ┄┄</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ┄┄</b> · gleiche Farbe, Evidenz unsicher</span>
                   </div>
                 </button>
                 {/* Mode 2: Anatomisch */}
@@ -3182,6 +3213,83 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                           <div style={{ height: '100%', width: `${indexingProgress}%`, background: 'linear-gradient(90deg, #30d158, #a881bd)', borderRadius: '3px', transition: 'width 0.3s ease' }} />
                         </div>
                         <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.55)' }}>Wird analysiert &amp; für nächste Sitzung gespeichert…</span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Phase-based post-analysis. Hard recording failures show a
+                    correction request instead of a guessed traffic light. */}
+                {overlayMode === 'lehrer-ampel' && teacherPhaseAnalysis && !isPreIndexing && (
+                  <div style={{
+                    position: 'absolute', top: '10px', right: '10px', zIndex: 35,
+                    width: 'min(330px, calc(100% - 20px))',
+                    background: 'rgba(14,11,22,0.92)', backdropFilter: 'blur(14px)',
+                    border: teacherPhaseAnalysis.gate.status === 'ready'
+                      ? '1px solid rgba(100,210,255,0.55)'
+                      : '1px solid rgba(255,159,10,0.7)',
+                    borderRadius: '12px', padding: '9px 10px', color: '#fff',
+                    boxShadow: '0 8px 28px rgba(0,0,0,0.38)',
+                  }}>
+                    {teacherPhaseAnalysis.gate.status === 'needs_correction' ? (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ff9f0a', fontSize: '11px', fontWeight: 900 }}>
+                          <AlertTriangle size={14} /> Aufnahme korrigieren
+                        </div>
+                        <div style={{ fontSize: '9px', opacity: 0.72, marginTop: '3px', lineHeight: 1.35 }}>
+                          Keine Ampelbewertung, solange der Aufnahmecheck nicht vollständig bestanden ist.
+                        </div>
+                        <div style={{ marginTop: '6px', display: 'grid', gap: '3px' }}>
+                          {teacherPhaseAnalysis.gate.checks.filter(check => !check.passed).map(check => (
+                            <div key={check.id} style={{ fontSize: '8px', color: '#ffd6a0' }}>• {check.label} · {check.detail}</div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ color: '#64d2ff', fontSize: '10px', fontWeight: 900 }}>✓ Aufnahme geeignet · Nachanalyse</div>
+                            <div style={{ fontSize: '8px', opacity: 0.65, marginTop: '2px' }}>
+                              {teacherPhaseAnalysis.exerciseLabel} · {teacherPhaseAnalysis.levelLabel} · {teacherPhaseAnalysis.framesAnalyzed} Frames
+                            </div>
+                            <div style={{ fontSize: '7px', opacity: 0.52, marginTop: '1px' }}>
+                              Pose · Zeitverlauf · Bildqualität · Geometrie
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '8px', opacity: 0.7, textAlign: 'right' }}>
+                            {activeTeacherPhase?.label ?? 'Phase wählen'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', marginTop: '7px' }}>
+                          {teacherPhaseAnalysis.phases.map(phase => {
+                            const color = heuristicColor(phase.displayState);
+                            const dashed = heuristicDash(phase.displayState).length > 0;
+                            const active = activeTeacherPhase?.id === phase.id;
+                            return (
+                              <button
+                                key={phase.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleInspectTeacherPhase(phase.representativeTimeMs);
+                                }}
+                                title={`${phase.label} · ${dashed ? 'Evidenz unsicher' : 'Evidenz stabil'}`}
+                                style={{
+                                  minWidth: 0, height: '28px', padding: '2px', cursor: 'pointer',
+                                  background: active ? `${color}2d` : 'rgba(255,255,255,0.035)',
+                                  color: active ? '#fff' : 'rgba(255,255,255,0.72)',
+                                  border: `${active ? 2 : 1}px ${dashed ? 'dashed' : 'solid'} ${color}`,
+                                  borderRadius: '7px', fontSize: '8px', fontWeight: 850,
+                                }}
+                              >
+                                {phase.id === 'setup' ? 'Start' : phase.id === 'descent' ? 'Ab' : phase.id === 'bottom' ? 'Tief' : phase.id === 'ascent' ? 'Auf' : 'Ende'}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
+                          Farbe = Phasenurteil · gestrichelt = Evidenz unsicher. Erst nach vollständigem Scan.
+                        </div>
                       </>
                     )}
                   </div>

@@ -24,15 +24,32 @@
  *   heuristic_match            → Grün
  *   heuristic_attention        → Gelb/Orange
  *   heuristic_strong_attention → Rot
- *   heuristic_review           → Gelb (gestrichelt, Nicole prüft)
- *   blocked                    → Gelb (gestrichelt, keine verwertbare Evidenz)
+ *   *_uncertain                → gleiche Grundfarbe, aber gestrichelt
+ *   blocked                    → keine Bewertung; Aufnahme-Gate entscheidet
  */
+export type TeacherHeuristicBaseState =
+  | 'heuristic_match'
+  | 'heuristic_attention'
+  | 'heuristic_strong_attention';
+
 export type TeacherHeuristicState =
-  | 'heuristic_match'              // Sieht gut aus – KI-Vorschlag "korrekt"
-  | 'heuristic_attention'          // Prüf-/Beobachtungsbedarf
-  | 'heuristic_strong_attention'   // Deutliche Abweichung – Korrekturbedarf
-  | 'heuristic_review'             // Kontext/Evidenz reicht nur für Nicoles Prüfung
-  | 'blocked';                     // Keine Evidenz – gelb gestrichelt, niemals Grün/Rot
+  | TeacherHeuristicBaseState
+  | 'heuristic_match_uncertain'
+  | 'heuristic_attention_uncertain'
+  | 'heuristic_strong_attention_uncertain'
+  | 'heuristic_review'             // Legacy-Kompatibilität: gelb gestrichelt
+  | 'blocked';                     // Keine auswertbare Aufnahme, kein Farburteil
+
+export type TeacherRegionKey =
+  | 'torsoAlignment' | 'spine' | 'shoulder' | 'pelvis'
+  | 'armL' | 'armR' | 'legL' | 'legR'
+  | 'footL' | 'footR' | 'cog' | 'head';
+
+export const TEACHER_REGION_KEYS: readonly TeacherRegionKey[] = Object.freeze([
+  'torsoAlignment', 'spine', 'shoulder', 'pelvis',
+  'armL', 'armR', 'legL', 'legR',
+  'footL', 'footR', 'cog', 'head',
+]);
 
 // ─── OVERLAY PACKET ─────────────────────────────────────────────────────────
 
@@ -113,6 +130,9 @@ export const HEURISTIC_COLORS: Record<TeacherHeuristicState, string> = Object.fr
   heuristic_match:            '#30d158',              // Grün
   heuristic_attention:        '#ffd60a',              // Gelb
   heuristic_strong_attention: '#ff453a',              // Rot
+  heuristic_match_uncertain:            '#30d158',    // Grün gestrichelt
+  heuristic_attention_uncertain:        '#ffd60a',    // Gelb gestrichelt
+  heuristic_strong_attention_uncertain: '#ff453a',    // Rot gestrichelt
   heuristic_review:           '#ffd60a',              // Gelb gestrichelt – Nicole prüft
   blocked:                    '#ffd60a',              // Gelb gestrichelt – fehlende Evidenz
 });
@@ -124,6 +144,9 @@ export const HEURISTIC_DASH: Record<TeacherHeuristicState, number[]> = Object.fr
   heuristic_match:            [],
   heuristic_attention:        [],
   heuristic_strong_attention: [],
+  heuristic_match_uncertain:            [7, 4],
+  heuristic_attention_uncertain:        [7, 4],
+  heuristic_strong_attention_uncertain: [7, 4],
   heuristic_review:           [7, 4],
   blocked:                    [5, 4],
 });
@@ -141,6 +164,35 @@ export function heuristicColor(state: TeacherHeuristicState): string {
 /** Gibt das Strich-Muster für einen Zustand zurück. */
 export function heuristicDash(state: TeacherHeuristicState): number[] {
   return HEURISTIC_DASH[state];
+}
+
+export function heuristicBaseState(state: TeacherHeuristicState): TeacherHeuristicBaseState | null {
+  if (state === 'heuristic_match' || state === 'heuristic_match_uncertain') return 'heuristic_match';
+  if (state === 'heuristic_attention' || state === 'heuristic_attention_uncertain' || state === 'heuristic_review') {
+    return 'heuristic_attention';
+  }
+  if (state === 'heuristic_strong_attention' || state === 'heuristic_strong_attention_uncertain') {
+    return 'heuristic_strong_attention';
+  }
+  return null;
+}
+
+export function heuristicHasUncertainEvidence(state: TeacherHeuristicState): boolean {
+  return state === 'heuristic_match_uncertain'
+    || state === 'heuristic_attention_uncertain'
+    || state === 'heuristic_strong_attention_uncertain'
+    || state === 'heuristic_review'
+    || state === 'blocked';
+}
+
+export function withUncertainEvidence(
+  state: TeacherHeuristicBaseState,
+  uncertain: boolean,
+): TeacherHeuristicState {
+  if (!uncertain) return state;
+  if (state === 'heuristic_match') return 'heuristic_match_uncertain';
+  if (state === 'heuristic_attention') return 'heuristic_attention_uncertain';
+  return 'heuristic_strong_attention_uncertain';
 }
 
 /**
@@ -161,7 +213,7 @@ export function createBlockedPacket(framePtsSeconds: number, streamEpoch: number
     footR: 'blocked',
     cog: 'blocked',
     head: 'blocked',
-    policyVersion: '0.3.0-pedagogical-full-coverage',
+    policyVersion: '0.4.0-phase-evidence-separation',
     streamEpoch,
     framePtsSeconds,
   };

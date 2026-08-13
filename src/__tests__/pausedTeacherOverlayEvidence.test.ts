@@ -10,6 +10,8 @@ import { PoseLandmark } from '../services/realMediaPipePose';
 import { FrameEntry } from '../services/frameInterpolator';
 import {
   createBlockedPacket,
+  heuristicBaseState,
+  heuristicHasUncertainEvidence,
   TeacherHeuristicState,
   TeacherOverlayPacket,
 } from '../types/teacherHeuristic';
@@ -40,7 +42,7 @@ function makePacket(
     footR: state,
     cog: state,
     head: state,
-    policyVersion: '0.3.0-pedagogical-full-coverage',
+    policyVersion: '0.4.0-phase-evidence-separation',
     streamEpoch: 1000,
     framePtsSeconds,
     ...overrides,
@@ -66,7 +68,7 @@ function expectAllBlocked(packet: TeacherOverlayPacket): void {
 
 function expectOnlyReviewStates(packet: TeacherOverlayPacket): void {
   for (const key of REGION_KEYS) {
-    expect(['blocked', 'heuristic_review']).toContain(packet[key]);
+    expect(packet[key] === 'blocked' || heuristicHasUncertainEvidence(packet[key])).toBe(true);
   }
 }
 
@@ -310,7 +312,7 @@ describe('buildPausedTeacherOverlayEvidence', () => {
     expectOnlyReviewStates(result);
   });
 
-  it('marks lower-body and center-of-gravity uncertainty as yellow review', () => {
+  it('keeps provisional lower-body and centre colours while marking their evidence uncertain', () => {
     const input = validInput();
     const lowVisibilityIndices = [25, 26, 27, 28, 31, 32];
     input.frames = input.frames.map(frame => ({
@@ -325,7 +327,8 @@ describe('buildPausedTeacherOverlayEvidence', () => {
     const result = buildPausedTeacherOverlayEvidence(input);
 
     for (const key of ['legL', 'legR', 'footL', 'footR', 'cog'] as const) {
-      expect(result[key]).toBe('heuristic_review');
+      expect(heuristicBaseState(result[key])).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(result[key])).toBe(true);
     }
   });
 });

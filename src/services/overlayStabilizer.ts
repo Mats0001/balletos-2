@@ -14,6 +14,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
+  heuristicHasUncertainEvidence,
   TeacherOverlayPacket,
   TeacherHeuristicState,
 } from '../types/teacherHeuristic';
@@ -46,6 +47,9 @@ const VALID_STATES: ReadonlySet<TeacherHeuristicState> = new Set([
   'heuristic_match',
   'heuristic_attention',
   'heuristic_strong_attention',
+  'heuristic_match_uncertain',
+  'heuristic_attention_uncertain',
+  'heuristic_strong_attention_uncertain',
 ]);
 
 const MEDIA_TIME_EPSILON_SECONDS = 0.000_001;
@@ -63,8 +67,11 @@ const SEVERITY: Record<TeacherHeuristicState, number> = {
   'blocked':                    -2,  // Special: always instant
   'heuristic_review':           -1,  // Yellow review, always instant
   'heuristic_match':             0,
+  'heuristic_match_uncertain':   0,
   'heuristic_attention':         1,
+  'heuristic_attention_uncertain': 1,
   'heuristic_strong_attention':  2,
+  'heuristic_strong_attention_uncertain': 2,
 };
 
 function isWorsening(from: TeacherHeuristicState, to: TeacherHeuristicState): boolean {
@@ -74,7 +81,7 @@ function isWorsening(from: TeacherHeuristicState, to: TeacherHeuristicState): bo
 function isImproving(from: TeacherHeuristicState, to: TeacherHeuristicState): boolean {
   return SEVERITY[to] < SEVERITY[from]
     && to !== 'blocked'
-    && to !== 'heuristic_review';
+    && !heuristicHasUncertainEvidence(to);
 }
 
 // ─── INTERNAL STATE ─────────────────────────────────────────────────────────
@@ -102,12 +109,12 @@ function confirmationHoldMs(
   displayed: TeacherHeuristicState,
   proposed: TeacherHeuristicState,
 ): number {
-  if (proposed === 'blocked' || proposed === 'heuristic_review') return 0;
+  if (proposed === 'blocked' || heuristicHasUncertainEvidence(proposed)) return 0;
   if (proposed === 'heuristic_strong_attention') return STRONG_ATTENTION_CONFIRM_MS;
 
   // A new stream starts neutral. Green requires the longest positive-evidence
   // confirmation; yellow uses the ordinary worsening confirmation window.
-  if (displayed === 'blocked' || displayed === 'heuristic_review') {
+  if (displayed === 'blocked' || heuristicHasUncertainEvidence(displayed)) {
     return proposed === 'heuristic_match' ? IMPROVE_HOLD_MS : WORSEN_HOLD_MS;
   }
 
@@ -212,8 +219,10 @@ export class OverlayStabilizer {
       }
 
       // ── INSTANT transitions ─────────────────────────────────────────
-      // blocked/review: SOFORT (safety – Grün muss sofort weg)
-      if (rawState === 'blocked' || rawState === 'heuristic_review') {
+      // Blocked or dashed evidence style changes immediately. The base colour
+      // still communicates the provisional verdict; the dash communicates
+      // evidence uncertainty without masquerading as a solid assessment.
+      if (rawState === 'blocked' || heuristicHasUncertainEvidence(rawState)) {
         region.displayedState = rawState;
         region.pendingState = null;
         result[key] = rawState;

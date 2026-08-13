@@ -2,17 +2,38 @@
 
 **Datum:** 2026-08-10
 **Entscheid durch:** Externer Berater (formelles Schreiben) + Nicole (Ballettpädagogin)
-**Policy-Version:** `0.3.0-pedagogical-full-coverage` (BUILD_POLICY.policyVersion)
+**Policy-Version:** `0.4.0-phase-evidence-separation` (BUILD_POLICY.policyVersion)
 **Status:** BINDEND – Produktionsimplementierung
+
+> **Phasen-/Evidenz-Nachtrag, 2026-08-13:** Vor jeder Ampelbewertung läuft ein
+> Aufnahme-Gate für vollständige Körper- und Gelenksichtbarkeit, stabile
+> Perspektive, Personengröße, Zieltracking, Bildschärfe, Kamerastabilität sowie
+> ausgewählte Übung und Stufe. Ein harter Fehler ergibt ausschließlich
+> **„Aufnahme korrigieren“**; das System rät dann keine Ampelfarbe. Nach
+> bestandenem Gate wird ein vollständiger Plié-Zyklus in Ausgangsposition,
+> Abwärtsbewegung, Tiefpunkt, Aufwärtsbewegung und Abschluss segmentiert. Die
+> Grundfarbe Grün/Gelb/Rot stammt aus dem Frame-Korridor der ganzen Phase:
+> vollständig im Kandidatenkorridor = Grün, Überlappung = Gelb, vollständig
+> außerhalb = Rot. Der Linienstil ist davon unabhängig: durchgezogen = stabile
+> Evidenz, gestrichelt = dieselbe Grundfarbe bei unsicherer Evidenz. Die Ampel
+> wird aus der abgeschlossenen Nachanalyse bezogen, nicht aus einem zufälligen
+> Live-Einzelbild.
+>
+> Der aktuelle Nachanalyse-Verbund nutzt Pose-Landmarks, zeitliches Tracking,
+> optische Bildqualität und geometrische Plausibilitätsgrenzen. Ein zweites
+> Posemodell, Nicoles gespeicherte Referenzlinien und frühere Versuche derselben
+> Schülerin werden erst dann als zusätzliche Signale ausgewiesen, wenn ihr
+> jeweiliger Adapter tatsächlich angeschlossen und provenance-geprüft ist.
 
 > **Vollabdeckungs-Nachtrag, 2026-08-13 – ersetzt die früheren
 > Darstellungsstopps für Arme, Beine, Füße und Schwerpunkt:** Die fehlerhaften
 > Knie-BAS- und 0°-Armresolver bleiben vollständig entfernt. An ihre Stelle
 > treten eigenständige, deterministische 2D-Lehrrelationen mit Perspektiv-,
 > Bewegungs-, Sichtbarkeits- und Geometriegates. Damit erhält jede erkannte,
-> sichtbare Körperregion eine Ampeldarstellung. Wenn ein Gate nicht erfüllt ist,
-> bleibt die Region nicht grau und wird nicht ausgelassen, sondern erscheint
-> gelb gestrichelt als „Nicole prüft“. Dieser Nachtrag autorisiert keine
+> auswertbare Körperregion eine Ampeldarstellung. Der neuere Phasen-Nachtrag
+> trennt dabei harte Aufnahmefehler von regionaler Evidenzunsicherheit: harte
+> Fehler stoppen die Bewertung, weiche Unsicherheit erhält die vorläufige
+> Grundfarbe mit gestrichelter Linie. Dieser Nachtrag autorisiert keine
 > Muskel-, Valgus-, Druck-, COP-, Ursachen-, Prognose- oder Verletzungsdiagnose.
 > Die folgenden P0-/BAS-Nachträge bleiben als Historie und als Verbot der alten
 > Resolver bindend; ihre damalige neutrale Darstellung ist durch diesen
@@ -69,9 +90,10 @@
 > BalletOS stellt Nicole im experimentellen Lehrer-Modus die vollständige automatische 
 > Ampelfunktion zur Verfügung. Die Ampel ist ein KI-gestützter fachlicher Vorschlag, 
 > kein validiertes Systemurteil. Nicole entscheidet über Annahme, Änderung und 
-> Kommunikation. Jede sichtbare Region erhält eine Ampelfarbe. Fehlende,
-> kontextabhängige oder nicht messbare Evidenz erscheint gelb gestrichelt als
-> „Nicole prüft“ und kann niemals automatisch Grün oder Rot werden.
+> Kommunikation. Jede auswertbare Region erhält pro Bewegungsphase eine
+> Grundfarbe Grün/Gelb/Rot. Evidenzsicherheit wird ausschließlich über den
+> Linienstil dargestellt. Nicht auswertbare Aufnahmen werden vor der Bewertung
+> mit „Aufnahme korrigieren“ gestoppt.
 
 ---
 
@@ -120,17 +142,22 @@ Freigegebene pädagogische Kommunikation
 
 ---
 
-## Review-Zustände (niemals automatisch Grün oder Rot)
+## Aufnahme-Gate und Evidenzstil
 
 ```
-not_measurable, blocked, missing_landmark, invalid_geometry,
-wrong_camera, occluded, unassigned_person, insufficient_temporal_data
+missing_landmark, invalid_geometry, wrong_camera, occluded,
+unassigned_person, insufficient_temporal_data, blurred_frame, unstable_camera
 ```
-→ Darstellung: `#ffd60a` Gelb / gestrichelt · Bedeutung: „Nicole prüft“
+→ Darstellung: keine Ampel; stattdessen **„Aufnahme korrigieren“** mit konkreter
+Handlungsanweisung.
 
-Grau gehört nicht mehr zur Lehrer-Ampel. Gelb hat zwei sichtbar getrennte
-Formen: durchgezogen = konkrete beobachtete Relation braucht Aufmerksamkeit;
-gestrichelt = Evidenz oder Bewegungskontext reicht nur für Nicoles Prüfung.
+Nach bestandenem Gate gilt orthogonal:
+
+- Farbe: Grün / Gelb / Rot = Phasenurteil.
+- Linie: durchgezogen = stabile Evidenz; gestrichelt = unsichere Evidenz.
+
+Damit kann auch ein vorläufig grünes oder rotes Phasenurteil gestrichelt sein,
+ohne Gelb fälschlich als „halb richtig“ und zugleich „unsicher“ zu überladen.
 
 ---
 
@@ -144,8 +171,9 @@ ihre Delta-Ziele gehören weiter zum Laufzeit- oder Messvertrag.
 Der historische Knie-Δ-Wert bleibt entfernt. Die neue Ampel verwendet keine
 Valgus-, Muskel- oder Baseline-Behauptung. Sie bewertet ausschließlich die
 sichtbare frontale Knie–Fuß-Projektion, normiert an der sichtbaren Beinlänge.
-Profil, Arabesque, geringe Sichtbarkeit oder fehlender Bewegungskontext führen
-gelb gestrichelt zu „Nicole prüft“.
+Profil oder Arabesque verändern den Evidenzstil bzw. stoppen bei einem harten
+Perspektivfehler das Aufnahme-Gate; sie werden nicht als eigene gelbe
+Urteilsklasse verwendet.
 
 Arme werden positionsabhängig als sichtbare 2D-Armform beurteilt. Füße nutzen
 im Plié dieselbe Knie–Fuß-Projektion, außerhalb davon lediglich die sichtbare
@@ -160,7 +188,8 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 |-------|----------|
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
-| `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Unsicherheit → gelb gestrichelt |
+| `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Farbe und Evidenzunsicherheit sind getrennt |
+| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und phasenweite Grün-/Gelb-/Rot-Aggregation; Unsicherheit → dieselbe Farbe gestrichelt |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
@@ -175,7 +204,8 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 - [x] Bein-Shadow-Metriken erzeugen keine automatischen Knie-Cues oder positiven Kniezählungen
 - [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
 - [x] Armfarben sind an sichtbare Position, Geometrie und Confidence gebunden
-- [x] `not_measurable`/`blocked` → niemals Grün/Rot (REVIEW gelb gestrichelt)
+- [x] Soft unsichere Evidenz → fachliches Grundurteil Grün/Gelb/Rot bleibt erhalten und wird gestrichelt
+- [x] Hart gescheitertes Aufnahme-Gate → keine Ampel, sondern konkrete Aufforderung „Aufnahme korrigieren“
 - [x] Keine graue oder ausgelassene Region im Lehrer-Ampelmodus
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
 - [x] Moduswechsel verändert keine Rohmesswerte

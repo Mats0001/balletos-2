@@ -1,10 +1,10 @@
 /**
  * VaganovaIdbCache — Persistent IndexedDB storage for pre-scanned frame data.
  *
- * Cache key strategy:  `vaganova_v1_${filename}_${fileSizeBytes}`
+ * Cache key strategy:  `vaganova_v2_${filename}_${fileSizeBytes}`
  * - Filename  →  differentiates different video files
  * - FileSize  →  detects re-encoded / updated versions of the same filename
- * - "v1"      →  schema version; bump to "v2" to invalidate all caches on format change
+ * - "v2"      →  frame image-quality metadata for recording gates
  *
  * Data volume estimate:
  *   186 frames × 33 landmarks × 4 floats (x,y,z,vis) × 4 bytes ≈ ~100 KB per video
@@ -18,7 +18,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'frame_scans';
 
 interface IdbRecord {
-  key:       string;       // cache key = `vaganova_v1_${filename}_${size}`
+  key:       string;       // cache key = `vaganova_v2_${filename}_${size}`
   frames:    FrameEntry[];
   fps:       number;
   duration:  number;
@@ -61,11 +61,11 @@ export class VaganovaIdbCache {
     if (file) {
       // Uploaded file: filename + size fingerprint
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      return `vaganova_v1_${safeName}_${file.size}`;
+      return `vaganova_v2_${safeName}_${file.size}`;
     }
     // Built-in video: use last path segment (e.g. "nicole_saal_1.mp4")
     const segment = videoUrl.split('/').pop() ?? videoUrl;
-    return `vaganova_v1_${segment}`;
+    return `vaganova_v2_${segment}`;
   }
 
   /** Load cached scan from IndexedDB. Returns null on miss. */

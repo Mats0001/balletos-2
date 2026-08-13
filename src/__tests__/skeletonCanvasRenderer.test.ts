@@ -31,6 +31,9 @@ const EXPECTED = {
   heuristic_match: { color: '#30d158', dash: [] },
   heuristic_attention: { color: '#ffd60a', dash: [] },
   heuristic_strong_attention: { color: '#ff453a', dash: [] },
+  heuristic_match_uncertain: { color: '#30d158', dash: [7, 4] },
+  heuristic_attention_uncertain: { color: '#ffd60a', dash: [7, 4] },
+  heuristic_strong_attention_uncertain: { color: '#ff453a', dash: [7, 4] },
   heuristic_review: { color: '#ffd60a', dash: [7, 4] },
   blocked: { color: '#ffd60a', dash: [5, 4] },
 } satisfies Record<TeacherHeuristicState, { color: string; dash: number[] }>;
@@ -152,7 +155,7 @@ function renderTeacherPacket(
   frameContext: { streamEpoch: number; framePtsSeconds: number; policyVersion: string } | undefined = {
     streamEpoch: 42,
     framePtsSeconds: 2.5,
-    policyVersion: '0.3.0-pedagogical-full-coverage',
+    policyVersion: '0.4.0-phase-evidence-separation',
   },
   selectedJointId: string = '',
   glowType?: 'GOOD' | 'CORRECTION',
@@ -314,7 +317,7 @@ describe('trusted skeleton color contract', () => {
     const strokes = renderTeacherPacket(0.95, {
       streamEpoch: 99,
       framePtsSeconds: 2.5,
-      policyVersion: '0.3.0-pedagogical-full-coverage',
+      policyVersion: '0.4.0-phase-evidence-separation',
     });
 
     expect(strokes.some(({ color }) => color === EXPECTED.heuristic_match.color)).toBe(false);
@@ -335,7 +338,7 @@ describe('trusted skeleton color contract', () => {
     const strokes = renderTeacherPacket(0.95, {
       streamEpoch: 99,
       framePtsSeconds: 2.5,
-      policyVersion: '0.3.0-pedagogical-full-coverage',
+      policyVersion: '0.4.0-phase-evidence-separation',
     }, 'port_de_bras_arms', 'CORRECTION');
 
     expect(strokes.some(({ color }) => color === '#ff6b6b')).toBe(false);
@@ -381,7 +384,7 @@ describe('trusted skeleton color contract', () => {
         mediaTimeUs: 2_500_000,
         videoWidth: 960,
         videoHeight: 1280,
-        policyVersion: '0.3.0-pedagogical-full-coverage',
+        policyVersion: '0.4.0-phase-evidence-separation',
       },
     });
     expect(draft.kind).toBe('ready');
@@ -423,7 +426,7 @@ describe('trusted skeleton color contract', () => {
       generation: 7,
       videoWidth: 960,
       videoHeight: 1280,
-      policyVersion: '0.3.0-pedagogical-full-coverage',
+      policyVersion: '0.4.0-phase-evidence-separation',
     };
 
     const current = renderGuide(2_500_000);
@@ -453,7 +456,7 @@ describe('trusted skeleton color contract', () => {
         mediaTimeUs: 2_500_000,
         videoWidth: 1000,
         videoHeight: 1000,
-        policyVersion: '0.3.0-pedagogical-full-coverage',
+        policyVersion: '0.4.0-phase-evidence-separation',
         source: 'exact_frame_cache',
       },
     };
@@ -483,7 +486,7 @@ describe('trusted skeleton color contract', () => {
             mediaTimeUs: 2_500_000,
             videoWidth: 1000,
             videoHeight: 1000,
-            policyVersion: '0.3.0-pedagogical-full-coverage',
+            policyVersion: '0.4.0-phase-evidence-separation',
           },
           isPlie: true,
           vaganovaAnalysis: rawAnalysis(0.95),

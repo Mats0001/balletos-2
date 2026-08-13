@@ -101,7 +101,12 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'analyzer' && (
-          <VideoAnalyzer onVaganovaAnalysis={handleVaganovaAnalysis} onSelectedCue={handleSelectedCue} onExerciseChange={setExerciseName} />
+          <VideoAnalyzer
+            onVaganovaAnalysis={handleVaganovaAnalysis}
+            onSelectedCue={handleSelectedCue}
+            exerciseName={exerciseName}
+            levelLabel={selectedAgeGroup}
+          />
         )}
 
         {activeTab === 'students' && (

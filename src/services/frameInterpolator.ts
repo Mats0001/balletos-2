@@ -1,4 +1,5 @@
 import { PoseLandmark } from './realMediaPipePose';
+import type { FrameImageQuality } from './teacherPhaseAnalysis';
 
 /**
  * Maximum time gap (ms) between two frames before interpolation is refused.
@@ -16,6 +17,8 @@ export interface FrameEntry {
   resultKind?: 'pose' | 'no_pose';
   landmarks: PoseLandmark[] | null;
   worldLandmarks?: PoseLandmark[];
+  /** Small-frame image quality captured during the deterministic pre-scan. */
+  imageQuality?: FrameImageQuality;
 }
 
 /**

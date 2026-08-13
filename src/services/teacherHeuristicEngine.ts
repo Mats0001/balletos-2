@@ -25,9 +25,13 @@ import { KinematicPoint, ReconstructedSkeleton } from './vaganova3DKinematics';
 import { vaganovaArmAnalyzer, type ArmQualityStatus, type VaganovaArmPosition } from './vaganovaArmAnalyzer';
 import type { MotionClassificationResult } from './vaganovaMotionClassifier';
 import {
+  heuristicBaseState,
+  heuristicHasUncertainEvidence,
+  TeacherHeuristicBaseState,
   TeacherHeuristicState,
   TeacherOverlayPacket,
   createBlockedPacket,
+  withUncertainEvidence,
 } from '../types/teacherHeuristic';
 import { BUILD_POLICY, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
 
@@ -70,51 +74,60 @@ function isEligible(
  * Jede fehlende Teilmessung blockiert den zusammengesetzten Befund.
  */
 function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
-  if (states.some(s => s === 'blocked' || s === 'heuristic_review')) {
-    return 'heuristic_review';
-  }
+  const baseStates = states.map(heuristicBaseState).filter((state): state is TeacherHeuristicBaseState => state !== null);
+  const uncertain = states.some(heuristicHasUncertainEvidence) || baseStates.length !== states.length;
+  const combined: TeacherHeuristicBaseState = baseStates.includes('heuristic_strong_attention')
+    ? 'heuristic_strong_attention'
+    : baseStates.includes('heuristic_attention')
+      ? 'heuristic_attention'
+      : baseStates.length > 0
+        ? 'heuristic_match'
+        : 'heuristic_attention';
+  return withUncertainEvidence(combined, uncertain);
+}
 
-  // Pessimistisch: Der schlechteste nicht-blockierte Zustand gewinnt.
-  // Begründung: Wenn EIN Bereich Aufmerksamkeit braucht, soll der
-  // gesamte Torso-Rahmen das signalisieren — nicht durch Mehrheit verwässern.
-  if (states.some(s => s === 'heuristic_strong_attention')) return 'heuristic_strong_attention';
-  if (states.some(s => s === 'heuristic_attention')) return 'heuristic_attention';
-  return 'heuristic_match';
+function finiteMeasurementValue(m: VaganovaMeasurement | null | undefined): number | null {
+  return isMeasurableVaganovaMeasurement(m) && Number.isFinite(m.value) ? m.value : null;
+}
+
+function classifyDegrees(
+  value: number,
+  matchMax: number,
+  attentionMax: number,
+): TeacherHeuristicBaseState {
+  const deg = Math.abs(value);
+  if (deg <= matchMax) return 'heuristic_match';
+  if (deg <= attentionMax) return 'heuristic_attention';
+  return 'heuristic_strong_attention';
 }
 
 // ─── EINZEL-HEURISTIKEN ─────────────────────────────────────────────────────
 
 function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.spineTilt;
-  if (!isEligible(m)) return 'heuristic_review';
-  const deg = Math.abs(m.value);
+  const value = finiteMeasurementValue(m);
+  if (value === null) return 'heuristic_attention_uncertain';
   // Mit isotropischer vw/vh-Korrektur: Rauschboden ~1-2°.
   // Vaganova-Standard: Wirbelsäule lotrecht, Abweichung >4° ist sichtbar.
-  if (deg <= 4)  return 'heuristic_match';
-  if (deg <= 10) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  return withUncertainEvidence(classifyDegrees(value, 4, 10), !isEligible(m));
 }
 
 function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.shoulderSymmetry;
-  if (!isEligible(m)) return 'heuristic_review';
-  const deg = Math.abs(m.value);
+  const value = finiteMeasurementValue(m);
+  if (value === null) return 'heuristic_attention_uncertain';
   // Schulter-Symmetrie: Nicole sieht Asymmetrie ab ~3°.
   // Épaulement kann 3-5° erzeugen, darüber ist es Haltungsfehler.
-  if (deg <= 5)  return 'heuristic_match';
-  if (deg <= 12) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  return withUncertainEvidence(classifyDegrees(value, 5, 12), !isEligible(m));
 }
 
 function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
-  if (!isEligible(m)) return 'heuristic_review';
-  const deg = Math.abs(m.value);
+  const value = finiteMeasurementValue(m);
+  if (value === null) return 'heuristic_attention_uncertain';
   // Becken-Neigung: Vaganova verlangt neutrales Becken.
   // >5° sichtbare Neigung, >12° deutlicher Fehler.
-  if (deg <= 5)  return 'heuristic_match';
-  if (deg <= 12) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  return withUncertainEvidence(classifyDegrees(value, 5, 12), !isEligible(m));
 }
 
 /**
@@ -145,8 +158,15 @@ function statusToState(status: ArmQualityStatus): TeacherHeuristicState {
 }
 
 function armAngleState(position: VaganovaArmPosition, angleDeg: number): TeacherHeuristicState {
-  if (!Number.isFinite(angleDeg)) return 'heuristic_review';
-  if (position === 'TRANSITION') return 'heuristic_review';
+  if (!Number.isFinite(angleDeg)) return 'heuristic_attention_uncertain';
+  if (position === 'TRANSITION') {
+    const provisional = angleDeg >= 120 && angleDeg <= 165
+      ? 'heuristic_match'
+      : angleDeg >= 100 && angleDeg <= 175
+        ? 'heuristic_attention'
+        : 'heuristic_strong_attention';
+    return withUncertainEvidence(provisional, true);
+  }
   if (position === 'ALLONGE') {
     if (angleDeg >= 160) return 'heuristic_match';
     if (angleDeg >= 145) return 'heuristic_attention';
@@ -166,9 +186,7 @@ function computeArm(
   const points = side === 'L'
     ? [sk.shoulderL, sk.elbowL, sk.wristL]
     : [sk.shoulderR, sk.elbowR, sk.wristR];
-  if (!context || context.motion.confidence < 35 || !points.every(pointIsUsable)) {
-    return 'heuristic_review';
-  }
+  if (!points.every(pointIsUsable)) return 'heuristic_attention_uncertain';
 
   const positions = vaganovaArmAnalyzer.classifyArmPosition(sk);
   const quality = vaganovaArmAnalyzer.analyzeElbowQuality(sk);
@@ -178,9 +196,13 @@ function computeArm(
 
   // Height is meaningful only for the open second-position relation. In third
   // position an elbow above the shoulder is expected and must not become red.
-  return position === 'SECOND'
+  const state = position === 'SECOND'
     ? combineStates([shapeState, statusToState(elbow.heightStatus)])
     : shapeState;
+  return withUncertainEvidence(
+    heuristicBaseState(state) ?? 'heuristic_attention',
+    heuristicHasUncertainEvidence(state) || !context || context.motion.confidence < 35,
+  );
 }
 
 function projectedKneeFootState(
@@ -188,13 +210,6 @@ function projectedKneeFootState(
   side: 'L' | 'R',
   context: TeacherHeuristicContext | null,
 ): TeacherHeuristicState {
-  if (
-    !context
-    || context.motion.confidence < 35
-    || context.motion.detectedPerspective !== 'FRONTAL'
-    || context.motion.isArabesque
-  ) return 'heuristic_review';
-
   const hip = side === 'L' ? sk.pelvisL : sk.pelvisR;
   const knee = side === 'L' ? sk.kneeL : sk.kneeR;
   const ankle = side === 'L' ? sk.ankleL : sk.ankleR;
@@ -204,13 +219,20 @@ function projectedKneeFootState(
     || !pointIsUsable(knee)
     || !pointIsUsable(ankle)
     || !pointIsUsable(foot)
-  ) return 'heuristic_review';
+  ) return 'heuristic_attention_uncertain';
 
   const legLength = Math.max(1, Math.hypot(hip.x - ankle.x, hip.y - ankle.y));
   const deviationRatio = Math.abs(knee.x - foot.x) / legLength;
-  if (deviationRatio <= 0.10) return 'heuristic_match';
-  if (deviationRatio <= 0.20) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  const base: TeacherHeuristicBaseState = deviationRatio <= 0.10
+    ? 'heuristic_match'
+    : deviationRatio <= 0.20
+      ? 'heuristic_attention'
+      : 'heuristic_strong_attention';
+  const uncertain = !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque;
+  return withUncertainEvidence(base, uncertain);
 }
 
 /** Visible knee-to-foot projection; never labelled valgus or a joint diagnosis. */
@@ -232,13 +254,6 @@ function computeFoot(
   side: 'L' | 'R',
   context: TeacherHeuristicContext | null,
 ): TeacherHeuristicState {
-  if (
-    !context
-    || context.motion.confidence < 35
-    || context.motion.detectedPerspective !== 'FRONTAL'
-    || context.motion.isArabesque
-  ) return 'heuristic_review';
-
   const ankle = side === 'L' ? sk.ankleL : sk.ankleR;
   const foot = side === 'L' ? sk.footL : sk.footR;
   const hip = side === 'L' ? sk.pelvisL : sk.pelvisR;
@@ -248,20 +263,27 @@ function computeFoot(
     || !pointIsUsable(hip)
     || !pointIsUsable(sk.pelvisCenter)
   ) {
-    return 'heuristic_review';
+    return 'heuristic_attention_uncertain';
   }
 
   // During a frontal plié the most useful visible relation is knee-over-foot.
-  if (context.motion.isPlie) return projectedKneeFootState(sk, side, context);
+  if (context?.motion.isPlie) return projectedKneeFootState(sk, side, context);
 
   // Outside plié, only assess whether the visible foot continues away from the
   // body centre. This is mirror-invariant and deliberately avoids turnout °.
   const outwardProduct = (foot.x - ankle.x) * (ankle.x - sk.pelvisCenter.x);
   const legLength = Math.max(1, Math.hypot(hip.x - ankle.x, hip.y - ankle.y));
   const horizontalReach = Math.abs(foot.x - ankle.x) / legLength;
-  if (outwardProduct < 0) return 'heuristic_strong_attention';
-  if (horizontalReach < 0.035) return 'heuristic_attention';
-  return 'heuristic_match';
+  const base: TeacherHeuristicBaseState = outwardProduct < 0
+    ? 'heuristic_strong_attention'
+    : horizontalReach < 0.035
+      ? 'heuristic_attention'
+      : 'heuristic_match';
+  const uncertain = !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque;
+  return withUncertainEvidence(base, uncertain);
 }
 
 /**
@@ -275,11 +297,7 @@ function computeCog(
   context: TeacherHeuristicContext | null,
 ): TeacherHeuristicState {
   if (
-    !context
-    || context.motion.confidence < 35
-    || context.motion.detectedPerspective !== 'FRONTAL'
-    || context.motion.isArabesque
-    || !Number.isFinite(context.cogX)
+    !Number.isFinite(context?.cogX)
     || ![
       sk.sternum,
       sk.navel,
@@ -289,25 +307,30 @@ function computeCog(
       sk.footL,
       sk.footR,
     ].every(pointIsUsable)
-  ) return 'heuristic_review';
+  ) return 'heuristic_attention_uncertain';
 
   const supportMin = Math.min(sk.ankleL.x, sk.ankleR.x, sk.footL!.x, sk.footR!.x);
   const supportMax = Math.max(sk.ankleL.x, sk.ankleR.x, sk.footL!.x, sk.footR!.x);
   const supportWidth = supportMax - supportMin;
-  if (!Number.isFinite(supportWidth) || supportWidth <= 1) return 'heuristic_review';
-  const percent = ((context.cogX - supportMin) / supportWidth) * 100;
-  if (percent >= 35 && percent <= 65) return 'heuristic_match';
-  if (percent >= 15 && percent <= 85) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  if (!Number.isFinite(supportWidth) || supportWidth <= 1) return 'heuristic_attention_uncertain';
+  const percent = ((context!.cogX - supportMin) / supportWidth) * 100;
+  const base: TeacherHeuristicBaseState = percent >= 35 && percent <= 65
+    ? 'heuristic_match'
+    : percent >= 15 && percent <= 85
+      ? 'heuristic_attention'
+      : 'heuristic_strong_attention';
+  const uncertain = !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque;
+  return withUncertainEvidence(base, uncertain);
 }
 
 function computeHead(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.headTilt;
-  if (!isEligible(m)) return 'heuristic_review';
-  const deg = Math.abs(m.value);
-  if (deg <= 5)  return 'heuristic_match';
-  if (deg <= 15) return 'heuristic_attention';
-  return 'heuristic_strong_attention';
+  const value = finiteMeasurementValue(m);
+  if (value === null) return 'heuristic_attention_uncertain';
+  return withUncertainEvidence(classifyDegrees(value, 5, 15), !isEligible(m));
 }
 
 // ─── ENGINE ─────────────────────────────────────────────────────────────────

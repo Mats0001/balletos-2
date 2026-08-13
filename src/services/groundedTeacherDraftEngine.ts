@@ -23,6 +23,9 @@ const VALID_HEURISTIC_STATES = new Set([
   'heuristic_match',
   'heuristic_attention',
   'heuristic_strong_attention',
+  'heuristic_match_uncertain',
+  'heuristic_attention_uncertain',
+  'heuristic_strong_attention_uncertain',
 ] as const);
 
 function isGroundedHeuristicState(

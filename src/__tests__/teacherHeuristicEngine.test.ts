@@ -7,6 +7,7 @@ import {
 } from '../services/vaganovaAngleCalculator';
 import { vaganova3DKinematics } from '../services/vaganova3DKinematics';
 import { PoseLandmark } from '../services/realMediaPipePose';
+import { heuristicBaseState, heuristicHasUncertainEvidence } from '../types/teacherHeuristic';
 
 function measurement(value: number, confidence = 0.9): VaganovaMeasurement {
   return {
@@ -125,8 +126,8 @@ describe('TeacherHeuristicEngine evidence gates', () => {
     expect(complete.torsoAlignment).toBe('heuristic_match');
     expect(missingShoulder.spine).toBe('heuristic_match');
     expect(missingShoulder.pelvis).toBe('heuristic_match');
-    expect(missingShoulder.shoulder).toBe('heuristic_review');
-    expect(missingShoulder.torsoAlignment).toBe('heuristic_review');
+    expect(missingShoulder.shoulder).toBe('heuristic_attention_uncertain');
+    expect(missingShoulder.torsoAlignment).toBe('heuristic_attention_uncertain');
   });
 
   it.each([
@@ -143,16 +144,19 @@ describe('TeacherHeuristicEngine evidence gates', () => {
       1000,
     );
 
-    expect(packet.spine).toBe('heuristic_review');
-    expect(packet.torsoAlignment).toBe('heuristic_review');
+    expect(heuristicBaseState(packet.spine)).not.toBeNull();
+    expect(heuristicHasUncertainEvidence(packet.spine)).toBe(true);
+    expect(heuristicBaseState(packet.torsoAlignment)).not.toBeNull();
+    expect(heuristicHasUncertainEvidence(packet.torsoAlignment)).toBe(true);
   });
 
-  it('keeps foot and center-of-gravity proxies neutral without their required context', () => {
+  it('keeps a provisional base colour while marking missing foot and centre context as uncertain', () => {
     const packet = engine.compute(analysis(), skeleton, 1, 1000);
 
-    expect(packet.footL).toBe('heuristic_review');
-    expect(packet.footR).toBe('heuristic_review');
-    expect(packet.cog).toBe('heuristic_review');
+    for (const state of [packet.footL, packet.footR, packet.cog]) {
+      expect(heuristicBaseState(state)).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(state)).toBe(true);
+    }
   });
 
   it.each([24, -24])(
@@ -165,8 +169,10 @@ describe('TeacherHeuristicEngine evidence gates', () => {
         valgusDriftR: unavailableKneeAxis(),
       }), skeleton, 1, 1000);
 
-      expect(packet.legL).toBe('heuristic_review');
-      expect(packet.legR).toBe('heuristic_review');
+      expect(heuristicBaseState(packet.legL)).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(packet.legL)).toBe(true);
+      expect(heuristicBaseState(packet.legR)).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(packet.legR)).toBe(true);
     },
   );
 
@@ -183,8 +189,10 @@ describe('TeacherHeuristicEngine evidence gates', () => {
         armLineQualityR: armMeasurement(value, status),
       }), skeleton, 1, 1000);
 
-      expect(packet.armL).toBe('heuristic_review');
-      expect(packet.armR).toBe('heuristic_review');
+      expect(heuristicBaseState(packet.armL)).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(packet.armL)).toBe(true);
+      expect(heuristicBaseState(packet.armR)).not.toBeNull();
+      expect(heuristicHasUncertainEvidence(packet.armR)).toBe(true);
     },
   );
 
@@ -210,7 +218,7 @@ describe('TeacherHeuristicEngine evidence gates', () => {
     expect(packet.footL).toBe('heuristic_strong_attention');
   });
 
-  it('keeps the projected torso-center relation in Nicole review when torso geometry is predicted', () => {
+  it('keeps the projected torso-center base colour but marks predicted torso geometry as uncertain', () => {
     const skeletonWithPredictedTorso = coachingSkeleton();
     (skeletonWithPredictedTorso.sternum as typeof skeletonWithPredictedTorso.sternum & { isPredicted?: boolean }).isPredicted = true;
 
@@ -222,6 +230,7 @@ describe('TeacherHeuristicEngine evidence gates', () => {
       frontalPlieContext,
     );
 
-    expect(packet.cog).toBe('heuristic_review');
+    expect(heuristicBaseState(packet.cog)).not.toBeNull();
+    expect(heuristicHasUncertainEvidence(packet.cog)).toBe(true);
   });
 });
