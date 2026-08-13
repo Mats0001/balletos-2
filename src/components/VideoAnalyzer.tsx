@@ -61,7 +61,7 @@ import {
   type TeacherPhaseAnalysis,
 } from '../services/teacherPhaseAnalysis';
 import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../types/teacherHeuristic';
-import { SynchronizedTenduAvatarViewport } from './SynchronizedTenduAvatarViewport';
+import { SynchronizedTenduAvatarViewport, type AvatarLoopRange } from './SynchronizedTenduAvatarViewport';
 import { canCreateNicoleReferenceFromSource } from '../services/referenceSourcePolicy';
 import {
   buildAttemptProgressCurve,
@@ -435,10 +435,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+  const avatarLoopRangeRef = useRef<AvatarLoopRange | null>(null);
   const getPrimaryVideoTimeMs = useCallback(
     () => (videoRef.current?.currentTime ?? 0) * 1000,
     [],
   );
+  const handleAvatarLoopRangeChange = useCallback((range: AvatarLoopRange | null) => {
+    avatarLoopRangeRef.current = range;
+    const video = videoRef.current;
+    if (range && video) {
+      const currentMs = video.currentTime * 1000;
+      if (currentMs < range.startMs || currentMs > range.endMs) video.currentTime = range.startMs / 1000;
+    }
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef<boolean>(false);
   const processingStartTimeRef = useRef<number>(0);
@@ -1344,7 +1353,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onTime = () => setCurrentPlayTime(v.currentTime);
+    const onTime = () => {
+      const loop = avatarLoopRangeRef.current;
+      if (loop && v.currentTime * 1000 >= loop.endMs - 3) {
+        v.currentTime = loop.startMs / 1000;
+      }
+      setCurrentPlayTime(v.currentTime);
+    };
     const onDur  = () => { if (v.duration && isFinite(v.duration)) setVideoDuration(v.duration); };
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('durationchange', onDur);
@@ -1355,6 +1370,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       v.removeEventListener('loadedmetadata', onDur);
     };
   }, [selectedDevVideoUrl]);
+
+  useEffect(() => {
+    avatarLoopRangeRef.current = null;
+  }, [effectiveExerciseLabel, selectedDevVideoUrl, splitScreenMode]);
 
 
 
@@ -3776,6 +3795,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 isPlaying={isPlaying}
                 currentTimeMs={currentPlayTime * 1000}
                 getCurrentTimeMs={getPrimaryVideoTimeMs}
+                liveSkeleton={sk}
+                videoWidth={vwSk}
+                videoHeight={vhSk}
+                previousAttempt={previousComparableAttempt}
+                progressCurve={attemptProgressCurve}
+                onLoopRangeChange={handleAvatarLoopRangeChange}
               />
             )}
 
