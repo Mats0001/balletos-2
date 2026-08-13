@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw, Hand } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
@@ -63,6 +63,12 @@ import {
 import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../types/teacherHeuristic';
 import { SynchronizedTenduAvatarViewport } from './SynchronizedTenduAvatarViewport';
 import { canCreateNicoleReferenceFromSource } from '../services/referenceSourcePolicy';
+import {
+  comparePhaseWithAttempt,
+  createStudentAttemptSnapshot,
+  findPreviousComparableAttempt,
+  studentAttemptHistory,
+} from '../services/studentAttemptHistory';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -70,6 +76,7 @@ interface VideoAnalyzerProps {
   exerciseName: string;
   onExerciseChange?: (exerciseName: string) => void;
   levelLabel: string;
+  selectedStudent: string;
 }
 
 export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
@@ -78,6 +85,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   exerciseName,
   onExerciseChange,
   levelLabel,
+  selectedStudent,
 }) => {
 
   // Video Controls State
@@ -256,6 +264,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
   const [analysisReport, setAnalysisReport] = useState<AutoAnalysisReport | null>(null);
   const [teacherPhaseAnalysis, setTeacherPhaseAnalysis] = useState<TeacherPhaseAnalysis | null>(null);
+  const [attemptHistoryRevision, setAttemptHistoryRevision] = useState(0);
   const [nicolePhaseComparisons, setNicolePhaseComparisons] = useState<readonly NicolePhaseReferenceComparison[]>([]);
   const [nicoleReferenceStorageRevision, setNicoleReferenceStorageRevision] = useState(0);
   const teacherPhaseAnalysisRef = useRef<TeacherPhaseAnalysis | null>(null);
@@ -2397,6 +2406,53 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       && comparison.cycleIndex === activeTeacherPhase.cycleIndex
     ))
     : [];
+  const attemptHistoryRecords = useMemo(
+    () => studentAttemptHistory.list(),
+    [attemptHistoryRevision],
+  );
+  const currentAttemptPreview = useMemo(() => teacherPhaseAnalysis
+    ? createStudentAttemptSnapshot({
+      analysis: teacherPhaseAnalysis,
+      studentLabel: selectedStudent,
+      sourceId: selectedDevVideoUrl,
+      now: () => new Date(0),
+      createId: () => 'current-attempt-preview',
+    })
+    : null,
+  [selectedDevVideoUrl, selectedStudent, teacherPhaseAnalysis]);
+  const previousComparableAttempt = currentAttemptPreview
+    ? findPreviousComparableAttempt(attemptHistoryRecords, currentAttemptPreview)
+    : null;
+  const activeAttemptComparison = comparePhaseWithAttempt(activeTeacherPhase, previousComparableAttempt);
+  const currentAttemptAlreadySaved = currentAttemptPreview
+    ? attemptHistoryRecords.some(record => (
+      record.studentKey === currentAttemptPreview.studentKey
+      && record.sourceId === currentAttemptPreview.sourceId
+      && record.exerciseId === currentAttemptPreview.exerciseId
+      && record.levelLabel === currentAttemptPreview.levelLabel
+    ))
+    : false;
+  const handleSaveStudentAttempt = () => {
+    if (!teacherPhaseAnalysis) return;
+    const snapshot = createStudentAttemptSnapshot({
+      analysis: teacherPhaseAnalysis,
+      studentLabel: selectedStudent,
+      sourceId: selectedDevVideoUrl,
+    });
+    if (!snapshot) {
+      showAnalyseToast('Versuch kann erst nach einer auswertbaren vollständigen Analyse gespeichert werden.');
+      return;
+    }
+    try {
+      const saved = studentAttemptHistory.save(snapshot);
+      setAttemptHistoryRevision(revision => revision + 1);
+      showAnalyseToast(saved.attemptId === snapshot.attemptId
+        ? `Versuch für ${selectedStudent} gespeichert · keine Referenz`
+        : `Dieser Versuch ist für ${selectedStudent} bereits gespeichert.`);
+    } catch (error) {
+      showAnalyseToast(error instanceof Error ? error.message : 'Versuch konnte nicht gespeichert werden.');
+    }
+  };
   vaganovaKineticAI.updateTrails(sk, currentVidTime);
   const cog = vaganovaKineticAI.computeCenterOfGravity(sk);
 
@@ -3358,6 +3414,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             Farben bleiben sichtbar, Punktpaare markieren das vorläufige Urteil. Optimieren: {teacherPhaseAnalysis.gate.correctiveActions.join(' · ')}
                           </div>
                         )}
+                        <details style={{ marginTop: '6px', fontSize: '7.5px', color: 'rgba(255,255,255,0.74)' }}>
+                          <summary style={{ cursor: 'pointer', color: '#a5f3fc', fontWeight: 850 }}>
+                            Aufnahmecheck {teacherPhaseAnalysis.gate.checks.filter(check => check.passed).length}/{teacherPhaseAnalysis.gate.checks.length}
+                          </summary>
+                          <div style={{ marginTop: '4px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 6px' }}>
+                            {teacherPhaseAnalysis.gate.checks.map(check => (
+                              <div key={check.id} title={check.detail} style={{ minWidth: 0, color: check.passed ? '#a5f3fc' : '#ffe87a' }}>
+                                {check.passed ? '✓' : '•'} {check.label}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', marginTop: '7px' }}>
                           {visibleTeacherPhases.map(phase => {
                             const color = heuristicColor(phase.displayState);
@@ -3435,6 +3503,50 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             </div>
                           );
                         })}
+                        <div style={{
+                          marginTop: '6px', padding: '5px 6px', borderRadius: '7px',
+                          background: 'rgba(168,129,189,0.08)', border: '1px solid rgba(168,129,189,0.3)',
+                          color: '#e9d5ff', fontSize: '7.5px', lineHeight: 1.35,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                            <div>
+                              <div style={{ fontWeight: 900 }}>Versuchsverlauf · {selectedStudent}</div>
+                              <div style={{ opacity: 0.58 }}>gleiche Übung · Stufe · Ansicht · Seite · keine Referenz</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleSaveStudentAttempt();
+                              }}
+                              disabled={!currentAttemptPreview || currentAttemptAlreadySaved}
+                              title={currentAttemptAlreadySaved ? 'Dieser Video-Versuch ist bereits gespeichert.' : 'Nur technische Phasenzusammenfassung speichern – kein Video und keine Rohlandmarks.'}
+                              style={{
+                                flexShrink: 0, borderRadius: '6px', padding: '4px 6px',
+                                border: '1px solid rgba(192,132,252,0.55)',
+                                background: currentAttemptAlreadySaved ? 'rgba(255,255,255,0.04)' : 'rgba(168,85,247,0.18)',
+                                color: currentAttemptAlreadySaved ? 'rgba(255,255,255,0.45)' : '#f3e8ff',
+                                fontSize: '7px', fontWeight: 850,
+                                cursor: currentAttemptAlreadySaved ? 'default' : 'pointer',
+                              }}
+                            >
+                              {currentAttemptAlreadySaved ? '✓ Gemerkt' : 'Versuch merken'}
+                            </button>
+                          </div>
+                          {activeAttemptComparison ? (
+                            <div style={{ marginTop: '4px', color: '#fff' }}>
+                              Gegen den letzten vergleichbaren Versuch in „{activeTeacherPhase?.label}“:
+                              {' '}<span style={{ color: '#30d158' }}>{activeAttemptComparison.improved} verbessert</span>
+                              {' · '}<span style={{ color: '#a5f3fc' }}>{activeAttemptComparison.unchanged} stabil</span>
+                              {' · '}<span style={{ color: '#ffd60a' }}>{activeAttemptComparison.needsMoreAttention} braucht mehr Aufmerksamkeit</span>
+                              {activeAttemptComparison.provisional ? ' · gepunktete Evidenz bleibt vorläufig' : ''}
+                            </div>
+                          ) : (
+                            <div style={{ marginTop: '4px', opacity: 0.7 }}>
+                              Noch kein anderer vergleichbarer Versuch gespeichert. Der erste gespeicherte Versuch wird nur zur persönlichen Verlaufslinie – niemals zur Soll-Referenz.
+                            </div>
+                          )}
+                        </div>
                         <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
                           Farbe = Phasenleistung · Einzelpunkte = leicht unsicher · Punktpaare = schwache Evidenz. Erst nach vollständigem Scan.
                         </div>

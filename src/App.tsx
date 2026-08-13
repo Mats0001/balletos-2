@@ -107,6 +107,7 @@ export const App: React.FC = () => {
             exerciseName={exerciseName}
             onExerciseChange={setExerciseName}
             levelLabel={selectedAgeGroup}
+            selectedStudent={selectedStudent}
           />
         )}
 
