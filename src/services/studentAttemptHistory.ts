@@ -13,6 +13,7 @@ import type {
   TeacherPhaseResult,
 } from './teacherPhaseAnalysis';
 import { isBundledNicoleTestClip } from './referenceSourcePolicy';
+import { MOTION_REGISTRY } from './motionRegistry';
 
 const STORAGE_KEY = 'balletos_student_attempt_history_v1';
 const MAX_RECORDS = 60;
@@ -152,7 +153,7 @@ export function studentAttemptSnapshotIsValid(value: unknown): value is StudentA
     && value.referenceAuthority === 'none'
     && stringValue(value.capturedAt)
     && !Number.isNaN(Date.parse(value.capturedAt as string))
-    && (value.exerciseId === 'plie' || value.exerciseId === 'tendu')
+    && MOTION_REGISTRY.some(entry => entry.id === value.exerciseId)
     && stringValue(value.exerciseLabel)
     && stringValue(value.levelLabel)
     && (value.perspective === null

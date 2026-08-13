@@ -24,6 +24,7 @@ const phase: TeacherPhaseResult = {
 const analysis: TeacherPhaseAnalysis = {
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS', workingSide: 'right',
   direction: 'a_la_seconde', directionConfidence: 0.88, phaseEngineConfidence: 0.9,
+  phaseAuthority: 'teacher_assessment',
   cycleCount: 1,
   gate: { status: 'ready', checks: [], correctiveActions: [], detectedPerspective: 'FRONTAL' },
   phases: [phase], framesAnalyzed: 40, policyVersion: 'test',

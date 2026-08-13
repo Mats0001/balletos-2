@@ -49,6 +49,7 @@ function analysis(
     direction: 'a_la_seconde',
     directionConfidence: 0.88,
     phaseEngineConfidence: 0.9,
+    phaseAuthority: 'teacher_assessment',
     cycleCount: 1,
     gate: { status, checks: [], correctiveActions: [], detectedPerspective: 'FRONTAL' },
     phases: status === 'needs_correction' ? [] : [phase(sourceState)],
@@ -160,5 +161,23 @@ describe('student attempt history', () => {
       analysis: analysis(), studentLabel: 'Emma', sourceId: 'clip-a.mp4', createId: () => 'attempt',
     })!;
     expect(() => failing.save(snapshot)).toThrow('quota');
+  });
+
+  it.each(['passe', 'jete', 'changement'] as const)('accepts a non-reference %s phase-pilot history record', (exerciseId) => {
+    const snapshot = createStudentAttemptSnapshot({
+      analysis: {
+        ...analysis('heuristic_attention_weak_evidence'),
+        exerciseId,
+        exerciseLabel: exerciseId === 'passe' ? 'Passé' : exerciseId === 'jete' ? 'Jeté' : 'Changement',
+        phaseAuthority: 'technical_phase_pilot',
+        phases: [phase('heuristic_attention_weak_evidence', 0, 'preparation')],
+      },
+      studentLabel: 'Emma',
+      sourceId: `student-${exerciseId}.mp4`,
+      createId: () => `attempt-${exerciseId}`,
+    });
+
+    expect(snapshot && studentAttemptSnapshotIsValid(snapshot)).toBe(true);
+    expect(snapshot).toMatchObject({ exerciseId, referenceAuthority: 'none' });
   });
 });

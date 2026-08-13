@@ -1,5 +1,6 @@
 import type { PoseLandmark } from './realMediaPipePose';
 import { vaganovaMotionClassifier } from './vaganovaMotionClassifier';
+import { resolveMotionRegistryEntry } from './motionRegistry';
 
 export type LivePreflightStatus = 'checking' | 'ready' | 'ready_with_notes' | 'needs_correction';
 
@@ -72,7 +73,8 @@ export function evaluateLiveRecordingPreflight(input: Readonly<{
   const progress = Math.min(1, observations.length / minimum);
   const poseObservations = observations.filter(observation => observation.landmarks.length >= 33);
   const poseRatio = poseObservations.length / Math.max(1, observations.length);
-  const exerciseSelected = input.exerciseLabel.trim().length > 0;
+  const motion = resolveMotionRegistryEntry(input.exerciseLabel);
+  const exerciseSelected = motion !== null;
 
   if (observations.length < minimum) {
     return Object.freeze({
@@ -131,9 +133,8 @@ export function evaluateLiveRecordingPreflight(input: Readonly<{
     headline: status === 'ready' ? 'Aufnahme kann starten'
       : status === 'ready_with_notes' ? 'Start möglich · Hinweise werden als Evidenzpunkte übernommen'
         : 'Vor dem Start kurz korrigieren',
-    nextAction: status === 'ready' ? 'Tendu einmal vollständig ausführen.'
+    nextAction: status === 'ready' ? `${motion?.shortLabel ?? 'Übung'} einmal vollständig ausführen.`
       : status === 'ready_with_notes' ? notes.map(item => item.label).join(' · ')
         : blocking.map(item => item.label).join(' · '),
   });
 }
-

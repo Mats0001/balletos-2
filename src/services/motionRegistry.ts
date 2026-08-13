@@ -18,21 +18,21 @@ const registry: readonly MotionRegistryEntry[] = [
   {
     id: 'passe', label: 'Passé', shortLabel: 'Passé',
     aliases: ['passé', 'passe'], directions: ['working_leg'],
-    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_events_only', feedbackStatus: 'safe_scaffold_ready',
+    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_phase_pilot', feedbackStatus: 'safe_scaffold_ready',
     sourceIds: ['dryad-passe-2025'],
     provenance: { pedagogicalStatus: 'technical_only', nicoleReviewStatus: 'not_reviewed', productStatus: 'technical_signal_only' },
   },
   {
     id: 'jete', label: 'Jeté', shortLabel: 'Jeté',
     aliases: ['jeté', 'jete'], directions: ['outward'],
-    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_events_only', feedbackStatus: 'safe_scaffold_ready',
+    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_phase_pilot', feedbackStatus: 'safe_scaffold_ready',
     sourceIds: ['dryad-jete-2025'],
     provenance: { pedagogicalStatus: 'technical_only', nicoleReviewStatus: 'not_reviewed', productStatus: 'technical_signal_only' },
   },
   {
     id: 'changement', label: 'Changement', shortLabel: 'Changement',
     aliases: ['changement'], directions: ['vertical_jump'],
-    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_events_only', feedbackStatus: 'safe_scaffold_ready',
+    dataStatus: 'technical_cohort_imported', phaseEngineStatus: 'technical_phase_pilot', feedbackStatus: 'safe_scaffold_ready',
     sourceIds: ['dryad-changement-2025'],
     provenance: { pedagogicalStatus: 'technical_only', nicoleReviewStatus: 'not_reviewed', productStatus: 'technical_signal_only' },
   },
@@ -63,4 +63,8 @@ export function resolveMotionRegistryEntry(label: string): MotionRegistryEntry |
 
 export function assessmentReadyMotions(): readonly MotionRegistryEntry[] {
   return MOTION_REGISTRY.filter(entry => entry.phaseEngineStatus === 'assessment_ready');
+}
+
+export function selectableMotionEntries(): readonly MotionRegistryEntry[] {
+  return MOTION_REGISTRY.filter(entry => entry.phaseEngineStatus !== 'technical_events_only');
 }

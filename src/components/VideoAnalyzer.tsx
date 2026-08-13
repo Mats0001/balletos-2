@@ -2786,7 +2786,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               value={resolveMotionRegistryEntry(exerciseName)?.id ?? 'plie'}
               onChange={(event) => {
                 const next = MOTION_REGISTRY.find(entry => entry.id === event.target.value);
-                if (!next || next.phaseEngineStatus !== 'assessment_ready') return;
+                if (!next || next.phaseEngineStatus === 'technical_events_only') return;
                 onExerciseChange?.(next.label);
                 clearSkeletonSelection('analysis_stale');
                 if (next.id !== 'tendu') setSplitScreenMode(false);
@@ -2802,10 +2802,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 <option
                   key={entry.id}
                   value={entry.id}
-                  disabled={entry.phaseEngineStatus !== 'assessment_ready'}
+                  disabled={entry.phaseEngineStatus === 'technical_events_only'}
                   style={{ background: '#1c1c1e' }}
                 >
-                  {entry.label}{entry.phaseEngineStatus === 'assessment_ready' ? '' : ' · Technikimport'}
+                  {entry.label}{entry.phaseEngineStatus === 'technical_phase_pilot' ? ' · Phasenpilot' : entry.phaseEngineStatus === 'technical_events_only' ? ' · Technikimport' : ''}
                 </option>
               ))}
             </select>
@@ -3488,14 +3488,27 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             <div style={{ fontSize: '7px', opacity: 0.52, marginTop: '1px' }}>
                               Pose · Zeitverlauf · Bildqualität · Geometrie{nicolePhaseComparisons.length > 0 ? ' · Nicole-Linie' : ''}
                             </div>
-                            {teacherPhaseAnalysis.exerciseId === 'tendu' && (
+                            {teacherPhaseAnalysis.phaseAuthority === 'technical_phase_pilot' && (
+                              <div style={{ fontSize: '7px', color: '#fbbf24', marginTop: '2px', fontWeight: 800 }}>
+                                TECHNISCHER PHASENPILOT · Dryad-Zeitstruktur · Nicole-Korridore ausstehend
+                              </div>
+                            )}
+                            {(teacherPhaseAnalysis.exerciseId === 'tendu' || teacherPhaseAnalysis.exerciseId === 'jete') && (
                               <div style={{ fontSize: '7px', color: '#a5f3fc', marginTop: '2px' }}>
-                                {teacherPhaseAnalysis.workingSide === 'left' ? 'Links' : 'Rechts'} · {
+                                {teacherPhaseAnalysis.workingSide === 'left' ? 'Links' : teacherPhaseAnalysis.workingSide === 'right' ? 'Rechts' : 'Seite uneindeutig'} · {
                                   teacherPhaseAnalysis.direction === 'a_la_seconde' ? 'à la seconde'
                                     : teacherPhaseAnalysis.direction === 'devant' ? 'devant'
                                       : teacherPhaseAnalysis.direction === 'derriere' ? 'derrière'
                                         : 'Richtung noch uneindeutig'
                                 } · Phasen {Math.round(teacherPhaseAnalysis.phaseEngineConfidence * 100)} %
+                              </div>
+                            )}
+                            {(teacherPhaseAnalysis.exerciseId === 'passe' || teacherPhaseAnalysis.exerciseId === 'changement') && (
+                              <div style={{ fontSize: '7px', color: '#a5f3fc', marginTop: '2px' }}>
+                                {teacherPhaseAnalysis.exerciseId === 'changement'
+                                  ? 'Beidseitige Sprungfolge'
+                                  : teacherPhaseAnalysis.workingSide === 'left' ? 'Arbeitsbein links' : teacherPhaseAnalysis.workingSide === 'right' ? 'Arbeitsbein rechts' : 'Arbeitsbein uneindeutig'}
+                                {' · '}Phasen {Math.round(teacherPhaseAnalysis.phaseEngineConfidence * 100)} %
                               </div>
                             )}
                             {!canCreateNicoleReferenceFromSource(selectedDevVideoUrl) && (
@@ -3516,6 +3529,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                         {teacherPhaseAnalysis.gate.status === 'usable_with_caution' && (
                           <div style={{ marginTop: '5px', color: '#ffe87a', fontSize: '7.5px', lineHeight: 1.35 }}>
                             Farben bleiben sichtbar, Punktpaare markieren das vorläufige Urteil. Optimieren: {teacherPhaseAnalysis.gate.correctiveActions.join(' · ')}
+                          </div>
+                        )}
+                        {teacherPhaseAnalysis.phaseAuthority === 'technical_phase_pilot' && teacherPhaseAnalysis.gate.status === 'ready' && (
+                          <div style={{ marginTop: '5px', color: '#ffe87a', fontSize: '7.5px', lineHeight: 1.35 }}>
+                            Farben zeigen die vorhandene Regionsheuristik; feine Punkte kennzeichnen die noch nicht von Nicole kalibrierten Phasenkorridore.
                           </div>
                         )}
                         <details style={{ marginTop: '6px', fontSize: '7.5px', color: 'rgba(255,255,255,0.74)' }}>

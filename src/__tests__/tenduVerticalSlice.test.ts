@@ -22,6 +22,7 @@ const phase: TeacherPhaseResult = Object.freeze({
 const analysis: TeacherPhaseAnalysis = Object.freeze({
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',
   workingSide: 'right', direction: 'a_la_seconde', directionConfidence: 0.88, phaseEngineConfidence: 0.9,
+  phaseAuthority: 'teacher_assessment',
   cycleCount: 1, framesAnalyzed: 80, policyVersion: 'test', phases: Object.freeze([phase]),
   gate: Object.freeze({ status: 'ready', checks: Object.freeze([]), correctiveActions: Object.freeze([]), detectedPerspective: 'FRONTAL' }),
 });

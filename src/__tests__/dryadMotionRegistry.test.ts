@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { buildDryadTechnicalCohortAsset } from '../services/dryadMotionCohort';
 import { importDryadMotionTrial } from '../services/dryadMotionImporter';
-import { MOTION_REGISTRY, resolveMotionRegistryEntry } from '../services/motionRegistry';
+import { MOTION_REGISTRY, resolveMotionRegistryEntry, selectableMotionEntries } from '../services/motionRegistry';
 import { DRYAD_MOTION_ASSET_MANIFEST, DRYAD_TECHNICAL_MOTION_ASSETS } from '../data/dryadMotionAssets.generated';
+import { DRYAD_TECHNICAL_PHASE_PRIORS } from '../data/dryadTechnicalPhasePriors.generated';
 
 function motionCsv(rightAmplitude = 2, leftAmplitude = 0.2): string {
   const header = 'trial,time,C7_z,RAnkle_x,RAnkle_y,RAnkle_z,LAnkle_x,LAnkle_y,LAnkle_z,RToe_x,RToe_y,RToe_z,LToe_x,LToe_y,LToe_z';
@@ -88,6 +89,10 @@ describe('general Dryad motion pipeline', () => {
     expect(MOTION_REGISTRY.map(entry => entry.id)).toEqual(['plie', 'tendu', 'passe', 'jete', 'changement']);
     expect(MOTION_REGISTRY.filter(entry => entry.phaseEngineStatus === 'assessment_ready').map(entry => entry.id))
       .toEqual(['plie', 'tendu']);
+    expect(MOTION_REGISTRY.filter(entry => entry.phaseEngineStatus === 'technical_phase_pilot').map(entry => entry.id))
+      .toEqual(['passe', 'jete', 'changement']);
+    expect(selectableMotionEntries().map(entry => entry.id))
+      .toEqual(['plie', 'tendu', 'passe', 'jete', 'changement']);
     expect(resolveMotionRegistryEntry('Battement Tendu devant')?.id).toBe('tendu');
     expect(resolveMotionRegistryEntry('Passé')?.id).toBe('passe');
     expect(DRYAD_TECHNICAL_MOTION_ASSETS.map(asset => asset.clip.exerciseId))
@@ -101,5 +106,25 @@ describe('general Dryad motion pipeline', () => {
       { movementId: 'jete', importedTrialCount: 100 },
       { movementId: 'changement', importedTrialCount: 81 },
     ]);
+  });
+
+  it('keeps the compact runtime timing priors bound to the full generated cohorts', () => {
+    for (const prior of DRYAD_TECHNICAL_PHASE_PRIORS) {
+      const asset = DRYAD_TECHNICAL_MOTION_ASSETS.find(candidate => candidate.clip.exerciseId === prior.exerciseId)!;
+      const expectedPeak = prior.exerciseId === 'passe'
+        ? asset.eventTiming.find(event => event.eventId === 'FT')!.medianProgress
+        : prior.exerciseId === 'jete'
+          ? asset.eventTiming.find(event => event.eventId === 'FR')!.medianProgress
+          : (
+            asset.eventTiming.find(event => event.eventId === 'GP2')!.medianProgress
+            + asset.eventTiming.find(event => event.eventId === 'GL')!.medianProgress
+          ) / 2;
+      expect(prior).toMatchObject({
+        datasetId: asset.clip.provenance.datasetId,
+        generatedFromDigest: asset.generatedFromDigest,
+        sourceSampleCount: asset.clip.sourceTrialCount,
+      });
+      expect(prior.expectedPeakProgress).toBe(expectedPeak);
+    }
   });
 });

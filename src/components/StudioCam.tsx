@@ -9,6 +9,7 @@ import {
   evaluateLiveRecordingPreflight,
   type LivePreflightObservation,
 } from '../services/liveRecordingPreflight';
+import { selectableMotionEntries } from '../services/motionRegistry';
 
 interface Props {
   selectedAgeGroup: AgeGroup;
@@ -73,12 +74,7 @@ export const StudioCam: React.FC<Props> = ({
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [isCameraActive]);
 
-  const exercises = [
-    'Plié in der 1. Position',
-    'Battement Tendu devant',
-    'Arabesque en l’air',
-    'Pirouette en dehors'
-  ];
+  const exercises = selectableMotionEntries();
 
   const inspectorData: JetztWichtigInspectorData = {
     studentName: 'Emma Berger',
@@ -182,8 +178,10 @@ export const StudioCam: React.FC<Props> = ({
                 cursor: 'pointer'
               }}
             >
-              {exercises.map(ex => (
-                <option key={ex} value={ex} style={{ background: '#14121a', color: '#fff' }}>{ex}</option>
+              {exercises.map(entry => (
+                <option key={entry.id} value={entry.label} style={{ background: '#14121a', color: '#fff' }}>
+                  {entry.label}{entry.phaseEngineStatus === 'technical_phase_pilot' ? ' · Phasenpilot' : ''}
+                </option>
               ))}
             </select>
           </div>

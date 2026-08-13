@@ -17,10 +17,19 @@ import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaKineticAI } from './vaganovaKineticAI';
 import { vaganovaMotionClassifier } from './vaganovaMotionClassifier';
 import type { CanonicalMotionPhaseId } from '../types/canonicalMotion';
+import type { BalletMotionId } from '../types/motionRegistry';
+import { resolveMotionRegistryEntry } from './motionRegistry';
+import {
+  detectTechnicalMotionPhases,
+  type ChangementPhaseId,
+  type JetePhaseId,
+  type PassePhaseId,
+  type TechnicalMotionId,
+} from './technicalMotionPhaseEngine';
 
 export type PliePhaseId = 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
 export type TenduPhaseId = CanonicalMotionPhaseId;
-export type TeacherPhaseId = PliePhaseId | TenduPhaseId;
+export type TeacherPhaseId = PliePhaseId | TenduPhaseId | PassePhaseId | JetePhaseId | ChangementPhaseId;
 export type TenduDirection = 'devant' | 'a_la_seconde' | 'derriere' | 'undetermined';
 
 export interface FrameImageQuality {
@@ -42,7 +51,8 @@ export interface RecordingGateCheck {
     | 'sharpness'
     | 'camera_stability'
     | 'complete_plie_cycle'
-    | 'complete_tendu_cycle';
+    | 'complete_tendu_cycle'
+    | 'complete_motion_cycle';
   label: string;
   passed: boolean;
   /** True only when this failure leaves no defensible phase analysis. */
@@ -86,13 +96,14 @@ export interface TeacherPhaseResult {
 
 export interface TeacherPhaseAnalysis {
   schemaVersion: 1;
-  exerciseId: 'plie' | 'tendu';
+  exerciseId: BalletMotionId;
   exerciseLabel: string;
   levelLabel: string;
   workingSide: 'left' | 'right' | null;
   direction: TenduDirection | null;
   directionConfidence: number;
   phaseEngineConfidence: number;
+  phaseAuthority: 'teacher_assessment' | 'technical_phase_pilot';
   cycleCount: number;
   gate: RecordingGateResult;
   phases: readonly TeacherPhaseResult[];
@@ -564,13 +575,12 @@ function gateCheck(
 }
 
 export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherPhaseAnalysis {
-  const normalizedExercise = input.exerciseLabel.toLocaleLowerCase('de-DE');
-  const exerciseId: TeacherPhaseAnalysis['exerciseId'] = normalizedExercise.includes('tendu')
-    ? 'tendu'
-    : 'plie';
-  const exerciseAndLevelSelected = (
-    normalizedExercise.includes('tendu') || normalizedExercise.includes('pli')
-  ) && input.levelLabel.trim().length > 0;
+  const registryEntry = resolveMotionRegistryEntry(input.exerciseLabel);
+  const exerciseId: TeacherPhaseAnalysis['exerciseId'] = registryEntry?.id ?? 'plie';
+  const phaseAuthority: TeacherPhaseAnalysis['phaseAuthority'] = registryEntry?.phaseEngineStatus === 'technical_phase_pilot'
+    ? 'technical_phase_pilot'
+    : 'teacher_assessment';
+  const exerciseAndLevelSelected = registryEntry !== null && input.levelLabel.trim().length > 0;
   const poseFrames = input.frames.filter((frame): frame is FrameEntry & { landmarks: PoseLandmark[] } => (
     frame.resultKind !== 'no_pose' && Array.isArray(frame.landmarks) && frame.landmarks.length >= 33
   ));
@@ -649,26 +659,45 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     }];
   });
   const tenduDetection = exerciseId === 'tendu' ? detectTenduPhases(samples) : null;
-  const boundaries = exerciseId === 'tendu'
+  const technicalDetection = phaseAuthority === 'technical_phase_pilot'
+    ? detectTechnicalMotionPhases(exerciseId as TechnicalMotionId, samples.map(sample => ({
+      timeMs: sample.frame.timeMs,
+      landmarks: sample.landmarks,
+      torsoCenter: sample.torsoCenter,
+      bboxHeight: sample.bbox.height,
+      perspective: sample.perspective,
+    })))
+    : null;
+  const boundaries: readonly PhaseBoundary[] | null = exerciseId === 'tendu'
     ? tenduDetection?.boundaries ?? null
-    : detectPliePhases(samples);
-  const workingSide = exerciseId === 'tendu' ? tenduDetection?.workingSide ?? null : null;
-  const cycleCount = exerciseId === 'tendu' ? tenduDetection?.cycleCount ?? 0 : boundaries ? 1 : 0;
-  const direction = exerciseId === 'tendu' ? tenduDetection?.direction ?? 'undetermined' : null;
-  const directionConfidence = exerciseId === 'tendu' ? tenduDetection?.directionConfidence ?? 0 : 1;
+    : phaseAuthority === 'technical_phase_pilot'
+      ? technicalDetection?.boundaries ?? null
+      : detectPliePhases(samples);
+  const workingSide = exerciseId === 'tendu'
+    ? tenduDetection?.workingSide ?? null
+    : technicalDetection?.workingSide ?? null;
+  const cycleCount = exerciseId === 'tendu'
+    ? tenduDetection?.cycleCount ?? 0
+    : technicalDetection?.cycleCount ?? (boundaries ? 1 : 0);
+  const direction = exerciseId === 'tendu'
+    ? tenduDetection?.direction ?? 'undetermined'
+    : technicalDetection?.direction ?? null;
+  const directionConfidence = exerciseId === 'tendu'
+    ? tenduDetection?.directionConfidence ?? 0
+    : technicalDetection?.directionConfidence ?? 1;
   const phaseEngineConfidence = exerciseId === 'tendu'
     ? tenduDetection?.confidence ?? 0
-    : boundaries ? 0.9 : 0;
-  const exerciseDisplayName = exerciseId === 'tendu' ? 'Tendu' : 'Plié';
+    : technicalDetection?.confidence ?? (boundaries ? 0.9 : 0);
+  const exerciseDisplayName = registryEntry?.shortLabel ?? 'Plié';
   const completeCycleId: RecordingGateCheck['id'] = exerciseId === 'tendu'
     ? 'complete_tendu_cycle'
-    : 'complete_plie_cycle';
-  const completeCycleLabel = exerciseId === 'tendu'
-    ? 'Vollständiger Tendu-Zyklus erkannt'
-    : 'Vollständiger Plié-Zyklus erkannt';
-  const missingCycleDetail = exerciseId === 'tendu'
-    ? 'Ausgang, volle Streckung, Rückweg oder Schluss fehlt'
-    : 'Ausgang, Tiefpunkt oder Abschluss fehlt';
+    : exerciseId === 'plie'
+      ? 'complete_plie_cycle'
+      : 'complete_motion_cycle';
+  const completeCycleLabel = `Vollständiger ${exerciseDisplayName}-Zyklus`;
+  const missingCycleDetail = exerciseId === 'plie'
+    ? 'Ausgang, Tiefpunkt oder Abschluss fehlt'
+    : `${exerciseDisplayName}-Bewegung nicht vollständig in fünf Phasen erkannt`;
 
   const checks: RecordingGateCheck[] = [
     gateCheck('exercise_level', `${exerciseDisplayName} und Stufe ausgewählt`, exerciseAndLevelSelected, !exerciseAndLevelSelected, `${input.exerciseLabel || 'Übung fehlt'} · ${input.levelLabel || 'Stufe fehlt'}`),
@@ -686,11 +715,11 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
       boundaries !== null,
       boundaries === null,
       boundaries
-        ? exerciseId === 'tendu'
-          ? cycleCount === 1
-            ? '1 vollständiger Tendu-Zyklus mit 5 Phasen erkannt'
-            : `${cycleCount} vollständige Tendu-Zyklen mit je 5 Phasen erkannt`
-          : '5 Phasen erkannt'
+        ? exerciseId === 'plie'
+          ? '5 Phasen erkannt'
+          : cycleCount === 1
+            ? `1 vollständiger ${exerciseDisplayName}-Zyklus mit 5 Phasen erkannt`
+            : `${cycleCount} vollständige ${exerciseDisplayName}-Zyklen mit je 5 Phasen erkannt`
         : missingCycleDetail,
     ),
   ];
@@ -714,7 +743,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
         TEACHER_REGION_KEYS.map(key => {
           const summary = aggregateRegion(phaseSamples, key);
           const base = heuristicBaseState(summary.state);
-          return [key, gate.status === 'usable_with_caution' && base
+          return [key, (gate.status === 'usable_with_caution' || phaseAuthority === 'technical_phase_pilot') && base
             ? { ...summary, state: withEvidenceStrength(base, 'weak') }
             : summary];
         }),
@@ -743,6 +772,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     direction,
     directionConfidence,
     phaseEngineConfidence,
+    phaseAuthority,
     cycleCount,
     gate,
     phases,

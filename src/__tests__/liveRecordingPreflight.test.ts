@@ -34,6 +34,14 @@ describe('live recording preflight', () => {
     const result = evaluateLiveRecordingPreflight({ observations: observations(8), exerciseLabel: 'Battement Tendu' });
     expect(result.status).toBe('ready');
     expect(result.checks.every(check => check.state === 'pass')).toBe(true);
+    expect(result.nextAction).toBe('Tendu einmal vollständig ausführen.');
+  });
+
+  it('names the selected technical phase pilot instead of hard-coding Tendu', () => {
+    const result = evaluateLiveRecordingPreflight({ observations: observations(8), exerciseLabel: 'Passé' });
+
+    expect(result.status).toBe('ready');
+    expect(result.nextAction).toBe('Passé einmal vollständig ausführen.');
   });
 
   it('allows ordinary classroom imperfections as evidence notes instead of an endless abort', () => {
@@ -60,4 +68,3 @@ describe('live recording preflight', () => {
       .toEqual(expect.arrayContaining(['exercise', 'pose', 'full_body', 'feet', 'person_size', 'sharpness', 'camera']));
   });
 });
-

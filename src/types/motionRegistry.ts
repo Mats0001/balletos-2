@@ -75,7 +75,11 @@ export interface MotionRegistryEntry {
   aliases: readonly string[];
   directions: readonly MotionDirection[];
   dataStatus: 'runtime_pose' | 'technical_cohort_imported';
-  phaseEngineStatus: 'assessment_ready' | 'technical_events_only';
+  /**
+   * `technical_phase_pilot` is selectable and phase-aware, but its colour
+   * corridors are deliberately provisional until Nicole reviews them.
+   */
+  phaseEngineStatus: 'assessment_ready' | 'technical_phase_pilot' | 'technical_events_only';
   feedbackStatus: 'general_safe_draft' | 'safe_scaffold_ready';
   sourceIds: readonly string[];
   provenance: Readonly<{

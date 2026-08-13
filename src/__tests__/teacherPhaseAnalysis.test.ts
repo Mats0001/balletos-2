@@ -78,6 +78,28 @@ function repeatedTenduCycleFrames(): FrameEntry[] {
   }));
 }
 
+function technicalMotionFrames(movement: 'passe' | 'jete' | 'changement'): FrameEntry[] {
+  const excursion = [
+    ...Array(8).fill(0),
+    ...Array.from({ length: 10 }, (_, index) => (index + 1) / 10),
+    ...Array(5).fill(1),
+    ...Array.from({ length: 10 }, (_, index) => 1 - (index + 1) / 10),
+    ...Array(8).fill(0),
+  ];
+  return excursion.map((progress, index) => {
+    const landmarks = poseForKneeAngle(170);
+    if (movement === 'passe') landmarks[32].y -= progress * 0.26;
+    if (movement === 'jete') landmarks[32].x += progress * 0.24;
+    if (movement === 'changement') landmarks.forEach(point => { point.y -= progress * 0.1; });
+    return {
+      timeMs: index * 33.333,
+      resultKind: 'pose' as const,
+      landmarks,
+      imageQuality: { sharpnessScore: 0.42, backgroundMotionScore: index === 0 ? null : 0.02 },
+    };
+  });
+}
+
 describe('teacher phase-based post analysis', () => {
   it('gates a complete recording and produces all five ordered Plié phases', () => {
     const result = analyzeTeacherPhases({
@@ -188,6 +210,34 @@ describe('teacher phase-based post analysis', () => {
     expect(findTeacherPhaseAtTime(result, secondPeak.representativeTimeMs)).toMatchObject({
       id: 'full_extension', cycleIndex: 1,
     });
+  });
+
+  it.each([
+    ['Passé', 'passe', ['preparation', 'lift', 'placement', 'lower', 'finish']],
+    ['Jeté', 'jete', ['preparation', 'brush', 'release', 'return', 'finish']],
+    ['Changement', 'changement', ['preparation', 'takeoff', 'flight', 'landing', 'finish']],
+  ] as const)('runs %s as a selectable five-phase technical pilot with dotted evidence', (label, movement, phases) => {
+    const result = analyzeTeacherPhases({
+      frames: technicalMotionFrames(movement),
+      videoWidth: 960,
+      videoHeight: 1280,
+      exerciseLabel: label,
+      levelLabel: 'MINIS',
+    });
+
+    expect(result).toMatchObject({
+      exerciseId: movement,
+      phaseAuthority: 'technical_phase_pilot',
+      cycleCount: 1,
+    });
+    expect(result.phases.map(phase => phase.id)).toEqual(phases);
+    expect(result.gate.checks).toContainEqual(expect.objectContaining({
+      id: 'complete_motion_cycle',
+      passed: true,
+    }));
+    expect(result.phases.flatMap(phase => Object.values(phase.regions))
+      .filter(region => heuristicBaseState(region.state) !== null)
+      .every(region => heuristicEvidenceStrength(region.state) === 'weak')).toBe(true);
   });
 
   it('keeps colour and evidence confidence orthogonal in every phase region', () => {
