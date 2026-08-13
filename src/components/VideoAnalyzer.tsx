@@ -40,7 +40,7 @@ import {
   getSkeletonTarget,
   resolveSkeletonTargetAnchor,
 } from '../services/skeletonTargetRegistry';
-import type { SelectedSkeletonTarget, SkeletonTargetId } from '../types/skeletonTarget';
+import type { GroundedMetricAdapterId, SelectedSkeletonTarget, SkeletonTargetFocusId, SkeletonTargetId } from '../types/skeletonTarget';
 import { cueReviewAuditIsValid, cueReviewExpectedState, projectCueReviewAudit } from '../services/cueReviewAudit';
 import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
 import {
@@ -116,8 +116,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     () => createBlockedGroundedTeacherDraft('target_not_selected'),
   );
   const groundedTeacherDraftRef = useRef<GroundedTeacherDraft>(groundedTeacherDraft);
-  const groundedTorsoDraftPendingRef = useRef(false);
-  const groundedTorsoSnapPendingRef = useRef(false);
+  const groundedDraftPendingRef = useRef(false);
+  const groundedSnapPendingRef = useRef(false);
+  const groundedDraftTargetRef = useRef<Readonly<{
+    metricAdapter: GroundedMetricAdapterId;
+    focusId: SkeletonTargetFocusId;
+  }> | null>(null);
   const skeletonTargetRebindRef = useRef<Readonly<{
     targetId: SkeletonTargetId;
     segmentT?: number;
@@ -135,8 +139,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
     reason: Parameters<typeof createBlockedGroundedTeacherDraft>[0] = 'target_not_selected',
     resetView: boolean = true,
   ) => {
-    groundedTorsoDraftPendingRef.current = false;
-    groundedTorsoSnapPendingRef.current = false;
+    groundedDraftPendingRef.current = false;
+    groundedSnapPendingRef.current = false;
+    groundedDraftTargetRef.current = null;
     skeletonTargetRebindRef.current = null;
     activeCueGlowTypeRef.current = undefined;
     updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(reason));
@@ -635,8 +640,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       stabilizedOverlayRef.current = null;
       lastStabilizedAnalysisTimeRef.current = -1;
       activeCueGlowTypeRef.current = undefined;
-      groundedTorsoDraftPendingRef.current = false;
-      groundedTorsoSnapPendingRef.current = false;
+      groundedDraftPendingRef.current = false;
+      groundedSnapPendingRef.current = false;
+      groundedDraftTargetRef.current = null;
       skeletonTargetRebindRef.current = null;
       updateSelectedSkeletonTarget(null);
       setJointPopover(null);
@@ -685,9 +691,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       stabilizedOverlayRef.current = null; // Phase 8: cached stabilizer result
       lastStabilizedAnalysisTimeRef.current = -1;
       activeCueGlowTypeRef.current = undefined;
-      groundedTorsoDraftPendingRef.current = false;
+      groundedDraftPendingRef.current = false;
       updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft('analysis_stale'));
-      if (!groundedTorsoSnapPendingRef.current) {
+      if (!groundedSnapPendingRef.current) {
         clearSkeletonSelection('analysis_stale');
       }
       poseDropoutStartedAtRef.current = null;
@@ -703,12 +709,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
       // After seek completes: pump continues automatically (rVFC/rAF re-schedules)
       // No action needed – the seeking handler already cleared everything
       console.debug('[VideoAnalyzer] seeked – pump generation:', framePump.generation);
-      if (groundedTorsoSnapPendingRef.current) {
-        groundedTorsoSnapPendingRef.current = false;
+      if (groundedSnapPendingRef.current) {
+        groundedSnapPendingRef.current = false;
         const pendingTarget = skeletonTargetRebindRef.current
           ? getSkeletonTarget(skeletonTargetRebindRef.current.targetId)
           : null;
-        groundedTorsoDraftPendingRef.current = pendingTarget?.metricAdapter === 'spine_tilt_aplomb';
+        groundedDraftPendingRef.current = Boolean(pendingTarget?.metricAdapter);
         processStaticPausedFrame();
       }
     };
@@ -1083,8 +1089,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     // geometry (missing cache entry, low visibility or predicted
                     // points). End the pending state instead of retrying forever.
                     skeletonTargetRebindRef.current = null;
-                    groundedTorsoDraftPendingRef.current = false;
-                    groundedTorsoSnapPendingRef.current = false;
+                    groundedDraftPendingRef.current = false;
+                    groundedSnapPendingRef.current = false;
                     // No trustworthy anchor exists on the exact displayed frame;
                     // keeping the pre-snap pointer would visually misidentify it.
                     clearSkeletonSelection(
@@ -1096,10 +1102,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                 }
 
                 if (
-                  groundedTorsoDraftPendingRef.current
-                  && renderState.selectedJointId === 'spine_center'
+                  groundedDraftPendingRef.current
                   && v.paused
                 ) {
+                  const groundedTarget = groundedDraftTargetRef.current;
                   const runtimeContext: GroundedGuideFrameContext = {
                     sourceId: selectedDevVideoUrlRef.current,
                     streamEpoch: streamEpochRef.current,
@@ -1110,7 +1116,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     policyVersion: BUILD_POLICY.policyVersion,
                   };
                   const refreshedDraft = buildGroundedTeacherDraft({
-                    targetJointId: 'spine_center',
+                    metricAdapter: groundedTarget?.metricAdapter ?? null,
+                    targetJointId: groundedTarget?.focusId ?? '',
                     isPaused: true,
                     exactCacheLandmarks: findExactCachedPoseLandmarks(
                       vaganovaFrameCache.getFrames(runtimeContext.sourceId),
@@ -1122,7 +1129,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     overlayPacket: overlayPacket ?? null,
                     runtime: runtimeContext,
                   });
-                  groundedTorsoDraftPendingRef.current = false;
+                  groundedDraftPendingRef.current = false;
                   updateGroundedTeacherDraft(refreshedDraft);
                 }
 
@@ -1655,6 +1662,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         activeCueGlowTypeRef.current = undefined;
 
         const currentVideo = videoRef.current;
+        groundedDraftTargetRef.current = hit.target.metricAdapter
+          ? Object.freeze({
+            metricAdapter: hit.target.metricAdapter,
+            focusId: hit.target.focusId,
+          })
+          : null;
         const nearestExactFrame = currentVideo
           ? findNearestExactPoseFrame(
             vaganovaFrameCache.getFrames(selectedDevVideoUrlRef.current),
@@ -1672,12 +1685,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
 
         if (!nearestExactFrame || !currentVideo) {
           skeletonTargetRebindRef.current = null;
-          groundedTorsoDraftPendingRef.current = false;
-          groundedTorsoSnapPendingRef.current = false;
+          groundedDraftPendingRef.current = false;
+          groundedSnapPendingRef.current = false;
           updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(
-            hit.target.metricAdapter === 'spine_tilt_aplomb'
+            hit.target.metricAdapter
               ? 'exact_cache_frame_missing'
               : 'measurement_not_authorized',
+            hit.target.focusId,
           ));
         } else {
           skeletonTargetRebindRef.current = Object.freeze({
@@ -1687,13 +1701,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           const requiresSeek = Math.abs(
             nearestExactFrame.timeMs - currentVideo.currentTime * 1000,
           ) > 0.001;
-          groundedTorsoSnapPendingRef.current = requiresSeek;
-          groundedTorsoDraftPendingRef.current = !requiresSeek
-            && hit.target.metricAdapter === 'spine_tilt_aplomb';
+          groundedSnapPendingRef.current = requiresSeek;
+          groundedDraftPendingRef.current = !requiresSeek
+            && Boolean(hit.target.metricAdapter);
           updateGroundedTeacherDraft(createBlockedGroundedTeacherDraft(
-            hit.target.metricAdapter === 'spine_tilt_aplomb'
+            hit.target.metricAdapter
               ? 'analysis_stale'
               : 'measurement_not_authorized',
+            hit.target.focusId,
           ));
           if (requiresSeek) currentVideo.currentTime = nearestExactFrame.timeMs / 1000;
           else processStaticPausedFrame();
@@ -1707,8 +1722,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
         setZoomLevel(autoZoom);
         setPanOffset({ x: panX, y: panY });
 
-        // A green guide is only allowed for the provenance-gated torso adapter.
-        setShowIdealOverlay(hit.target.metricAdapter === 'spine_tilt_aplomb');
+        // A green 2D orientation guide is only allowed for provenance-gated adapters.
+        setShowIdealOverlay(Boolean(hit.target.metricAdapter));
         if (!showFocusDim) setShowFocusDim(true);
       }
     } else {
@@ -2678,7 +2693,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* Provenienzgebundene 2D-Aplomb-Orientierung */}
           <button
             onClick={() => setShowIdealOverlay(!showIdealOverlay)}
-            title="2D-Leitlinie: zeigt die vorläufige Aplomb-Orientierung nur bei abgesicherter Rumpfevidenz"
+            title="2D-Leitlinie: zeigt die vorläufige Orientierung nur bei abgesicherter Rumpf-, Schulter- oder Beckenevidenz"
             style={{
               background: showIdealOverlay ? 'rgba(52,211,153,0.15)' : 'transparent',
               color: showIdealOverlay ? '#34d399' : 'rgba(255,255,255,0.45)',

@@ -1,4 +1,5 @@
 import type { TeacherHeuristicState } from './teacherHeuristic';
+import type { GroundedMetricAdapterId, SkeletonTargetFocusId } from './skeletonTarget';
 
 export type GroundedTeacherDraftBlockReason =
   | 'target_not_selected'
@@ -16,7 +17,7 @@ export type GroundedTeacherDraftBlockReason =
   | 'overlay_blocked';
 
 export interface GroundedTeacherEvidence {
-  metricId: 'spine_tilt_aplomb';
+  metricId: GroundedMetricAdapterId;
   valueDeg: number;
   confidence: number;
   measurementClass: 'vaganova_relation';
@@ -42,13 +43,19 @@ export interface GroundedTeacherDraftSections {
   sourceRefs: readonly string[];
 }
 
-export interface GroundedAplombGuide {
-  kind: 'image_vertical';
-  anchor: 'pelvis_center';
-  label: 'Aplomb-Orientierung (2D) · Nicole prüft';
+export interface GroundedTeacherGuide {
+  kind: 'image_vertical' | 'image_horizontal';
+  anchor: 'pelvis_center' | 'shoulder_center';
+  label:
+    | 'Aplomb-Orientierung (2D) · Nicole prüft'
+    | 'Schulter-Orientierung (2D) · Nicole prüft'
+    | 'Becken-Orientierung (2D) · Nicole prüft';
   reviewState: 'pending_nicole';
   evidence: GroundedTeacherEvidence;
 }
+
+/** Compatibility alias for the first, vertical guide consumer. */
+export type GroundedAplombGuide = GroundedTeacherGuide;
 
 export interface GroundedGuideFrameContext {
   sourceId: string;
@@ -62,20 +69,20 @@ export interface GroundedGuideFrameContext {
 
 export interface BlockedGroundedTeacherDraft {
   kind: 'blocked';
-  target: 'spine_center';
+  target: SkeletonTargetFocusId | 'none';
   reason: GroundedTeacherDraftBlockReason;
   message: string;
 }
 
 export interface ReadyGroundedTeacherDraft {
   kind: 'ready';
-  target: 'spine_center';
+  target: Extract<SkeletonTargetFocusId, 'spine_center' | 'shoulder_line' | 'pelvis_core'>;
   reviewState: 'pending_nicole';
   learnerVisible: false;
   parentVisible: false;
   evidence: GroundedTeacherEvidence;
   sections: GroundedTeacherDraftSections;
-  guide: GroundedAplombGuide;
+  guide: GroundedTeacherGuide;
 }
 
 export type GroundedTeacherDraft =

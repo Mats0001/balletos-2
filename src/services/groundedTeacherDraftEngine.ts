@@ -7,8 +7,10 @@ import {
 import type { PosePacket } from '../types/posePacket';
 import type { TeacherOverlayPacket } from '../types/teacherHeuristic';
 import type { TeacherHeuristicState } from '../types/teacherHeuristic';
+import type { GroundedMetricAdapterId, SkeletonTargetFocusId } from '../types/skeletonTarget';
 import type {
-  GroundedAplombGuide,
+  GroundedTeacherDraftSections,
+  GroundedTeacherGuide,
   GroundedGuideFrameContext,
   GroundedTeacherDraft,
   GroundedTeacherDraftBlockReason,
@@ -30,33 +32,35 @@ function isGroundedHeuristicState(
 }
 
 const BLOCK_MESSAGES: Readonly<Record<GroundedTeacherDraftBlockReason, string>> = Object.freeze({
-  target_not_selected: 'Wähle die Rumpfachse aus, um den Lehrerentwurf zu öffnen.',
+  target_not_selected: 'Wähle eine unterstützte Körperlinie aus, um den Lehrerentwurf zu öffnen.',
   video_playing: 'Pausiere das Video auf einem exakt analysierten Frame.',
   exact_cache_frame_missing: 'Für diesen Zeitpunkt liegt kein exakter Analyseframe vor.',
   pose_packet_missing: 'Für diesen Frame liegt keine Pose-Evidenz vor.',
   pose_packet_not_exact_cache: 'Der aktuelle Frame ist noch nicht als exakter Cache-Frame bestätigt.',
   pose_packet_stale: 'Pose und Videozeit stimmen nicht sicher überein.',
   pose_geometry_mismatch: 'Die gezeichnete Pose stimmt nicht mit dem exakten Cache-Frame überein.',
-  analysis_missing: 'Für diesen Frame liegt keine autorisierte Rumpfmessung vor.',
+  analysis_missing: 'Für diesen Frame liegt keine autorisierte Linienmessung vor.',
   analysis_stale: 'Messung und gezeichneter Frame stimmen nicht sicher überein.',
-  measurement_not_authorized: 'Die Rumpfbeobachtung ist für diesen Frame nicht auswertbar.',
+  measurement_not_authorized: 'Die ausgewählte Linienbeobachtung ist für diesen Frame nicht auswertbar.',
   overlay_missing: 'Die Lehrer-Ampel hat für diesen Frame noch keine stabile Evidenz.',
   overlay_stale: 'Ampel und gezeichneter Frame stimmen nicht sicher überein.',
-  overlay_blocked: 'Die Evidenz reicht für eine farbige Rumpfbeobachtung nicht aus.',
+  overlay_blocked: 'Die Evidenz reicht für eine farbige Linienbeobachtung nicht aus.',
 });
 
 export function createBlockedGroundedTeacherDraft(
   reason: GroundedTeacherDraftBlockReason,
+  target: SkeletonTargetFocusId | 'none' = 'none',
 ): GroundedTeacherDraft {
   return {
     kind: 'blocked',
-    target: 'spine_center',
+    target,
     reason,
     message: BLOCK_MESSAGES[reason],
   };
 }
 
 export interface GroundedTeacherDraftInput {
+  metricAdapter: GroundedMetricAdapterId | null;
   targetJointId: string;
   isPaused: boolean;
   exactCacheLandmarks: readonly PoseLandmark[] | null;
@@ -65,6 +69,62 @@ export interface GroundedTeacherDraftInput {
   analysisMediaTimeUs: number | null;
   overlayPacket: TeacherOverlayPacket | null;
   runtime: GroundedGuideFrameContext;
+}
+
+type SupportedGroundedTarget = Extract<
+  SkeletonTargetFocusId,
+  'spine_center' | 'shoulder_line' | 'pelvis_core'
+>;
+
+interface GroundedMetricProfile {
+  metricId: GroundedMetricAdapterId;
+  target: SupportedGroundedTarget;
+  measurement: VaganovaFullAnalysis['spineTilt'] | undefined;
+  overlayState: TeacherHeuristicState | undefined;
+  guide: Readonly<Pick<GroundedTeacherGuide, 'kind' | 'anchor' | 'label'>>;
+}
+
+function resolveMetricProfile(input: GroundedTeacherDraftInput): GroundedMetricProfile | null {
+  switch (input.metricAdapter) {
+    case 'spine_tilt_aplomb':
+      return {
+        metricId: input.metricAdapter,
+        target: 'spine_center',
+        measurement: input.analysis?.spineTilt,
+        overlayState: input.overlayPacket?.spine,
+        guide: {
+          kind: 'image_vertical',
+          anchor: 'pelvis_center',
+          label: 'Aplomb-Orientierung (2D) · Nicole prüft',
+        },
+      };
+    case 'shoulder_horizontal':
+      return {
+        metricId: input.metricAdapter,
+        target: 'shoulder_line',
+        measurement: input.analysis?.shoulderSymmetry,
+        overlayState: input.overlayPacket?.shoulder,
+        guide: {
+          kind: 'image_horizontal',
+          anchor: 'shoulder_center',
+          label: 'Schulter-Orientierung (2D) · Nicole prüft',
+        },
+      };
+    case 'projected_hip_line_obliquity':
+      return {
+        metricId: input.metricAdapter,
+        target: 'pelvis_core',
+        measurement: input.analysis?.pelvicTilt,
+        overlayState: input.overlayPacket?.pelvis,
+        guide: {
+          kind: 'image_horizontal',
+          anchor: 'pelvis_center',
+          label: 'Becken-Orientierung (2D) · Nicole prüft',
+        },
+      };
+    default:
+      return null;
+  }
 }
 
 /**
@@ -145,21 +205,22 @@ function overlayIsCurrent(
 
 function createEvidence(
   input: GroundedTeacherDraftInput,
+  profile: GroundedMetricProfile,
 ): GroundedTeacherEvidence | null {
-  const measurement = input.analysis?.spineTilt;
+  const measurement = profile.measurement;
   const packet = input.posePacket;
   const overlay = input.overlayPacket;
   const runtime = input.runtime;
 
   if (!packet || !overlay || !isMeasurableVaganovaMeasurement(measurement)) return null;
-  if (!isGroundedHeuristicState(overlay.spine)) return null;
+  if (!isGroundedHeuristicState(profile.overlayState)) return null;
 
   return Object.freeze({
-    metricId: 'spine_tilt_aplomb',
+    metricId: profile.metricId,
     valueDeg: Math.abs(measurement.value),
     confidence: measurement.confidence,
     measurementClass: 'vaganova_relation',
-    heuristicState: overlay.spine,
+    heuristicState: profile.overlayState,
     sourceId: runtime.sourceId,
     streamEpoch: runtime.streamEpoch,
     generation: runtime.generation,
@@ -182,28 +243,84 @@ function runtimeIdentityIsValid(runtime: GroundedGuideFrameContext): boolean {
     && finitePositive(runtime.videoHeight);
 }
 
+function buildSections(
+  evidence: GroundedTeacherEvidence,
+): GroundedTeacherDraftSections {
+  const value = evidence.valueDeg.toFixed(1);
+  const pts = (evidence.mediaTimeUs / 1_000_000).toFixed(3);
+  const visibility = Math.round(evidence.confidence * 100);
+  const technical = `${evidence.metricId} · ${value}° · Frame ${pts}s · exakter Cache-Frame · Landmark-Sichtbarkeit ${visibility}% · ${evidence.measurementClass}.`;
+
+  switch (evidence.metricId) {
+    case 'shoulder_horizontal':
+      return Object.freeze({
+        what: `In diesem Bild weicht die projizierte Schulterlinie um ${value}° von der Bildhorizontalen ab. Das ist eine sichtbare 2D-Beobachtung am pausierten Frame.`,
+        whyConditional: 'Falls Nicole in dieser Phase eine ruhige oder horizontale Schulterlinie erwartet, verändert die sichtbare Höhendifferenz die Organisation des Oberkörpers. Ein beabsichtigtes Épaulement kann die Linie dagegen bewusst verändern; die Ursache lässt sich aus diesem Frame allein nicht bestimmen.',
+        goalConditional: 'Orientierung für Nicoles Prüfung: Beide sichtbaren Schulterpunkte näher an der Bildhorizontalen organisieren – sofern Bewegungsphase, Blickrichtung und Épaulement keine bewusste Abweichung verlangen.',
+        practiceForTeacherReview: 'Video an diesem Frame pausieren, Schulterlinie und Kopf-/Rumpfausrichtung gemeinsam ansehen und die Bewegung langsam bis zu diesem Moment wiederholen. Nicole entscheidet, ob Halten, Lösen oder eine konkrete Port-de-Bras-Korrektur geübt wird.',
+        metaphor: '„Trag auf deinen Schultern ein breites, ruhiges Tablett: Es bleibt offen und getragen – außer Nicole kippt es bewusst für das Épaulement.“',
+        technical,
+        limitations: 'Die Linie zeigt nur die 2D-Bildprojektion. Perspektive, Körperrotation und beabsichtigtes Épaulement können eine sichtbare Neigung erzeugen. Muskelspannung, Kraft oder Ursache sind aus diesem Frame nicht bestimmbar.',
+        sourceRefs: Object.freeze([
+          'BalletOS Messvertrag: shoulder_horizontal / Bildprojektion',
+          'Pädagogische Schulter-Orientierung: KI-Entwurf, Nicoles Prüfung ausstehend',
+        ]),
+      });
+    case 'projected_hip_line_obliquity':
+      return Object.freeze({
+        what: `In diesem Bild weicht die projizierte Beckenlinie um ${value}° von der Bildhorizontalen ab. Das ist eine sichtbare 2D-Beobachtung am pausierten Frame.`,
+        whyConditional: 'Falls Nicole in dieser Phase ein waagerecht organisiertes Becken erwartet, verändert die sichtbare Höhendifferenz die darüber gestapelten Körperlinien. Arbeitsbein, Gewichtsverlagerung, Perspektive oder Phase können die Linie jedoch bewusst verändern; die Ursache ist aus diesem Frame nicht ableitbar.',
+        goalConditional: 'Orientierung für Nicoles Prüfung: Beide sichtbaren Hüftpunkte näher an der Bildhorizontalen organisieren – nur wenn Position und Bewegungsphase ein neutrales Becken verlangen.',
+        practiceForTeacherReview: 'Frame pausieren, Beckenlinie zusammen mit Standbein und Rumpfachse vergleichen und die Passage langsam wiederholen. Nicole legt danach den konkreten Korrekturhinweis und die passende Übung fest.',
+        metaphor: '„Stell dir das Becken als ruhige Schale vor: Nicole entscheidet, ob sie in diesem Moment waagerecht getragen oder für die Bewegung bewusst geneigt wird.“',
+        technical,
+        limitations: 'Die Verbindung der sichtbaren Hüftpunkte ist eine frontale 2D-Projektion, kein anatomischer 3D-Beckenwinkel. Kameraperspektive, Rotation und Belastungsphase müssen von Nicole geprüft werden; Muskel- oder Kraftursachen sind nicht messbar.',
+        sourceRefs: Object.freeze([
+          'BalletOS Messvertrag: projected_hip_line_obliquity / Bildprojektion',
+          'Pädagogische Becken-Orientierung: KI-Entwurf, Nicoles Prüfung ausstehend',
+        ]),
+      });
+    case 'spine_tilt_aplomb':
+      return Object.freeze({
+        what: `In diesem Bild ist die projizierte Rumpfachse um ${value}° gegenüber der Bildvertikalen geneigt. Das ist eine sichtbare 2D-Beobachtung am pausierten Frame.`,
+        whyConditional: 'Falls Nicole in dieser Phase Aplomb erwartet, verändert eine geneigte Rumpfachse die sichtbare Stapelung von Schultergürtel und Becken. Aus diesem Frame allein lässt sich die Ursache nicht bestimmen.',
+        goalConditional: 'Orientierung für Nicoles Prüfung: Schultermitte und Beckenmitte näher über derselben Bildlotlinie organisieren – ohne ein beabsichtigtes Épaulement oder die konkrete Phase zu überschreiben.',
+        practiceForTeacherReview: 'Video am markierten Punkt pausieren, die Linie im Spiegel oder in einer Wiederholung vergleichen und die Bewegung langsam bis zu diesem Moment führen. Wiederholungen und Korrekturhinweis legt Nicole fest.',
+        metaphor: '„Stell dir einen goldenen Faden am Scheitel vor: Die Körperblöcke ordnen sich darunter wie ruhig gestapelte Bausteine – lang, aber nicht starr.“',
+        technical,
+        limitations: 'Die Linie zeigt eine Bildprojektion, keine 3D-Körperachse. Nicole prüft: Ist die Neigung beabsichtigt? Passt Bewegungsphase und Kameraperspektive? Liegt eine Gewichtsverlagerung vor? Muskelursachen sind aus diesem Video nicht bestimmbar.',
+        sourceRefs: Object.freeze([
+          'BalletOS Messvertrag: spine_tilt_aplomb / Bildprojektion',
+          'Pädagogische Aplomb-Orientierung: KI-Entwurf, Nicoles Prüfung ausstehend',
+        ]),
+      });
+  }
+}
+
 export function buildGroundedTeacherDraft(
   input: GroundedTeacherDraftInput,
 ): GroundedTeacherDraft {
   const runtime = input.runtime;
   const packet = input.posePacket;
-  const measurement = input.analysis?.spineTilt;
+  const profile = resolveMetricProfile(input);
+  const measurement = profile?.measurement;
 
-  if (input.targetJointId !== 'spine_center') {
+  if (!profile || input.targetJointId !== profile.target) {
     return createBlockedGroundedTeacherDraft('target_not_selected');
   }
-  if (!input.isPaused) return createBlockedGroundedTeacherDraft('video_playing');
+  const target = profile.target;
+  if (!input.isPaused) return createBlockedGroundedTeacherDraft('video_playing', target);
   if (!runtimeIdentityIsValid(runtime)) {
-    return createBlockedGroundedTeacherDraft('pose_packet_stale');
+    return createBlockedGroundedTeacherDraft('pose_packet_stale', target);
   }
   if (!input.exactCacheLandmarks) {
-    return createBlockedGroundedTeacherDraft('exact_cache_frame_missing');
+    return createBlockedGroundedTeacherDraft('exact_cache_frame_missing', target);
   }
   if (!packet || packet.resultKind !== 'pose') {
-    return createBlockedGroundedTeacherDraft('pose_packet_missing');
+    return createBlockedGroundedTeacherDraft('pose_packet_missing', target);
   }
   if (packet.source !== 'frame_cache') {
-    return createBlockedGroundedTeacherDraft('pose_packet_not_exact_cache');
+    return createBlockedGroundedTeacherDraft('pose_packet_not_exact_cache', target);
   }
   if (
     packet.sourceId !== runtime.sourceId
@@ -213,17 +330,17 @@ export function buildGroundedTeacherDraft(
     || packet.videoWidth !== runtime.videoWidth
     || packet.videoHeight !== runtime.videoHeight
   ) {
-    return createBlockedGroundedTeacherDraft('pose_packet_stale');
+    return createBlockedGroundedTeacherDraft('pose_packet_stale', target);
   }
   if (!landmarksMatchExactCache(packet.landmarks, input.exactCacheLandmarks)) {
-    return createBlockedGroundedTeacherDraft('pose_geometry_mismatch');
+    return createBlockedGroundedTeacherDraft('pose_geometry_mismatch', target);
   }
-  if (!input.analysis) return createBlockedGroundedTeacherDraft('analysis_missing');
+  if (!input.analysis) return createBlockedGroundedTeacherDraft('analysis_missing', target);
   if (
     input.analysisMediaTimeUs === null
     || !mediaTimeMatches(input.analysisMediaTimeUs, runtime.mediaTimeUs)
   ) {
-    return createBlockedGroundedTeacherDraft('analysis_stale');
+    return createBlockedGroundedTeacherDraft('analysis_stale', target);
   }
   if (
     !isMeasurableVaganovaMeasurement(measurement)
@@ -234,65 +351,65 @@ export function buildGroundedTeacherDraft(
     || measurement.confidence < 0
     || measurement.confidence > 1
   ) {
-    return createBlockedGroundedTeacherDraft('measurement_not_authorized');
+    return createBlockedGroundedTeacherDraft('measurement_not_authorized', target);
   }
-  if (!input.overlayPacket) return createBlockedGroundedTeacherDraft('overlay_missing');
+  if (!input.overlayPacket) return createBlockedGroundedTeacherDraft('overlay_missing', target);
   if (!overlayIsCurrent(input.overlayPacket, runtime)) {
-    return createBlockedGroundedTeacherDraft('overlay_stale');
+    return createBlockedGroundedTeacherDraft('overlay_stale', target);
   }
-  if (!isGroundedHeuristicState(input.overlayPacket.spine)) {
-    return createBlockedGroundedTeacherDraft('overlay_blocked');
+  if (!isGroundedHeuristicState(profile.overlayState)) {
+    return createBlockedGroundedTeacherDraft('overlay_blocked', target);
   }
 
-  const evidence = createEvidence(input);
-  if (!evidence) return createBlockedGroundedTeacherDraft('measurement_not_authorized');
+  const evidence = createEvidence(input, profile);
+  if (!evidence) return createBlockedGroundedTeacherDraft('measurement_not_authorized', target);
 
-  const value = evidence.valueDeg.toFixed(1);
-  const pts = (evidence.mediaTimeUs / 1_000_000).toFixed(3);
-  const visibility = Math.round(evidence.confidence * 100);
-  const guide: GroundedAplombGuide = Object.freeze({
-    kind: 'image_vertical',
-    anchor: 'pelvis_center',
-    label: 'Aplomb-Orientierung (2D) · Nicole prüft',
+  const guide: GroundedTeacherGuide = Object.freeze({
+    ...profile.guide,
     reviewState: 'pending_nicole',
     evidence,
   });
 
   return Object.freeze({
     kind: 'ready',
-    target: 'spine_center',
+    target,
     reviewState: 'pending_nicole',
     learnerVisible: false,
     parentVisible: false,
     evidence,
-    sections: Object.freeze({
-      what: `In diesem Bild ist die projizierte Rumpfachse um ${value}° gegenüber der Bildvertikalen geneigt. Das ist eine sichtbare 2D-Beobachtung am pausierten Frame.`,
-      whyConditional: 'Falls Nicole in dieser Phase Aplomb erwartet, verändert eine geneigte Rumpfachse die sichtbare Stapelung von Schultergürtel und Becken. Aus diesem Frame allein lässt sich die Ursache nicht bestimmen.',
-      goalConditional: 'Orientierung für Nicoles Prüfung: Schultermitte und Beckenmitte näher über derselben Bildlotlinie organisieren – ohne ein beabsichtigtes Épaulement oder die konkrete Phase zu überschreiben.',
-      practiceForTeacherReview: 'Video am markierten Punkt pausieren, die Linie im Spiegel oder in einer Wiederholung vergleichen und die Bewegung langsam bis zu diesem Moment führen. Wiederholungen und Korrekturhinweis legt Nicole fest.',
-      metaphor: '„Stell dir einen goldenen Faden am Scheitel vor: Die Körperblöcke ordnen sich darunter wie ruhig gestapelte Bausteine – lang, aber nicht starr.“',
-      technical: `spine_tilt_aplomb · ${value}° · Frame ${pts}s · exakter Cache-Frame · Landmark-Sichtbarkeit ${visibility}% · ${evidence.measurementClass}.`,
-      limitations: 'Die Linie zeigt eine Bildprojektion, keine 3D-Körperachse. Nicole prüft: Ist die Neigung beabsichtigt? Passt Bewegungsphase und Kameraperspektive? Liegt eine Gewichtsverlagerung vor? Muskelursachen sind aus diesem Video nicht bestimmbar.',
-      sourceRefs: Object.freeze([
-        'BalletOS Messvertrag: spine_tilt_aplomb / Bildprojektion',
-        'Pädagogische Aplomb-Orientierung: KI-Entwurf, Nicoles Prüfung ausstehend',
-      ]),
-    }),
+    sections: buildSections(evidence),
     guide,
   });
 }
 
-export function isGroundedAplombGuideCurrent(
-  guide: GroundedAplombGuide | undefined,
+function guideShapeMatchesMetric(guide: GroundedTeacherGuide): boolean {
+  switch (guide.evidence.metricId) {
+    case 'spine_tilt_aplomb':
+      return guide.kind === 'image_vertical'
+        && guide.anchor === 'pelvis_center'
+        && guide.label === 'Aplomb-Orientierung (2D) · Nicole prüft';
+    case 'shoulder_horizontal':
+      return guide.kind === 'image_horizontal'
+        && guide.anchor === 'shoulder_center'
+        && guide.label === 'Schulter-Orientierung (2D) · Nicole prüft';
+    case 'projected_hip_line_obliquity':
+      return guide.kind === 'image_horizontal'
+        && guide.anchor === 'pelvis_center'
+        && guide.label === 'Becken-Orientierung (2D) · Nicole prüft';
+    default:
+      return false;
+  }
+}
+
+export function isGroundedTeacherGuideCurrent(
+  guide: GroundedTeacherGuide | undefined,
   context: GroundedGuideFrameContext | undefined,
-): guide is GroundedAplombGuide {
+): guide is GroundedTeacherGuide {
   if (!guide || !context) return false;
   const evidence = guide.evidence;
 
-  return guide.kind === 'image_vertical'
-    && guide.anchor === 'pelvis_center'
+  return guideShapeMatchesMetric(guide)
     && guide.reviewState === 'pending_nicole'
-    && evidence.metricId === 'spine_tilt_aplomb'
     && evidence.measurementClass === 'vaganova_relation'
     && isGroundedHeuristicState(evidence.heuristicState)
     && evidence.source === 'exact_frame_cache'
@@ -313,11 +430,14 @@ export function isGroundedAplombGuideCurrent(
     && mediaTimeMatches(evidence.mediaTimeUs, context.mediaTimeUs);
 }
 
+/** Backwards-compatible name for existing renderer/test imports. */
+export const isGroundedAplombGuideCurrent = isGroundedTeacherGuideCurrent;
+
 export function groundedTeacherDraftFingerprint(draft: GroundedTeacherDraft): string {
-  if (draft.kind === 'blocked') return `blocked:${draft.reason}`;
+  if (draft.kind === 'blocked') return `blocked:${draft.target}:${draft.reason}`;
   const e = draft.evidence;
   return [
-    'ready', e.sourceId, e.streamEpoch, e.generation, e.mediaTimeUs,
+    'ready', draft.target, e.metricId, e.sourceId, e.streamEpoch, e.generation, e.mediaTimeUs,
     e.videoWidth, e.videoHeight, e.policyVersion, e.valueDeg, e.confidence,
     e.heuristicState,
   ].join(':');

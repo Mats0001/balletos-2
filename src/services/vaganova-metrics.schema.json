@@ -100,6 +100,22 @@
       "validation_status": "proxy_unvalidated"
     },
     {
+      "metric_id": "projected_hip_line_obliquity",
+      "movement_id": "any_standing",
+      "label_de": "Projizierte Beckenlinie",
+      "phase": "any",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view",
+      "target_type": "angle_deviation_from_horizontal",
+      "target": { "operator": "<=", "value": 3, "unit": "deg" },
+      "exception": "Arbeitsbein, Gewichtsverlagerung, Arabesque und Kameraperspektive können eine sichtbare Neigung beabsichtigt oder projektionsbedingt verändern; Nicole prüft die Phase.",
+      "source": { "work": "Vaganova, Основы", "edition": "6th, 2000" },
+      "mediapipe_landmarks_used": [23, 24],
+      "mediapipe_validity": "frontal_view_2d_projection",
+      "validation_status": "proxy_unvalidated",
+      "note": "Verbindung der sichtbaren Hüftpunkte; kein anatomischer 3D-Beckenwinkel und keine Muskel- oder Kraftmessung."
+    },
+    {
       "metric_id": "turnout_foot_proxy",
       "movement_id": "any_standing_or_plie",
       "label_de": "Turnout Fußwinkel-Proxy",

@@ -244,6 +244,7 @@ describe('SkeletonJointPopover evidence color semantics', () => {
     const overlay = createBlockedPacket(2.5, 42);
     overlay.spine = 'heuristic_attention';
     const draft = buildGroundedTeacherDraft({
+      metricAdapter: 'spine_tilt_aplomb',
       targetJointId: 'spine_center',
       isPaused: true,
       exactCacheLandmarks: points,
@@ -289,6 +290,71 @@ describe('SkeletonJointPopover evidence color semantics', () => {
     expect(screen.getAllByText(/6\.3°/)).toHaveLength(2);
     expect(screen.queryByText('Oberkörper neigt sich beim Plie nach vorne oder zur Seite.')).toBeNull();
     expect(screen.queryByText(/Beckenboden aktiv|10x/)).toBeNull();
+  });
+
+  it('renders an exact shoulder-line draft instead of generic neutral copy', () => {
+    const points = Array.from({ length: 33 }, (_, index) => ({
+      x: 0.2 + index * 0.01,
+      y: 0.3 + index * 0.005,
+      z: -index * 0.001,
+      visibility: 0.95,
+    }));
+    const shoulderAnalysis = analysis({
+      shoulderSymmetry: {
+        value: 7.5,
+        unit: 'deg',
+        confidence: 0.92,
+        label: 'Schulterlinie',
+        measurement_class: 'vaganova_relation',
+      },
+    });
+    const overlay = createBlockedPacket(2.5, 42);
+    overlay.shoulder = 'heuristic_attention';
+    const draft = buildGroundedTeacherDraft({
+      metricAdapter: 'shoulder_horizontal',
+      targetJointId: 'shoulder_line',
+      isPaused: true,
+      exactCacheLandmarks: points,
+      posePacket: {
+        streamEpoch: 42,
+        frameSeq: 75,
+        mediaTimeUs: 2_500_000,
+        inferenceStartedAtMs: 1,
+        inferenceEndedAtMs: 2,
+        resultKind: 'pose',
+        landmarks: points.map(point => ({ ...point })),
+        avgVisibility: 0.95,
+        source: 'frame_cache',
+        generation: 7,
+        sourceId: '/videos/nicole_saal_1.mp4',
+        videoWidth: 960,
+        videoHeight: 1280,
+      },
+      analysis: shoulderAnalysis,
+      analysisMediaTimeUs: 2_500_000,
+      overlayPacket: overlay,
+      runtime: {
+        sourceId: '/videos/nicole_saal_1.mp4',
+        streamEpoch: 42,
+        generation: 7,
+        mediaTimeUs: 2_500_000,
+        videoWidth: 960,
+        videoHeight: 1280,
+        policyVersion: '0.2.0-teacher-ampel',
+      },
+    });
+
+    renderTarget('bone.shoulder_line', shoulderAnalysis, draft);
+
+    expect(screen.getByText('KI-Entwurf · Nicole prüft')).toBeTruthy();
+    expect(screen.getAllByText(/7\.5°/)).toHaveLength(2);
+    expect(screen.getAllByText(/beabsichtigtes Épaulement/i)).toHaveLength(2);
+    expect(screen.queryByText(/noch kein freigegebener Exact-Frame-Adapter/i)).toBeNull();
+
+    cleanup();
+    renderJoint(100, shoulderAnalysis, draft);
+    expect(screen.queryByText('KI-Entwurf · Nicole prüft')).toBeNull();
+    expect(screen.getByText('Noch keine gesicherte Frame-Evidenz')).toBeTruthy();
   });
 
   it('renders a blocked torso as neutral only, never as legacy coaching', () => {

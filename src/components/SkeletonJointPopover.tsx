@@ -113,23 +113,29 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   const liveMeasurements = getLiveMeasurements(landmarkIndex, vaganovaAnalysis);
   const expectedMeasurementKeys = LIVE_MEASUREMENT_KEYS[landmarkIndex] ?? [];
   const [copied, setCopied] = useState(false);
-  const isGroundedTorso = selectedTarget
-    ? selectedTarget.metricAdapter === 'spine_tilt_aplomb'
+  const isGroundedTarget = selectedTarget
+    ? Boolean(selectedTarget.metricAdapter)
     : landmarkIndex === 100;
-  const readyTorsoDraft = isGroundedTorso && groundedTeacherDraft?.kind === 'ready'
+  const readyGroundedDraft = isGroundedTarget
+    && groundedTeacherDraft?.kind === 'ready'
+    && (selectedTarget
+      ? selectedTarget.metricAdapter === groundedTeacherDraft.evidence.metricId
+        && selectedTarget.focusId === groundedTeacherDraft.target
+      : groundedTeacherDraft.evidence.metricId === 'spine_tilt_aplomb'
+        && groundedTeacherDraft.target === 'spine_center')
     ? groundedTeacherDraft
     : null;
-  const blockedTorsoDraft = isGroundedTorso && groundedTeacherDraft?.kind === 'blocked'
+  const blockedGroundedDraft = isGroundedTarget && groundedTeacherDraft?.kind === 'blocked'
     ? groundedTeacherDraft
     : null;
-  const blockedTorsoMessage = blockedTorsoDraft?.message
+  const blockedGroundedMessage = blockedGroundedDraft?.message
     ?? 'Für diesen Zeitpunkt liegt noch kein abgesicherter Lehrerentwurf vor.';
 
   const handleCopyAll = useCallback(() => {
-    if (readyTorsoDraft) {
-      const sections = readyTorsoDraft.sections;
+    if (readyGroundedDraft) {
+      const sections = readyGroundedDraft.sections;
       navigator.clipboard.writeText([
-        'Rumpf / Wirbelsäule · KI-ENTWURF – NICOLE PRÜFT',
+        `${selectedTarget?.label ?? knowledge.name} · KI-ENTWURF – NICOLE PRÜFT`,
         '',
         `WAS WIR SEHEN: ${sections.what}`,
         '',
@@ -175,7 +181,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [knowledge, liveMeasurements, readyTorsoDraft, isGroundedTorso, selectedTarget]);
+  }, [knowledge, liveMeasurements, readyGroundedDraft, selectedTarget]);
 
   // ESC to close
   useEffect(() => {
@@ -310,7 +316,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
             <button
               onClick={handleCopyAll}
               title="Inhalt in Zwischenablage kopieren"
-              disabled={(Boolean(selectedTarget) || isGroundedTorso) && !readyTorsoDraft}
+              disabled={(Boolean(selectedTarget) || isGroundedTarget) && !readyGroundedDraft}
               style={{ background: copied ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.07)', border: 'none', color: copied ? '#30d158' : 'rgba(255,255,255,0.55)', cursor: 'pointer', borderRadius: '6px', width: '26px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s ease' }}
             >
               {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -367,7 +373,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           </div>
         )}
 
-        {readyTorsoDraft ? (
+        {readyGroundedDraft ? (
           <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,214,10,0.08)', border: '1px solid rgba(255,214,10,0.25)', borderRadius: '8px', padding: '7px 9px' }}>
               <span aria-hidden="true" style={{ color: '#ffd60a', fontSize: '11px' }}>✦</span>
@@ -381,22 +387,22 @@ export const SkeletonJointPopover: React.FC<Props> = ({
               </div>
             </div>
             <Section icon={<span style={{ fontSize: '9px' }}>👁</span>} label="Was wir sehen" color={color} highlight>
-              {readyTorsoDraft.sections.what}
+              {readyGroundedDraft.sections.what}
             </Section>
             <Section icon={<Zap size={9} />} label="Warum das technisch wichtig sein kann" color={color}>
-              {readyTorsoDraft.sections.whyConditional}
+              {readyGroundedDraft.sections.whyConditional}
             </Section>
             <Section icon={<span style={{ fontSize: '9px' }}>◎</span>} label="Zielbild für Nicoles Prüfung" color="#34d399">
-              {readyTorsoDraft.sections.goalConditional}
+              {readyGroundedDraft.sections.goalConditional}
             </Section>
             <Section icon={<Dumbbell size={9} />} label="Üben & verbessern" color="#30d158">
-              {readyTorsoDraft.sections.practiceForTeacherReview}
+              {readyGroundedDraft.sections.practiceForTeacherReview}
             </Section>
             <Section icon={<span style={{ fontSize: '9px' }}>✨</span>} label="Metapher / Bild" color="#c084fc">
-              {readyTorsoDraft.sections.metaphor}
+              {readyGroundedDraft.sections.metaphor}
             </Section>
             <Section icon={<span style={{ fontSize: '9px' }}>📐</span>} label="Technik für Nicole" color="#64d2ff">
-              {readyTorsoDraft.sections.technical}
+              {readyGroundedDraft.sections.technical}
               {selectedTarget?.metricScopeLabel ? (
                 <span style={{ display: 'block', marginTop: '4px', color: 'rgba(255,255,255,0.52)' }}>
                   Messbereich: {selectedTarget.metricScopeLabel}. Das exakt ausgewählte Segment bleibt davon getrennt.
@@ -404,20 +410,20 @@ export const SkeletonJointPopover: React.FC<Props> = ({
               ) : null}
             </Section>
             <Section icon={<AlertTriangle size={9} />} label="Grenzen & Prüffragen" color="#ffd60a">
-              {readyTorsoDraft.sections.limitations}
+              {readyGroundedDraft.sections.limitations}
             </Section>
           </div>
-        ) : selectedTarget || isGroundedTorso ? (
+        ) : selectedTarget || isGroundedTarget ? (
           <div style={{ padding: '8px 10px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '9px 10px' }}>
               <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.5)', fontSize: '12px', lineHeight: 1 }}>○</span>
               <div>
                 <div style={{ fontSize: '8px', fontWeight: 900, color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: '4px' }}>
-                  {isGroundedTorso ? 'Noch keine gesicherte Frame-Evidenz' : 'Ziel ausgewählt · noch keine automatische Bewertung'}
+                  {isGroundedTarget ? 'Noch keine gesicherte Frame-Evidenz' : 'Ziel ausgewählt · noch keine automatische Bewertung'}
                 </div>
                 <div style={{ fontSize: '9.5px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
-                  {isGroundedTorso
-                    ? blockedTorsoMessage
+                  {isGroundedTarget
+                    ? blockedGroundedMessage
                     : `${selectedTarget?.label ?? knowledge.name} ist als eigenständiges ${selectedTarget?.kind === 'bone' ? 'Segment' : 'Gelenk'} ausgewählt. Für diese Region ist noch kein freigegebener Exact-Frame-Adapter aktiv.`}
                 </div>
                 <div style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.45, marginTop: '6px' }}>
@@ -471,7 +477,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           {onAddToCueManager && (
             <button onClick={() => { if (onAddToCueManager() !== false) onClose(); }}
               style={{ flex: 1, background: `linear-gradient(135deg, ${color}25 0%, ${color}12 100%)`, border: `1px solid ${color}45`, color, borderRadius: '6px', padding: '5px 7px', fontSize: '9px', fontWeight: 800, cursor: 'pointer' }}>
-              {readyTorsoDraft ? 'Als Nicole-Entwurf übernehmen' : '+ Zum Cue-Manager'}
+              {readyGroundedDraft ? 'Als Nicole-Entwurf übernehmen' : '+ Zum Cue-Manager'}
             </button>
           )}
           {onSaveNicoleReference && (

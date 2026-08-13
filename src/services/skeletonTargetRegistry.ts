@@ -8,6 +8,10 @@ import type {
 
 const SPINE_ADAPTER = 'spine_tilt_aplomb' as const;
 const SPINE_SCOPE = 'Regionale Rumpfachse (Schultermitte–Beckenmitte)';
+const SHOULDER_ADAPTER = 'shoulder_horizontal' as const;
+const SHOULDER_SCOPE = 'Projizierte Schulterlinie (linke–rechte Schulter)';
+const PELVIS_ADAPTER = 'projected_hip_line_obliquity' as const;
+const PELVIS_SCOPE = 'Projizierte Beckenlinie (linke–rechte Hüfte)';
 
 export const SKELETON_TARGETS: readonly SkeletonTargetDefinition[] = Object.freeze([
   { id: 'joint.head', kind: 'joint', label: 'Kopfpunkt', shortLabel: 'Kopf', side: 'center', pointIds: ['head'], overlayRegion: 'head', focusId: 'head_epaulement', representativeLandmarkIndex: 0 },
@@ -33,14 +37,14 @@ export const SKELETON_TARGETS: readonly SkeletonTargetDefinition[] = Object.free
   { id: 'bone.neck_sternum', kind: 'bone', label: 'Obere Rumpfachse', shortLabel: 'Rumpfachse oben', side: 'center', pointIds: ['neck', 'sternum'], overlayRegion: 'spine', focusId: 'spine_center', representativeLandmarkIndex: 100, metricAdapter: SPINE_ADAPTER, metricScopeLabel: SPINE_SCOPE },
   { id: 'bone.sternum_navel', kind: 'bone', label: 'Mittlere Rumpfachse', shortLabel: 'Rumpfachse Mitte', side: 'center', pointIds: ['sternum', 'navel'], overlayRegion: 'spine', focusId: 'spine_center', representativeLandmarkIndex: 100, metricAdapter: SPINE_ADAPTER, metricScopeLabel: SPINE_SCOPE },
   { id: 'bone.navel_pelvis', kind: 'bone', label: 'Untere Rumpfachse', shortLabel: 'Rumpfachse unten', side: 'center', pointIds: ['navel', 'pelvisCenter'], overlayRegion: 'spine', focusId: 'spine_center', representativeLandmarkIndex: 100, metricAdapter: SPINE_ADAPTER, metricScopeLabel: SPINE_SCOPE },
-  { id: 'bone.shoulder_line', kind: 'bone', label: 'Schulterlinie', shortLabel: 'Schulterlinie', side: 'center', pointIds: ['shoulderL', 'shoulderR'], overlayRegion: 'shoulder', focusId: 'shoulder_line', representativeLandmarkIndex: 11 },
+  { id: 'bone.shoulder_line', kind: 'bone', label: 'Schulterlinie', shortLabel: 'Schulterlinie', side: 'center', pointIds: ['shoulderL', 'shoulderR'], overlayRegion: 'shoulder', focusId: 'shoulder_line', representativeLandmarkIndex: 11, metricAdapter: SHOULDER_ADAPTER, metricScopeLabel: SHOULDER_SCOPE },
   { id: 'bone.upper_arm_l', kind: 'bone', label: 'Linker Oberarm', shortLabel: 'L-Oberarm', side: 'left', pointIds: ['shoulderL', 'elbowL'], overlayRegion: 'armL', focusId: 'left_elbow', representativeLandmarkIndex: 13 },
   { id: 'bone.upper_arm_r', kind: 'bone', label: 'Rechter Oberarm', shortLabel: 'R-Oberarm', side: 'right', pointIds: ['shoulderR', 'elbowR'], overlayRegion: 'armR', focusId: 'right_elbow', representativeLandmarkIndex: 14 },
   { id: 'bone.forearm_l', kind: 'bone', label: 'Linker Unterarm', shortLabel: 'L-Unterarm', side: 'left', pointIds: ['elbowL', 'wristL'], overlayRegion: 'armL', focusId: 'left_elbow', representativeLandmarkIndex: 15 },
   { id: 'bone.forearm_r', kind: 'bone', label: 'Rechter Unterarm', shortLabel: 'R-Unterarm', side: 'right', pointIds: ['elbowR', 'wristR'], overlayRegion: 'armR', focusId: 'right_elbow', representativeLandmarkIndex: 16 },
   { id: 'bone.torso_side_l', kind: 'bone', label: 'Linke Rumpfseite', shortLabel: 'L-Rumpfseite', side: 'left', pointIds: ['shoulderL', 'pelvisL'], overlayRegion: 'torsoAlignment', focusId: 'spine_center', representativeLandmarkIndex: 100, metricAdapter: SPINE_ADAPTER, metricScopeLabel: SPINE_SCOPE },
   { id: 'bone.torso_side_r', kind: 'bone', label: 'Rechte Rumpfseite', shortLabel: 'R-Rumpfseite', side: 'right', pointIds: ['shoulderR', 'pelvisR'], overlayRegion: 'torsoAlignment', focusId: 'spine_center', representativeLandmarkIndex: 100, metricAdapter: SPINE_ADAPTER, metricScopeLabel: SPINE_SCOPE },
-  { id: 'bone.pelvis_line', kind: 'bone', label: 'Beckenlinie', shortLabel: 'Beckenlinie', side: 'center', pointIds: ['pelvisL', 'pelvisR'], overlayRegion: 'pelvis', focusId: 'pelvis_core', representativeLandmarkIndex: 23 },
+  { id: 'bone.pelvis_line', kind: 'bone', label: 'Beckenlinie', shortLabel: 'Beckenlinie', side: 'center', pointIds: ['pelvisL', 'pelvisR'], overlayRegion: 'pelvis', focusId: 'pelvis_core', representativeLandmarkIndex: 23, metricAdapter: PELVIS_ADAPTER, metricScopeLabel: PELVIS_SCOPE },
   { id: 'bone.thigh_l', kind: 'bone', label: 'Linker Oberschenkel', shortLabel: 'L-Oberschenkel', side: 'left', pointIds: ['pelvisL', 'kneeL'], overlayRegion: 'legL', focusId: 'left_knee', representativeLandmarkIndex: 25 },
   { id: 'bone.thigh_r', kind: 'bone', label: 'Rechter Oberschenkel', shortLabel: 'R-Oberschenkel', side: 'right', pointIds: ['pelvisR', 'kneeR'], overlayRegion: 'legR', focusId: 'right_knee', representativeLandmarkIndex: 26 },
   { id: 'bone.shin_l', kind: 'bone', label: 'Linker Unterschenkel', shortLabel: 'L-Unterschenkel', side: 'left', pointIds: ['kneeL', 'ankleL'], overlayRegion: 'legL', focusId: 'left_knee', representativeLandmarkIndex: 27 },

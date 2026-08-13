@@ -52,6 +52,7 @@ function readyInput(): GroundedTeacherDraftInput {
   const overlay = createBlockedPacket(2.5, 42);
   overlay.spine = 'heuristic_attention';
   return {
+    metricAdapter: 'spine_tilt_aplomb',
     targetJointId: 'spine_center',
     isPaused: true,
     exactCacheLandmarks: landmarks,
@@ -134,6 +135,43 @@ describe('grounded torso teacher draft', () => {
     expect(first.sections.metaphor).toContain('goldenen Faden');
     expect(first.sections.limitations).toContain('nicht bestimmbar');
     expect(first.guide.label).toBe('Aplomb-Orientierung (2D) · Nicole prüft');
+  });
+
+  it.each([
+    {
+      metricAdapter: 'shoulder_horizontal' as const,
+      targetJointId: 'shoulder_line',
+      measurementKey: 'shoulderSymmetry' as const,
+      overlayKey: 'shoulder' as const,
+      expectedLabel: 'Schulter-Orientierung (2D) · Nicole prüft',
+      expectedCopy: 'Schulterlinie',
+    },
+    {
+      metricAdapter: 'projected_hip_line_obliquity' as const,
+      targetJointId: 'pelvis_core',
+      measurementKey: 'pelvicTilt' as const,
+      overlayKey: 'pelvis' as const,
+      expectedLabel: 'Becken-Orientierung (2D) · Nicole prüft',
+      expectedCopy: 'Beckenlinie',
+    },
+  ])('builds a conditional exact-frame draft for $metricAdapter', profile => {
+    const input = readyInput();
+    input.metricAdapter = profile.metricAdapter;
+    input.targetJointId = profile.targetJointId;
+    input.analysis = { ...analysis(null), [profile.measurementKey]: measurement };
+    input.overlayPacket!.spine = 'blocked';
+    input.overlayPacket![profile.overlayKey] = 'heuristic_attention';
+
+    const draft = buildGroundedTeacherDraft(input);
+    expect(draft.kind).toBe('ready');
+    if (draft.kind !== 'ready') return;
+    expect(draft.evidence.metricId).toBe(profile.metricAdapter);
+    expect(draft.target).toBe(profile.targetJointId);
+    expect(draft.guide.kind).toBe('image_horizontal');
+    expect(draft.guide.label).toBe(profile.expectedLabel);
+    expect(draft.sections.what).toContain(profile.expectedCopy);
+    expect(draft.sections.whyConditional).toContain('Falls Nicole');
+    expect(draft.sections.limitations).toMatch(/2D|Bildprojektion/);
   });
 
   it.each([

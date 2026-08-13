@@ -1,5 +1,5 @@
 import type {
-  GroundedAplombGuide,
+  GroundedTeacherGuide,
   GroundedTeacherDraftSections,
   GroundedTeacherEvidence,
 } from './groundedTeacherDraft';
@@ -26,7 +26,7 @@ export interface CueReviewContent {
 export interface GroundedAiOriginPayload {
   evidence: GroundedTeacherEvidence;
   sections: GroundedTeacherDraftSections;
-  guide: GroundedAplombGuide;
+  guide: GroundedTeacherGuide;
 }
 
 export interface CueAiOriginSnapshot {

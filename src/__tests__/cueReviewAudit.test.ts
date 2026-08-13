@@ -91,6 +91,59 @@ describe('cue review audit', () => {
     expect(() => { (audit.origin.originalContent as { headline: string }).headline = 'mutated'; }).toThrow();
   });
 
+  it.each([
+    {
+      metricId: 'shoulder_horizontal' as const,
+      focusId: 'shoulder_line' as const,
+      targetId: 'bone.shoulder_line' as const,
+      headline: 'Schulterlinie – Nicole prüft',
+      anchor: 'shoulder_center' as const,
+      label: 'Schulter-Orientierung (2D) · Nicole prüft' as const,
+    },
+    {
+      metricId: 'projected_hip_line_obliquity' as const,
+      focusId: 'pelvis_core' as const,
+      targetId: 'bone.pelvis_line' as const,
+      headline: 'Beckenlinie – Nicole prüft',
+      anchor: 'pelvis_center' as const,
+      label: 'Becken-Orientierung (2D) · Nicole prüft' as const,
+    },
+  ])('captures $metricId as a separate immutable Nicole draft', profile => {
+    const regionalTarget: SelectedSkeletonTarget = {
+      ...target,
+      targetId: profile.targetId,
+    };
+    const regionalEvidence: ReadyGroundedTeacherDraft['evidence'] = {
+      ...evidence,
+      metricId: profile.metricId,
+    };
+    const regionalDraft: ReadyGroundedTeacherDraft = {
+      ...draft,
+      target: profile.focusId,
+      evidence: regionalEvidence,
+      guide: {
+        kind: 'image_horizontal',
+        anchor: profile.anchor,
+        label: profile.label,
+        reviewState: 'pending_nicole',
+        evidence: regionalEvidence,
+      },
+    };
+    const context = deterministicContext();
+    const content = contentFromGroundedDraft(regionalDraft, regionalTarget, 'Testphase');
+    const audit = createGroundedCueReviewAudit({
+      draft: regionalDraft,
+      target: regionalTarget,
+      content,
+      context,
+    });
+
+    expect(content.headline).toBe(profile.headline);
+    expect(content.jointFocusId).toBe(profile.focusId);
+    expect(audit.origin.anchor.targetId).toBe(profile.targetId);
+    expect(cueReviewAuditIsValid(audit)).toBe(true);
+  });
+
   it('approves explicitly, grants audiences only for that revision, and revokes them on edit', () => {
     const { audit, content, context } = createAudit();
     const originBefore = canonicalJson(audit.origin);

@@ -17,8 +17,8 @@ import {
   heuristicDash,
 } from '../types/teacherHeuristic';
 import type { TeacherHeuristicState } from '../types/teacherHeuristic';
-import type { GroundedAplombGuide, GroundedGuideFrameContext } from '../types/groundedTeacherDraft';
-import { isGroundedAplombGuideCurrent } from './groundedTeacherDraftEngine';
+import type { GroundedGuideFrameContext, GroundedTeacherGuide } from '../types/groundedTeacherDraft';
+import { isGroundedTeacherGuideCurrent } from './groundedTeacherDraftEngine';
 import { getSkeletonTarget, getSkeletonTargetPoints, isSkeletonPointUsable, isSkeletonTargetGeometryUsable } from './skeletonTargetRegistry';
 import type { SelectedSkeletonTarget, SkeletonTargetFrameContext } from '../types/skeletonTarget';
 import type { NicoleReferenceFrameContext, NicoleReferenceLineGuide } from '../types/nicoleReferenceLine';
@@ -166,8 +166,8 @@ export interface CanvasRenderOptions {
   glowType?: 'GOOD' | 'CORRECTION';
   /** Show ideal position overlay (green dashed guide) for selected joint */
   showIdealOverlay?: boolean;
-  /** Provenance-gated 2D Aplomb guide for the exact selected paused frame. */
-  groundedAplombGuide?: GroundedAplombGuide;
+  /** Provenance-gated 2D orientation guide for the exact selected paused frame. */
+  groundedAplombGuide?: GroundedTeacherGuide;
   /** Current runtime identity used to reject stale or cross-video guides. */
   groundedGuideFrameContext?: GroundedGuideFrameContext;
   /** Dim everything except the focused joint area (spotlight effect) */
@@ -1013,21 +1013,49 @@ export function renderSkeletonToCanvas(
     drawLine(ctx, x1, y1, x2, y2, IDEAL_COLOR, IDEAL_WIDTH, sx, sy, IDEAL_DASH);
   };
 
+  const groundedGuide = opts.groundedAplombGuide;
+  const groundedGuideFocusId = groundedGuide?.evidence.metricId === 'spine_tilt_aplomb'
+    ? 'spine_center'
+    : groundedGuide?.evidence.metricId === 'shoulder_horizontal'
+      ? 'shoulder_line'
+      : groundedGuide?.evidence.metricId === 'projected_hip_line_obliquity'
+        ? 'pelvis_core'
+        : null;
   if (
     opts.showIdealOverlay
-    && opts.selectedJointId === 'spine_center'
-    && isGroundedAplombGuideCurrent(
-      opts.groundedAplombGuide,
+    && opts.selectedJointId === groundedGuideFocusId
+    && isGroundedTeacherGuideCurrent(
+      groundedGuide,
       opts.groundedGuideFrameContext,
     )
   ) {
     ctx.save();
     ctx.globalAlpha = IDEAL_ALPHA;
-    drawIdealLine(pelvisCenter.x, head.y - 15, pelvisCenter.x, pelvisCenter.y + 15);
+    let labelX: number;
+    let labelY: number;
+    if (groundedGuide.kind === 'image_vertical') {
+      drawIdealLine(pelvisCenter.x, head.y - 15, pelvisCenter.x, pelvisCenter.y + 15);
+      labelX = (pelvisCenter.x + 18) * sx;
+      labelY = ((head.y + pelvisCenter.y) / 2) * sy;
+    } else {
+      const anchor = groundedGuide.anchor === 'shoulder_center'
+        ? {
+          x: (shoulderL.x + shoulderR.x) / 2,
+          y: (shoulderL.y + shoulderR.y) / 2,
+        }
+        : pelvisCenter;
+      const sourceLength = groundedGuide.anchor === 'shoulder_center'
+        ? Math.hypot(shoulderR.x - shoulderL.x, shoulderR.y - shoulderL.y)
+        : Math.hypot(pelvisR.x - pelvisL.x, pelvisR.y - pelvisL.y);
+      const halfLength = Math.max(35, sourceLength / 2);
+      drawIdealLine(anchor.x - halfLength, anchor.y, anchor.x + halfLength, anchor.y);
+      labelX = (anchor.x - halfLength) * sx;
+      labelY = (anchor.y - 12) * sy;
+    }
     drawIdealLabel(
-      'Aplomb-Orientierung (2D) · Nicole prüft',
-      (pelvisCenter.x + 18) * sx,
-      ((head.y + pelvisCenter.y) / 2) * sy,
+      groundedGuide.label,
+      labelX,
+      labelY,
     );
 
     ctx.restore();

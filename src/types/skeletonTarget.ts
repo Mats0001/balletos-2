@@ -82,7 +82,10 @@ export type SkeletonOverlayRegionKey =
   | 'cog'
   | 'head';
 
-export type GroundedMetricAdapterId = 'spine_tilt_aplomb';
+export type GroundedMetricAdapterId =
+  | 'spine_tilt_aplomb'
+  | 'shoulder_horizontal'
+  | 'projected_hip_line_obliquity';
 
 export interface SkeletonTargetDefinition {
   id: SkeletonTargetId;

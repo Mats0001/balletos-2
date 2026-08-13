@@ -17,6 +17,7 @@ import type {
 import { createBlockedPacket, TeacherHeuristicState } from '../types/teacherHeuristic';
 import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngine';
 import type { PoseLandmark } from '../services/realMediaPipePose';
+import type { GroundedTeacherGuide } from '../types/groundedTeacherDraft';
 import { sha256Canonical } from '../services/cueReviewAudit';
 import { NICOLE_REFERENCE_DIGEST_ALGORITHM } from '../types/nicoleReferenceLine';
 
@@ -312,6 +313,7 @@ describe('trusted skeleton color contract', () => {
     const overlay = createBlockedPacket(2.5, 42);
     overlay.spine = 'heuristic_attention';
     const draft = buildGroundedTeacherDraft({
+      metricAdapter: 'spine_tilt_aplomb',
       targetJointId: 'spine_center',
       isPaused: true,
       exactCacheLandmarks: points,
@@ -392,6 +394,70 @@ describe('trusted skeleton color contract', () => {
     expect(current.some(({ color, dash }) => color === '#22c55e' && dash.join(',') === '14,8')).toBe(true);
     expect(stale.some(({ color }) => color === '#22c55e')).toBe(false);
     expect(missing.some(({ color }) => color === '#22c55e')).toBe(false);
+  });
+
+  it('draws a current grounded shoulder guide horizontally and rejects the wrong focus', () => {
+    const guide: GroundedTeacherGuide = {
+      kind: 'image_horizontal',
+      anchor: 'shoulder_center',
+      label: 'Schulter-Orientierung (2D) · Nicole prüft',
+      reviewState: 'pending_nicole',
+      evidence: {
+        metricId: 'shoulder_horizontal',
+        valueDeg: 7.5,
+        confidence: 0.92,
+        measurementClass: 'vaganova_relation',
+        heuristicState: 'heuristic_attention',
+        sourceId: 'clip-a',
+        streamEpoch: 42,
+        generation: 7,
+        mediaTimeUs: 2_500_000,
+        videoWidth: 1000,
+        videoHeight: 1000,
+        policyVersion: '0.2.0-teacher-ampel',
+        source: 'exact_frame_cache',
+      },
+    };
+    const renderGuide = (selectedJointId: string) => {
+      const { canvas, strokes } = createRecordingCanvas();
+      renderSkeletonToCanvas(
+        canvas,
+        SKELETON,
+        { x: 500, y: 520 },
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {
+          showSkeleton: true,
+          showMotionTrails: false,
+          showCoG: false,
+          showAngleArcs: false,
+          selectedJointId,
+          showIdealOverlay: true,
+          groundedAplombGuide: guide,
+          groundedGuideFrameContext: {
+            sourceId: 'clip-a',
+            streamEpoch: 42,
+            generation: 7,
+            mediaTimeUs: 2_500_000,
+            videoWidth: 1000,
+            videoHeight: 1000,
+            policyVersion: '0.2.0-teacher-ampel',
+          },
+          isPlie: true,
+          vaganovaAnalysis: rawAnalysis(0.95),
+          overlayMode: 'anatomisch',
+        },
+      );
+      return strokes;
+    };
+
+    expect(renderGuide('shoulder_line').some(({ color, dash }) => (
+      color === '#22c55e' && dash.join(',') === '14,8'
+    ))).toBe(true);
+    expect(renderGuide('spine_center').some(({ color }) => color === '#22c55e')).toBe(false);
   });
 
   it('outlines the exact selected bone in amber only for the matching frame identity', () => {

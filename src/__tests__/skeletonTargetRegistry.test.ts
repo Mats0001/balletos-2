@@ -40,6 +40,14 @@ describe('skeleton target registry', () => {
     expect(new Set(SKELETON_TARGETS.map(target => target.id)).size).toBe(37);
     expect(SKELETON_TARGETS.filter(target => target.kind === 'joint')).toHaveLength(19);
     expect(SKELETON_TARGETS.filter(target => target.kind === 'bone')).toHaveLength(18);
+    expect(getSkeletonTarget('bone.shoulder_line')).toMatchObject({
+      metricAdapter: 'shoulder_horizontal',
+      focusId: 'shoulder_line',
+    });
+    expect(getSkeletonTarget('bone.pelvis_line')).toMatchObject({
+      metricAdapter: 'projected_hip_line_obliquity',
+      focusId: 'pelvis_core',
+    });
   });
 
   it('preserves the exact clicked bone instead of collapsing it to a representative joint', () => {

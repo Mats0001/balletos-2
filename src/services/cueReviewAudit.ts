@@ -156,15 +156,20 @@ function event(
 
 export function contentFromGroundedDraft(
   draft: ReadyGroundedTeacherDraft,
-  target: SelectedSkeletonTarget,
+  _target: SelectedSkeletonTarget,
   poseName: string,
 ): CueReviewContent {
+  const headline = draft.evidence.metricId === 'shoulder_horizontal'
+    ? 'Schulterlinie – Nicole prüft'
+    : draft.evidence.metricId === 'projected_hip_line_obliquity'
+      ? 'Beckenlinie – Nicole prüft'
+      : 'Rumpfachse – Nicole prüft';
   return cloneFreeze({
     poseName,
     status: 'NEUTRAL',
-    headline: 'Rumpfachse – Nicole prüft',
+    headline,
     cueMetaphor: draft.sections.metaphor,
-    jointFocusId: 'spine_center',
+    jointFocusId: draft.target,
     diagnosisText: `${draft.sections.what}\n\n${draft.sections.whyConditional}`,
     goalText: draft.sections.goalConditional,
     practiceText: draft.sections.practiceForTeacherReview,
@@ -188,12 +193,20 @@ export function createGroundedCueReviewAudit(input: {
     || input.target.generation !== input.draft.evidence.generation) {
     throw new Error('Grounded draft and selected exact frame do not share one identity.');
   }
-  const groundedTargetIds = new Set([
-    'bone.neck_sternum', 'bone.sternum_navel', 'bone.navel_pelvis',
-    'bone.torso_side_l', 'bone.torso_side_r',
-  ]);
-  if (!groundedTargetIds.has(input.target.targetId) || input.content.jointFocusId !== 'spine_center') {
-    throw new Error('Grounded Aplomb draft requires a supported torso target.');
+  const allowedTargetsByMetric = {
+    spine_tilt_aplomb: new Set([
+      'bone.neck_sternum', 'bone.sternum_navel', 'bone.navel_pelvis',
+      'bone.torso_side_l', 'bone.torso_side_r',
+    ]),
+    shoulder_horizontal: new Set(['bone.shoulder_line']),
+    projected_hip_line_obliquity: new Set(['bone.pelvis_line']),
+  } as const;
+  const allowedTargets = allowedTargetsByMetric[input.draft.evidence.metricId];
+  if (
+    !allowedTargets.has(input.target.targetId)
+    || input.content.jointFocusId !== input.draft.target
+  ) {
+    throw new Error('Grounded teacher draft requires its supported exact line target.');
   }
   const origin = originWithDigest({
     originId: context.createId('origin'),
@@ -201,7 +214,7 @@ export function createGroundedCueReviewAudit(input: {
     integrity: 'verified_application_snapshot',
     videoSourceId: input.draft.evidence.sourceId,
     anchor: { mediaTimeUs: input.draft.evidence.mediaTimeUs, targetId: input.target.targetId },
-    generatedAt: context.now(), generatorId: 'balletos-grounded-teacher-draft-v1',
+    generatedAt: context.now(), generatorId: 'balletos-grounded-teacher-draft-v2',
     policyVersion: input.draft.evidence.policyVersion,
     originalContent: cloneFreeze(input.content),
     groundedPayload: cloneFreeze({ evidence: input.draft.evidence, sections: input.draft.sections, guide: input.draft.guide }),
