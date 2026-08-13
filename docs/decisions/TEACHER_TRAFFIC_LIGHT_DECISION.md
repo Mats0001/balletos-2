@@ -9,7 +9,10 @@
 > Aufnahme-Gate für vollständige Körper- und Gelenksichtbarkeit, stabile
 > Perspektive, Personengröße, Zieltracking, Bildschärfe, Kamerastabilität sowie
 > ausgewählte Übung und Stufe. Ein harter Fehler ergibt ausschließlich
-> **„Aufnahme korrigieren“**; das System rät dann keine Ampelfarbe. Nach
+> **„Aufnahme korrigieren“**; das System rät dann keine Ampelfarbe. Einzelne
+> weiche Aufnahmefehler (etwa zeitweise verdeckte Füße, mäßige Schärfe oder
+> Kamerabewegung) stoppen dagegen nicht: Die Phasenfarben bleiben sichtbar und
+> werden mit Punktpaaren als vorläufig gekennzeichnet. Nach
 > bestandenem Gate wird ein vollständiger Plié-Zyklus in Ausgangsposition,
 > Abwärtsbewegung, Tiefpunkt, Aufwärtsbewegung und Abschluss segmentiert. Die
 > Grundfarbe Grün/Gelb/Rot stammt aus dem gemittelten Leistungsgrad aller
@@ -151,8 +154,12 @@ Freigegebene pädagogische Kommunikation
 missing_landmark, invalid_geometry, wrong_camera, occluded,
 unassigned_person, insufficient_temporal_data, blurred_frame, unstable_camera
 ```
-→ Darstellung: keine Ampel; stattdessen **„Aufnahme korrigieren“** mit konkreter
-Handlungsanweisung.
+→ Weiche, nur zeitweise auftretende Mängel: Ampel bleibt sichtbar, alle
+Phasenurteile erhalten Punktpaare und konkrete Verbesserungshinweise.
+
+→ Erst wenn der zeitliche Aufnahmeverbund keine tragfähige Pose, Zielperson,
+Geometrie oder vollständige Plié-Phase mehr liefert: keine Ampel; stattdessen
+**„Aufnahme korrigieren“** mit konkreter Handlungsanweisung.
 
 Nach bestandenem Gate gilt orthogonal:
 

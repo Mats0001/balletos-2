@@ -13,7 +13,8 @@
  *   → Grundfarbe und Evidenzsicherheit sind getrennt: Grün/Gelb/Rot beschreibt
  *     das aggregierte Phasenurteil. Einzelpunkte markieren leichte Unsicherheit,
  *     feine Punktpaare schwache Evidenz; die Grundfarbe bleibt erhalten.
- *   → Harte Aufnahmefehler stoppen die Ampel mit „Aufnahme korrigieren“.
+ *   → Weiche Aufnahmefehler lassen die Ampel mit Punktpaaren weiterlaufen.
+ *   → Nur technisch nicht auswertbare Aufnahmen stoppen mit „Aufnahme korrigieren“.
  *
  * Gesperrt bleiben (unabhängig vom Ampelmodus):
  *   allowValidatedThresholdScoring / allowAutomaticSafetyClaims /

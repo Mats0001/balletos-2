@@ -40,11 +40,13 @@ export interface RecordingGateCheck {
     | 'complete_plie_cycle';
   label: string;
   passed: boolean;
+  /** True only when this failure leaves no defensible phase analysis. */
+  blocksAnalysis: boolean;
   detail: string;
 }
 
 export interface RecordingGateResult {
-  status: 'ready' | 'needs_correction';
+  status: 'ready' | 'usable_with_caution' | 'needs_correction';
   checks: readonly RecordingGateCheck[];
   correctiveActions: readonly string[];
   detectedPerspective: 'FRONTAL' | 'PROFILE_RIGHT' | 'PROFILE_LEFT' | null;
@@ -334,8 +336,14 @@ function phaseDisplayState(regions: Readonly<Record<TeacherRegionKey, TeacherPha
   return withEvidenceStrength(base, strength);
 }
 
-function gateCheck(id: RecordingGateCheck['id'], label: string, passed: boolean, detail: string): RecordingGateCheck {
-  return { id, label, passed, detail };
+function gateCheck(
+  id: RecordingGateCheck['id'],
+  label: string,
+  passed: boolean,
+  blocksAnalysis: boolean,
+  detail: string,
+): RecordingGateCheck {
+  return { id, label, passed, blocksAnalysis: !passed && blocksAnalysis, detail };
 }
 
 export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherPhaseAnalysis {
@@ -420,30 +428,41 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
   const boundaries = detectPliePhases(samples);
 
   const checks: RecordingGateCheck[] = [
-    gateCheck('exercise_level', 'Plié und Stufe ausgewählt', exerciseAndLevelSelected, `${input.exerciseLabel || 'Übung fehlt'} · ${input.levelLabel || 'Stufe fehlt'}`),
-    gateCheck('pose_coverage', 'Körper durchgängig erkannt', poseCoverage >= 0.75, `${Math.round(poseCoverage * 100)} % der Analyseframes`),
-    gateCheck('full_body', 'Vollständiger Körper sichtbar', fullBodyRatio >= 0.7, `${Math.round(fullBodyRatio * 100)} % mit Kopf, Armen, Beinen und Füßen`),
-    gateCheck('perspective', 'Kameraperspektive eindeutig', perspectiveRatio >= 0.75, `${perspectivePlane} · ${Math.round(perspectiveRatio * 100)} % stabil · dominant ${detectedPerspective ?? 'nicht erkannt'}`),
-    gateCheck('person_size', 'Person ausreichend groß', medianHeight >= 0.32 && medianWidth >= 0.16, `${Math.round(medianHeight * 100)} % Bildhöhe · ${Math.round(medianWidth * 100)} % Bildbreite`),
-    gateCheck('target_tracking', 'Zielperson eindeutig verfolgt', stableTrackingRatio >= 0.85, `${Math.round(stableTrackingRatio * 100)} % stabile Tracking-Schritte`),
-    gateCheck('feet_joints', 'Füße und relevante Gelenke sichtbar', feetRatio >= 0.72, `${Math.round(feetRatio * 100)} % vollständig`),
-    gateCheck('sharpness', 'Ausreichende Bildschärfe', quality.length >= totalFrames * 0.7 && sharpness >= 0.08, `Schärfeindex ${sharpness.toFixed(2)}`),
-    gateCheck('camera_stability', 'Kamera stabil', quality.length >= totalFrames * 0.7 && cameraMotion <= 0.12, `Hintergrundbewegung ${cameraMotion.toFixed(2)}`),
-    gateCheck('complete_plie_cycle', 'Vollständiger Plié-Zyklus erkannt', boundaries !== null, boundaries ? '5 Phasen erkannt' : 'Ausgang, Tiefpunkt oder Abschluss fehlt'),
+    gateCheck('exercise_level', 'Plié und Stufe ausgewählt', exerciseAndLevelSelected, !exerciseAndLevelSelected, `${input.exerciseLabel || 'Übung fehlt'} · ${input.levelLabel || 'Stufe fehlt'}`),
+    gateCheck('pose_coverage', 'Körper durchgängig erkannt', poseCoverage >= 0.75, poseCoverage < 0.35, `${Math.round(poseCoverage * 100)} % der Analyseframes`),
+    gateCheck('full_body', 'Vollständiger Körper sichtbar', fullBodyRatio >= 0.7, false, `${Math.round(fullBodyRatio * 100)} % mit Kopf, Armen, Beinen und Füßen`),
+    gateCheck('perspective', 'Kameraperspektive eindeutig', perspectiveRatio >= 0.75, perspectiveRatio < 0.5, `${perspectivePlane} · ${Math.round(perspectiveRatio * 100)} % stabil · dominant ${detectedPerspective ?? 'nicht erkannt'}`),
+    gateCheck('person_size', 'Person ausreichend groß', medianHeight >= 0.32 && medianWidth >= 0.16, medianHeight < 0.18 || medianWidth < 0.08, `${Math.round(medianHeight * 100)} % Bildhöhe · ${Math.round(medianWidth * 100)} % Bildbreite`),
+    gateCheck('target_tracking', 'Zielperson eindeutig verfolgt', stableTrackingRatio >= 0.85, stableTrackingRatio < 0.55, `${Math.round(stableTrackingRatio * 100)} % stabile Tracking-Schritte`),
+    gateCheck('feet_joints', 'Füße und relevante Gelenke sichtbar', feetRatio >= 0.72, false, `${Math.round(feetRatio * 100)} % vollständig`),
+    gateCheck('sharpness', 'Ausreichende Bildschärfe', quality.length >= totalFrames * 0.7 && sharpness >= 0.08, quality.length >= totalFrames * 0.2 && sharpness < 0.02, `Schärfeindex ${sharpness.toFixed(2)}`),
+    gateCheck('camera_stability', 'Kamera stabil', quality.length >= totalFrames * 0.7 && cameraMotion <= 0.12, quality.length >= totalFrames * 0.2 && cameraMotion > 0.35, `Hintergrundbewegung ${cameraMotion.toFixed(2)}`),
+    gateCheck('complete_plie_cycle', 'Vollständiger Plié-Zyklus erkannt', boundaries !== null, boundaries === null, boundaries ? '5 Phasen erkannt' : 'Ausgang, Tiefpunkt oder Abschluss fehlt'),
   ];
   const correctiveActions = checks.filter(check => !check.passed).map(check => check.label);
+  const analysisBlocked = checks.some(check => check.blocksAnalysis);
   const gate: RecordingGateResult = {
-    status: correctiveActions.length === 0 ? 'ready' : 'needs_correction',
+    status: analysisBlocked
+      ? 'needs_correction'
+      : correctiveActions.length > 0
+        ? 'usable_with_caution'
+        : 'ready',
     checks,
     correctiveActions,
     detectedPerspective,
   };
 
-  const phases: TeacherPhaseResult[] = gate.status === 'ready' && boundaries
+  const phases: TeacherPhaseResult[] = gate.status !== 'needs_correction' && boundaries
     ? boundaries.map(boundary => {
       const phaseSamples = samples.slice(boundary.startIndex, boundary.endIndex + 1);
       const regions = Object.fromEntries(
-        TEACHER_REGION_KEYS.map(key => [key, aggregateRegion(phaseSamples, key)]),
+        TEACHER_REGION_KEYS.map(key => {
+          const summary = aggregateRegion(phaseSamples, key);
+          const base = heuristicBaseState(summary.state);
+          return [key, gate.status === 'usable_with_caution' && base
+            ? { ...summary, state: withEvidenceStrength(base, 'weak') }
+            : summary];
+        }),
       ) as Record<TeacherRegionKey, TeacherPhaseRegionSummary>;
       return {
         id: boundary.id,
@@ -472,7 +491,7 @@ export function findTeacherPhaseAtTime(
   analysis: TeacherPhaseAnalysis | null,
   timeMs: number,
 ): TeacherPhaseResult | null {
-  if (!analysis || analysis.gate.status !== 'ready' || analysis.phases.length === 0 || !Number.isFinite(timeMs)) return null;
+  if (!analysis || analysis.gate.status === 'needs_correction' || analysis.phases.length === 0 || !Number.isFinite(timeMs)) return null;
   return analysis.phases.find(phase => timeMs >= phase.startMs && timeMs <= phase.endMs)
     ?? analysis.phases.reduce((closest, phase) => (
       Math.abs(phase.representativeTimeMs - timeMs) < Math.abs(closest.representativeTimeMs - timeMs)

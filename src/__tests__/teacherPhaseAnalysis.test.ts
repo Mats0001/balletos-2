@@ -8,7 +8,7 @@ import {
   phaseToOverlayPacket,
   summarizePhaseRegionStates,
 } from '../services/teacherPhaseAnalysis';
-import { heuristicBaseState, heuristicDash, TEACHER_REGION_KEYS } from '../types/teacherHeuristic';
+import { heuristicBaseState, heuristicDash, heuristicEvidenceStrength, TEACHER_REGION_KEYS } from '../types/teacherHeuristic';
 
 function poseForKneeAngle(angleDeg: number): PoseLandmark[] {
   const landmarks: PoseLandmark[] = Array.from({ length: 33 }, () => ({
@@ -171,12 +171,45 @@ describe('teacher phase-based post analysis', () => {
 
     expect(result.gate.status).toBe('needs_correction');
     expect(result.phases).toEqual([]);
+    expect(result.gate.checks.some(check => check.blocksAnalysis)).toBe(true);
     expect(result.gate.correctiveActions).toEqual(expect.arrayContaining([
       'Plié und Stufe ausgewählt',
       'Füße und relevante Gelenke sichtbar',
       'Ausreichende Bildschärfe',
       'Kamera stabil',
     ]));
+  });
+
+  it('keeps phase colours with paired dots when only soft recording checks fail', () => {
+    const frames = fullCycleFrames().map((frame, index) => ({
+      ...frame,
+      imageQuality: { sharpnessScore: 0.06, backgroundMotionScore: index === 0 ? null : 0.2 },
+      landmarks: frame.landmarks!.map((landmark, landmarkIndex) => (
+        [27, 28, 31, 32].includes(landmarkIndex) ? { ...landmark, visibility: 0.4 } : landmark
+      )),
+    }));
+    const result = analyzeTeacherPhases({
+      frames,
+      videoWidth: 960,
+      videoHeight: 1280,
+      exerciseLabel: 'Plié',
+      levelLabel: 'Basis',
+    });
+
+    expect(result.gate.status).toBe('usable_with_caution');
+    expect(result.phases).toHaveLength(5);
+    expect(result.gate.checks.filter(check => !check.passed).every(check => !check.blocksAnalysis)).toBe(true);
+    expect(findTeacherPhaseAtTime(result, result.phases[2].representativeTimeMs)?.id).toBe('bottom');
+    expect(result.gate.correctiveActions).toEqual(expect.arrayContaining([
+      'Vollständiger Körper sichtbar',
+      'Füße und relevante Gelenke sichtbar',
+      'Ausreichende Bildschärfe',
+      'Kamera stabil',
+    ]));
+    for (const phase of result.phases) {
+      expect(heuristicEvidenceStrength(phase.displayState)).toBe('weak');
+      expect(heuristicDash(phase.displayState)).toEqual([0.75, 3.5, 0.75, 6]);
+    }
   });
 });
 

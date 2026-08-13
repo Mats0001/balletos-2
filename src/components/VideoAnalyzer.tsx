@@ -1180,8 +1180,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   updateGroundedTeacherDraft(refreshedDraft);
                 }
 
+                const phaseGateStatus = teacherPhaseAnalysisRef.current?.gate.status;
                 const phaseTrafficLightReady = currentMode !== 'lehrer-ampel'
-                  || teacherPhaseAnalysisRef.current?.gate.status === 'ready';
+                  || (phaseGateStatus !== undefined && phaseGateStatus !== 'needs_correction');
                 renderSkeletonToCanvas(canvas2, c.sk, c.cogPt, c.armPos, c.elbowQ, c.epaul, c.footAl, c.wDist, {
                   showSkeleton: renderState.showSkeleton,
                   showMotionTrails: renderState.showMotionTrails,
@@ -3272,7 +3273,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     background: 'rgba(14,11,22,0.92)', backdropFilter: 'blur(14px)',
                     border: teacherPhaseAnalysis.gate.status === 'ready'
                       ? '1px solid rgba(100,210,255,0.55)'
-                      : '1px solid rgba(255,159,10,0.7)',
+                      : teacherPhaseAnalysis.gate.status === 'usable_with_caution'
+                        ? '1px solid rgba(255,214,10,0.72)'
+                        : '1px solid rgba(255,159,10,0.7)',
                     borderRadius: '12px', padding: '9px 10px', color: '#fff',
                     boxShadow: '0 8px 28px rgba(0,0,0,0.38)',
                   }}>
@@ -3294,7 +3297,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                           <div>
-                            <div style={{ color: '#64d2ff', fontSize: '10px', fontWeight: 900 }}>✓ Aufnahme geeignet · Nachanalyse</div>
+                            <div style={{ color: teacherPhaseAnalysis.gate.status === 'ready' ? '#64d2ff' : '#ffd60a', fontSize: '10px', fontWeight: 900 }}>
+                              {teacherPhaseAnalysis.gate.status === 'ready'
+                                ? '✓ Aufnahme geeignet · Nachanalyse'
+                                : '·· ·· Aufnahme mit Vorsicht auswertbar'}
+                            </div>
                             <div style={{ fontSize: '8px', opacity: 0.65, marginTop: '2px' }}>
                               {teacherPhaseAnalysis.exerciseLabel} · {teacherPhaseAnalysis.levelLabel} · {teacherPhaseAnalysis.framesAnalyzed} Frames
                             </div>
@@ -3306,6 +3313,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             {activeTeacherPhase?.label ?? 'Phase wählen'}
                           </div>
                         </div>
+                        {teacherPhaseAnalysis.gate.status === 'usable_with_caution' && (
+                          <div style={{ marginTop: '5px', color: '#ffe87a', fontSize: '7.5px', lineHeight: 1.35 }}>
+                            Farben bleiben sichtbar, Punktpaare markieren das vorläufige Urteil. Optimieren: {teacherPhaseAnalysis.gate.correctiveActions.join(' · ')}
+                          </div>
+                        )}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', marginTop: '7px' }}>
                           {teacherPhaseAnalysis.phases.map(phase => {
                             const color = heuristicColor(phase.displayState);
