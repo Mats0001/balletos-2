@@ -83,7 +83,7 @@ describe('teacher phase-based post analysis', () => {
     expect(packet.streamEpoch).toBe(91);
   });
 
-  it('keeps the nearest phase colour and expresses temporal disagreement only as dashes', () => {
+  it('scores movement variation as phase colour without inventing evidence uncertainty', () => {
     const inside = summarizePhaseRegionStates([
       'heuristic_match', 'heuristic_match', 'heuristic_match',
     ]);
@@ -100,7 +100,8 @@ describe('teacher phase-based post analysis', () => {
       'heuristic_strong_attention', 'heuristic_strong_attention', 'heuristic_attention',
     ]);
     const tie = summarizePhaseRegionStates([
-      'heuristic_match', 'heuristic_strong_attention',
+      'heuristic_match', 'heuristic_match',
+      'heuristic_strong_attention', 'heuristic_strong_attention',
     ]);
     const uncertainOutside = summarizePhaseRegionStates([
       'heuristic_strong_attention_uncertain',
@@ -110,12 +111,12 @@ describe('teacher phase-based post analysis', () => {
 
     expect(inside).toMatchObject({ state: 'heuristic_match', corridorResult: 'inside' });
     expect(outside).toMatchObject({ state: 'heuristic_strong_attention', corridorResult: 'outside' });
-    expect(nearestGreen).toMatchObject({ state: 'heuristic_match_uncertain', corridorResult: 'inside' });
-    expect(nearestYellow).toMatchObject({ state: 'heuristic_attention_uncertain', corridorResult: 'overlap' });
-    expect(nearestRed).toMatchObject({ state: 'heuristic_strong_attention_uncertain', corridorResult: 'outside' });
-    expect(tie).toMatchObject({ state: 'heuristic_attention_uncertain', corridorResult: 'overlap' });
+    expect(nearestGreen).toMatchObject({ state: 'heuristic_match', corridorResult: 'inside' });
+    expect(nearestYellow).toMatchObject({ state: 'heuristic_attention', corridorResult: 'overlap' });
+    expect(nearestRed).toMatchObject({ state: 'heuristic_strong_attention', corridorResult: 'outside' });
+    expect(tie).toMatchObject({ state: 'heuristic_attention', corridorResult: 'overlap' });
     expect(uncertainOutside).toMatchObject({
-      state: 'heuristic_strong_attention_uncertain',
+      state: 'heuristic_strong_attention_weak_evidence',
       corridorResult: 'outside',
     });
   });
@@ -130,6 +131,26 @@ describe('teacher phase-based post analysis', () => {
       corridorResult: 'inside',
       sampleCount: 2,
     });
+  });
+
+  it('uses paired micro-dots when most of a phase window has weak evidence', () => {
+    const result = summarizePhaseRegionStates([
+      'heuristic_strong_attention', 'blocked', 'blocked',
+    ]);
+
+    expect(result).toMatchObject({
+      state: 'heuristic_strong_attention_weak_evidence',
+      corridorResult: 'outside',
+      sampleCount: 1,
+    });
+    expect(heuristicDash(result.state)).toEqual([0.75, 3.5, 0.75, 6]);
+  });
+
+  it('keeps a fully missing phase neutral and double-dotted instead of guessing a colour', () => {
+    const result = summarizePhaseRegionStates(['blocked', 'blocked']);
+
+    expect(result).toMatchObject({ state: 'blocked', sampleCount: 0 });
+    expect(heuristicDash(result.state)).toEqual([0.75, 3.5, 0.75, 6]);
   });
 
   it('returns Aufnahme korrigieren instead of phase colours when hard recording gates fail', () => {

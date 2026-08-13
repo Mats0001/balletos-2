@@ -12,12 +12,13 @@
 > **„Aufnahme korrigieren“**; das System rät dann keine Ampelfarbe. Nach
 > bestandenem Gate wird ein vollständiger Plié-Zyklus in Ausgangsposition,
 > Abwärtsbewegung, Tiefpunkt, Aufwärtsbewegung und Abschluss segmentiert. Die
-> Grundfarbe Grün/Gelb/Rot stammt aus der dominanten, nächstliegenden
-> Ampelklasse aller auswertbaren Frames der Phase; ein echter Gleichstand wird
-> als Grenzbereich Gelb aufgelöst. Abweichende Frameklassen, Evidenzlücken oder
-> unsichere Eingangssignale färben nicht pauschal Gelb, sondern machen die
-> ermittelte Grundfarbe fein gepunktet. Durchgezogen bedeutet, dass alle
-> auswertbaren Frames dieselbe Grundklasse tragen. Die Ampel
+> Grundfarbe Grün/Gelb/Rot stammt aus dem gemittelten Leistungsgrad aller
+> auswertbaren Frames der Phase. Ein 50/50-Verlauf aus Grün und Rot wird als
+> Grenzbereich Gelb aufgelöst. Abweichende Frameklassen sind damit bereits Teil
+> der Leistungsfarbe und erzeugen nicht zusätzlich eine Unsicherheitstextur.
+> Evidenzlücken oder unsichere Eingangssignale färben nicht pauschal Gelb:
+> stabile Evidenz bleibt durchgezogen, leichte Unsicherheit erhält feine
+> Einzelpunkte und schwache Evidenz feine Punktpaare in derselben Grundfarbe. Die Ampel
 > wird aus der abgeschlossenen Nachanalyse bezogen, nicht aus einem zufälligen
 > Live-Einzelbild.
 >
@@ -35,7 +36,7 @@
 > auswertbare Körperregion eine Ampeldarstellung. Der neuere Phasen-Nachtrag
 > trennt dabei harte Aufnahmefehler von regionaler Evidenzunsicherheit: harte
 > Fehler stoppen die Bewertung, weiche Unsicherheit erhält die vorläufige
-> Grundfarbe mit fein gepunkteter Linie. Dieser Nachtrag autorisiert keine
+> Grundfarbe mit feinen Einzelpunkten oder Punktpaaren. Dieser Nachtrag autorisiert keine
 > Muskel-, Valgus-, Druck-, COP-, Ursachen-, Prognose- oder Verletzungsdiagnose.
 > Die folgenden P0-/BAS-Nachträge bleiben als Historie und als Verbot der alten
 > Resolver bindend; ihre damalige neutrale Darstellung ist durch diesen
@@ -155,11 +156,17 @@ Handlungsanweisung.
 
 Nach bestandenem Gate gilt orthogonal:
 
-- Farbe: Grün / Gelb / Rot = dominante/nächstliegende Phasenklasse; Gleichstand = Gelb.
-- Linie: durchgezogen = stabile Evidenz; fein gepunktet = unsichere Evidenz.
+- Farbe: Grün / Gelb / Rot = gemittelte Phasenleistung; 50/50 Grün/Rot = Gelb.
+- Linie: durchgezogen = stabile Evidenz.
+- Feine Einzelpunkte = leichte Unsicherheit bei grundsätzlich tragfähiger Evidenz.
+- Feine Punktpaare = schwache Evidenz; die Farbtendenz ist nur vorläufig.
 
-Damit kann auch ein vorläufig grünes oder rotes Phasenurteil fein gepunktet sein,
+Damit kann auch ein vorläufig grünes oder rotes Phasenurteil gepunktet sein,
 ohne Gelb fälschlich als „halb richtig“ und zugleich „unsicher“ zu überladen.
+Bewegungsvariation beeinflusst die Farbe, nicht die Evidenztextur. Eine starke
+sichtbare Abweichung darf daher rot mit Punktpaaren erscheinen, wenn der
+Zeitverlauf die rote Tendenz trägt, die Einzelmessung aber schwach ist; es wird
+dabei kein fehlender Winkel erfunden.
 
 ---
 
@@ -191,7 +198,7 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
 | `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Farbe und Evidenzunsicherheit sind getrennt |
-| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und dominante/nächstliegende Grün-/Gelb-/Rot-Aggregation; Streuung oder Unsicherheit → dieselbe Farbe fein gepunktet |
+| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und gemittelte Grün-/Gelb-/Rot-Leistungsaggregation; Evidenzstärke getrennt als durchgezogen/Einzelpunkte/Punktpaare |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
@@ -206,8 +213,9 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 - [x] Bein-Shadow-Metriken erzeugen keine automatischen Knie-Cues oder positiven Kniezählungen
 - [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
 - [x] Armfarben sind an sichtbare Position, Geometrie und Confidence gebunden
-- [x] Soft unsichere Evidenz → fachliches Grundurteil Grün/Gelb/Rot bleibt erhalten und wird fein gepunktet
-- [x] Gemischte Frameklassen → dominante/nächstliegende Grundfarbe bleibt erhalten; kein pauschaler Gelb-Sammelzustand
+- [x] Leicht unsichere Evidenz → fachliches Grundurteil bleibt erhalten und erhält feine Einzelpunkte
+- [x] Schwache Evidenz → fachliche Farbtendenz bleibt vorläufig erhalten und erhält feine Punktpaare
+- [x] Gemischte Frameklassen → Leistungsgrad wird über die Phase gemittelt; 50/50 Grün/Rot ergibt Gelb ohne künstliche Unsicherheitstextur
 - [x] Hart gescheitertes Aufnahme-Gate → keine Ampel, sondern konkrete Aufforderung „Aufnahme korrigieren“
 - [x] Keine graue oder ausgelassene Region im Lehrer-Ampelmodus
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar

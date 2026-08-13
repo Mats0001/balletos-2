@@ -50,6 +50,9 @@ const VALID_STATES: ReadonlySet<TeacherHeuristicState> = new Set([
   'heuristic_match_uncertain',
   'heuristic_attention_uncertain',
   'heuristic_strong_attention_uncertain',
+  'heuristic_match_weak_evidence',
+  'heuristic_attention_weak_evidence',
+  'heuristic_strong_attention_weak_evidence',
 ]);
 
 const MEDIA_TIME_EPSILON_SECONDS = 0.000_001;
@@ -68,10 +71,13 @@ const SEVERITY: Record<TeacherHeuristicState, number> = {
   'heuristic_review':           -1,  // Yellow review, always instant
   'heuristic_match':             0,
   'heuristic_match_uncertain':   0,
+  'heuristic_match_weak_evidence': 0,
   'heuristic_attention':         1,
   'heuristic_attention_uncertain': 1,
+  'heuristic_attention_weak_evidence': 1,
   'heuristic_strong_attention':  2,
   'heuristic_strong_attention_uncertain': 2,
+  'heuristic_strong_attention_weak_evidence': 2,
 };
 
 function isWorsening(from: TeacherHeuristicState, to: TeacherHeuristicState): boolean {

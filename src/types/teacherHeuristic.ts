@@ -24,7 +24,8 @@
  *   heuristic_match            → Grün
  *   heuristic_attention        → Gelb/Orange
  *   heuristic_strong_attention → Rot
- *   *_uncertain                → gleiche Grundfarbe, aber fein gepunktet
+ *   *_uncertain                → gleiche Grundfarbe, feine Einzelpunkte
+ *   *_weak_evidence            → gleiche Grundfarbe, feine Punktpaare
  *   blocked                    → keine Bewertung; Aufnahme-Gate entscheidet
  */
 export type TeacherHeuristicBaseState =
@@ -37,8 +38,13 @@ export type TeacherHeuristicState =
   | 'heuristic_match_uncertain'
   | 'heuristic_attention_uncertain'
   | 'heuristic_strong_attention_uncertain'
-  | 'heuristic_review'             // Legacy-Kompatibilität: gelb fein gepunktet
+  | 'heuristic_match_weak_evidence'
+  | 'heuristic_attention_weak_evidence'
+  | 'heuristic_strong_attention_weak_evidence'
+  | 'heuristic_review'             // Legacy-Kompatibilität: gelb paarweise gepunktet
   | 'blocked';                     // Keine auswertbare Aufnahme, kein Farburteil
+
+export type TeacherEvidenceStrength = 'stable' | 'uncertain' | 'weak';
 
 export type TeacherRegionKey =
   | 'torsoAlignment' | 'spine' | 'shoulder' | 'pelvis'
@@ -133,8 +139,11 @@ export const HEURISTIC_COLORS: Record<TeacherHeuristicState, string> = Object.fr
   heuristic_match_uncertain:            '#30d158',    // Grün fein gepunktet
   heuristic_attention_uncertain:        '#ffd60a',    // Gelb fein gepunktet
   heuristic_strong_attention_uncertain: '#ff453a',    // Rot fein gepunktet
-  heuristic_review:           '#ffd60a',              // Gelb fein gepunktet – Nicole prüft
-  blocked:                    '#ffd60a',              // Gelb fein gepunktet – fehlende Evidenz
+  heuristic_match_weak_evidence:            '#30d158', // Grün schwache Evidenz
+  heuristic_attention_weak_evidence:        '#ffd60a', // Gelb schwache Evidenz
+  heuristic_strong_attention_weak_evidence: '#ff453a', // Rot schwache Evidenz
+  heuristic_review:           '#ffd60a',              // Gelb paarweise gepunktet – Nicole prüft
+  blocked:                    '#ffd60a',              // Gelb paarweise gepunktet – fehlende Evidenz
 });
 
 /**
@@ -149,8 +158,11 @@ export const HEURISTIC_DASH: Record<TeacherHeuristicState, number[]> = Object.fr
   heuristic_match_uncertain:            [0.75, 3.25],
   heuristic_attention_uncertain:        [0.75, 3.25],
   heuristic_strong_attention_uncertain: [0.75, 3.25],
-  heuristic_review:           [0.75, 3.25],
-  blocked:                    [0.75, 3.25],
+  heuristic_match_weak_evidence:            [0.75, 3.5, 0.75, 6],
+  heuristic_attention_weak_evidence:        [0.75, 3.5, 0.75, 6],
+  heuristic_strong_attention_weak_evidence: [0.75, 3.5, 0.75, 6],
+  heuristic_review:           [0.75, 3.5, 0.75, 6],
+  blocked:                    [0.75, 3.5, 0.75, 6],
 });
 
 // ─── HELPER ─────────────────────────────────────────────────────────────────
@@ -169,32 +181,69 @@ export function heuristicDash(state: TeacherHeuristicState): number[] {
 }
 
 export function heuristicBaseState(state: TeacherHeuristicState): TeacherHeuristicBaseState | null {
-  if (state === 'heuristic_match' || state === 'heuristic_match_uncertain') return 'heuristic_match';
-  if (state === 'heuristic_attention' || state === 'heuristic_attention_uncertain' || state === 'heuristic_review') {
+  if (
+    state === 'heuristic_match'
+    || state === 'heuristic_match_uncertain'
+    || state === 'heuristic_match_weak_evidence'
+  ) return 'heuristic_match';
+  if (
+    state === 'heuristic_attention'
+    || state === 'heuristic_attention_uncertain'
+    || state === 'heuristic_attention_weak_evidence'
+    || state === 'heuristic_review'
+  ) {
     return 'heuristic_attention';
   }
-  if (state === 'heuristic_strong_attention' || state === 'heuristic_strong_attention_uncertain') {
+  if (
+    state === 'heuristic_strong_attention'
+    || state === 'heuristic_strong_attention_uncertain'
+    || state === 'heuristic_strong_attention_weak_evidence'
+  ) {
     return 'heuristic_strong_attention';
   }
   return null;
 }
 
-export function heuristicHasUncertainEvidence(state: TeacherHeuristicState): boolean {
-  return state === 'heuristic_match_uncertain'
+export function heuristicEvidenceStrength(state: TeacherHeuristicState): TeacherEvidenceStrength {
+  if (
+    state === 'heuristic_match_weak_evidence'
+    || state === 'heuristic_attention_weak_evidence'
+    || state === 'heuristic_strong_attention_weak_evidence'
+    || state === 'heuristic_review'
+    || state === 'blocked'
+  ) return 'weak';
+  if (
+    state === 'heuristic_match_uncertain'
     || state === 'heuristic_attention_uncertain'
     || state === 'heuristic_strong_attention_uncertain'
-    || state === 'heuristic_review'
-    || state === 'blocked';
+  ) return 'uncertain';
+  return 'stable';
+}
+
+export function heuristicHasUncertainEvidence(state: TeacherHeuristicState): boolean {
+  return heuristicEvidenceStrength(state) !== 'stable';
+}
+
+export function withEvidenceStrength(
+  state: TeacherHeuristicBaseState,
+  strength: TeacherEvidenceStrength,
+): TeacherHeuristicState {
+  if (strength === 'stable') return state;
+  if (strength === 'uncertain') {
+    if (state === 'heuristic_match') return 'heuristic_match_uncertain';
+    if (state === 'heuristic_attention') return 'heuristic_attention_uncertain';
+    return 'heuristic_strong_attention_uncertain';
+  }
+  if (state === 'heuristic_match') return 'heuristic_match_weak_evidence';
+  if (state === 'heuristic_attention') return 'heuristic_attention_weak_evidence';
+  return 'heuristic_strong_attention_weak_evidence';
 }
 
 export function withUncertainEvidence(
   state: TeacherHeuristicBaseState,
   uncertain: boolean,
 ): TeacherHeuristicState {
-  if (!uncertain) return state;
-  if (state === 'heuristic_match') return 'heuristic_match_uncertain';
-  if (state === 'heuristic_attention') return 'heuristic_attention_uncertain';
-  return 'heuristic_strong_attention_uncertain';
+  return withEvidenceStrength(state, uncertain ? 'uncertain' : 'stable');
 }
 
 /**

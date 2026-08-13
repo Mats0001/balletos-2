@@ -1,13 +1,13 @@
 import { BUILD_POLICY } from '../config/buildPolicy';
 import {
   heuristicBaseState,
-  heuristicHasUncertainEvidence,
+  heuristicEvidenceStrength,
   TEACHER_REGION_KEYS,
   TeacherHeuristicBaseState,
   TeacherHeuristicState,
   TeacherOverlayPacket,
   TeacherRegionKey,
-  withUncertainEvidence,
+  withEvidenceStrength,
 } from '../types/teacherHeuristic';
 import type { FrameEntry } from './frameInterpolator';
 import type { PoseLandmark } from './realMediaPipePose';
@@ -51,7 +51,7 @@ export interface RecordingGateResult {
 }
 
 export interface TeacherPhaseRegionSummary {
-  state: ReturnType<typeof withUncertainEvidence>;
+  state: TeacherHeuristicState;
   corridorResult: 'inside' | 'overlap' | 'outside';
   sampleCount: number;
   agreement: number;
@@ -65,7 +65,7 @@ export interface TeacherPhaseResult {
   endMs: number;
   representativeTimeMs: number;
   regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>;
-  displayState: ReturnType<typeof withUncertainEvidence>;
+  displayState: TeacherHeuristicState;
 }
 
 export interface TeacherPhaseAnalysis {
@@ -261,31 +261,46 @@ export function summarizePhaseRegionStates(
   };
   for (const state of baseStates) counts[state]++;
   const sampleCount = baseStates.length;
+  if (sampleCount === 0) {
+    return {
+      state: 'blocked',
+      corridorResult: 'overlap',
+      sampleCount: 0,
+      agreement: 0,
+      uncertainRatio: states.length > 0 ? 1 : 0,
+    };
+  }
   const winningCount = Math.max(...Object.values(counts));
-  const winners = (Object.keys(counts) as TeacherHeuristicBaseState[])
-    .filter(state => counts[state] === winningCount && winningCount > 0);
-  // Die Grundfarbe ist die naechste/dominante Phasenklasse. Nur ein echter
-  // Gleichstand wird gelb aufgeloest. Zeitliche Streuung veraendert nicht
-  // heimlich die Farbe, sondern ausschliesslich das Strichmuster.
-  const base: TeacherHeuristicBaseState = winners.length === 1
-    ? winners[0]
-    : 'heuristic_attention';
+  const severityMean = (
+    counts.heuristic_attention + counts.heuristic_strong_attention * 2
+  ) / sampleCount;
+  // Die Farbe beschreibt die Leistung ueber das Phasenfenster. Ein 50/50-
+  // Verlauf aus Gruen und Rot ist fachlich Gelb; Farbstreuung allein ist aber
+  // keine Erkennungsunsicherheit und erzeugt deshalb keine Punkttextur.
+  const base: TeacherHeuristicBaseState = severityMean < 0.5
+    ? 'heuristic_match'
+    : severityMean > 1.5
+      ? 'heuristic_strong_attention'
+      : 'heuristic_attention';
   const corridorResult: TeacherPhaseRegionSummary['corridorResult'] = base === 'heuristic_match'
     ? 'inside'
     : base === 'heuristic_strong_attention'
       ? 'outside'
       : 'overlap';
   const agreement = winningCount / Math.max(1, sampleCount);
-  const uncertainRatio = states.filter(heuristicHasUncertainEvidence).length
+  const strengths = states.map(heuristicEvidenceStrength);
+  const weakRatio = strengths.filter(strength => strength === 'weak').length
     / Math.max(1, states.length);
-  // Jede Luecke, jede abweichende Farbstichprobe und jedes unsichere
-  // Eingangssignal bekommt eine feine Punkttextur. Die Grundfarbe bleibt erhalten.
-  const uncertain = sampleCount < 3
-    || sampleCount !== states.length
-    || agreement < 1
-    || uncertainRatio > 0;
+  const uncertainRatio = strengths.filter(strength => strength !== 'stable').length
+    / Math.max(1, states.length);
+  const coverage = sampleCount / Math.max(1, states.length);
+  const evidenceStrength = coverage < 0.5 || weakRatio >= 0.5 || uncertainRatio >= 0.75
+    ? 'weak'
+    : sampleCount < 3 || coverage < 1 || uncertainRatio > 0
+      ? 'uncertain'
+      : 'stable';
   return {
-    state: withUncertainEvidence(base, uncertain),
+    state: withEvidenceStrength(base, evidenceStrength),
     corridorResult,
     sampleCount,
     agreement,
@@ -297,26 +312,26 @@ function aggregateRegion(samples: readonly PoseSample[], key: TeacherRegionKey):
   return summarizePhaseRegionStates(samples.map(sample => sample.packet[key]));
 }
 
-function phaseDisplayState(regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>) {
-  const counts: Record<TeacherHeuristicBaseState, number> = {
-    heuristic_match: 0,
-    heuristic_attention: 0,
-    heuristic_strong_attention: 0,
-  };
-  for (const key of TEACHER_REGION_KEYS) {
-    const state = heuristicBaseState(regions[key].state);
-    if (state) counts[state]++;
-  }
-  const winningCount = Math.max(...Object.values(counts));
-  const winners = (Object.keys(counts) as TeacherHeuristicBaseState[])
-    .filter(state => counts[state] === winningCount && winningCount > 0);
-  const base: TeacherHeuristicBaseState = winners.length === 1
-    ? winners[0]
-    : 'heuristic_attention';
-  const uncertain = winners.length !== 1
-    || winningCount !== TEACHER_REGION_KEYS.length
-    || TEACHER_REGION_KEYS.some(key => heuristicHasUncertainEvidence(regions[key].state));
-  return withUncertainEvidence(base, uncertain);
+function phaseDisplayState(regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>): TeacherHeuristicState {
+  const states = TEACHER_REGION_KEYS.map(key => regions[key].state);
+  const baseStates = states.map(heuristicBaseState).filter((state): state is TeacherHeuristicBaseState => state !== null);
+  if (baseStates.length === 0) return 'blocked';
+  const severityMean = baseStates.reduce((sum, state) => (
+    sum + (state === 'heuristic_match' ? 0 : state === 'heuristic_attention' ? 1 : 2)
+  ), 0) / baseStates.length;
+  const base: TeacherHeuristicBaseState = severityMean < 0.5
+    ? 'heuristic_match'
+    : severityMean > 1.5
+      ? 'heuristic_strong_attention'
+      : 'heuristic_attention';
+  const strengths = states.map(heuristicEvidenceStrength);
+  const weakRatio = strengths.filter(strength => strength === 'weak').length / strengths.length;
+  const strength = weakRatio >= 1 / 3
+    ? 'weak'
+    : strengths.some(value => value !== 'stable')
+      ? 'uncertain'
+      : 'stable';
+  return withEvidenceStrength(base, strength);
 }
 
 function gateCheck(id: RecordingGateCheck['id'], label: string, passed: boolean, detail: string): RecordingGateCheck {

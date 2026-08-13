@@ -26,11 +26,14 @@ import { vaganovaArmAnalyzer, type ArmQualityStatus, type VaganovaArmPosition } 
 import type { MotionClassificationResult } from './vaganovaMotionClassifier';
 import {
   heuristicBaseState,
+  heuristicEvidenceStrength,
   heuristicHasUncertainEvidence,
   TeacherHeuristicBaseState,
+  TeacherEvidenceStrength,
   TeacherHeuristicState,
   TeacherOverlayPacket,
   createBlockedPacket,
+  withEvidenceStrength,
   withUncertainEvidence,
 } from '../types/teacherHeuristic';
 import { BUILD_POLICY, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
@@ -76,7 +79,13 @@ function isEligible(
  */
 function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
   const baseStates = states.map(heuristicBaseState).filter((state): state is TeacherHeuristicBaseState => state !== null);
-  const uncertain = states.some(heuristicHasUncertainEvidence) || baseStates.length !== states.length;
+  const strengthRank: Record<TeacherEvidenceStrength, number> = { stable: 0, uncertain: 1, weak: 2 };
+  const evidenceStrength: TeacherEvidenceStrength = baseStates.length !== states.length
+    ? 'weak'
+    : states.reduce<TeacherEvidenceStrength>((current, state) => {
+      const proposed = heuristicEvidenceStrength(state);
+      return strengthRank[proposed] > strengthRank[current] ? proposed : current;
+    }, 'stable');
   const combined: TeacherHeuristicBaseState | null = baseStates.includes('heuristic_strong_attention')
     ? 'heuristic_strong_attention'
     : baseStates.includes('heuristic_attention')
@@ -84,7 +93,7 @@ function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
       : baseStates.length > 0
         ? 'heuristic_match'
         : null;
-  return combined ? withUncertainEvidence(combined, uncertain) : 'blocked';
+  return combined ? withEvidenceStrength(combined, evidenceStrength) : 'blocked';
 }
 
 function finiteMeasurementValue(m: VaganovaMeasurement | null | undefined): number | null {

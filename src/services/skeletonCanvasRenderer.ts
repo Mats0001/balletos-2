@@ -79,6 +79,9 @@ const isTeacherHeuristicState = (value: unknown): value is TeacherHeuristicState
   || value === 'heuristic_match_uncertain'
   || value === 'heuristic_attention_uncertain'
   || value === 'heuristic_strong_attention_uncertain'
+  || value === 'heuristic_match_weak_evidence'
+  || value === 'heuristic_attention_weak_evidence'
+  || value === 'heuristic_strong_attention_weak_evidence'
   || value === 'heuristic_review'
   || value === 'blocked';
 

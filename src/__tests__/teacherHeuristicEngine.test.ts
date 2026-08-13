@@ -127,7 +127,7 @@ describe('TeacherHeuristicEngine evidence gates', () => {
     expect(missingShoulder.spine).toBe('heuristic_match');
     expect(missingShoulder.pelvis).toBe('heuristic_match');
     expect(missingShoulder.shoulder).toBe('blocked');
-    expect(missingShoulder.torsoAlignment).toBe('heuristic_match_uncertain');
+    expect(missingShoulder.torsoAlignment).toBe('heuristic_match_weak_evidence');
   });
 
   it.each([

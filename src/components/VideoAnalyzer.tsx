@@ -59,7 +59,7 @@ import {
   phaseToOverlayPacket,
   type TeacherPhaseAnalysis,
 } from '../services/teacherPhaseAnalysis';
-import { heuristicColor, heuristicDash } from '../types/teacherHeuristic';
+import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../types/teacherHeuristic';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -3026,7 +3026,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     <span><b style={{ color: '#30d158' }}>━━ Grün</b> · nächste Phasenklasse: im Korridor</span>
                     <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · nächste Phasenklasse: Grenzbereich</span>
                     <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · nächste Phasenklasse: außerhalb</span>
-                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>····</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ····</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ····</b> · gleiche Farbe, Evidenz unsicher</span>
+                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>····</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ····</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ····</b> · Einzelpunkte: leicht unsicher</span>
+                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>·· ··</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ·· ··</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ·· ··</b> · Punktpaare: schwache Evidenz</span>
                   </div>
                 </button>
                 {/* Mode 2: Anatomisch */}
@@ -3308,8 +3309,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', marginTop: '7px' }}>
                           {teacherPhaseAnalysis.phases.map(phase => {
                             const color = heuristicColor(phase.displayState);
-                            const dashed = heuristicDash(phase.displayState).length > 0;
+                            const evidenceStrength = heuristicEvidenceStrength(phase.displayState);
+                            const dotted = heuristicDash(phase.displayState).length > 0;
                             const active = activeTeacherPhase?.id === phase.id;
+                            const evidenceLabel = evidenceStrength === 'stable'
+                              ? 'Evidenz stabil'
+                              : evidenceStrength === 'uncertain'
+                                ? 'Evidenz leicht unsicher'
+                                : 'Evidenz schwach · Urteil vorläufig';
                             return (
                               <button
                                 key={phase.id}
@@ -3317,12 +3324,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   event.stopPropagation();
                                   handleInspectTeacherPhase(phase.representativeTimeMs);
                                 }}
-                                title={`${phase.label} · ${dashed ? 'Evidenz unsicher' : 'Evidenz stabil'}`}
+                                title={`${phase.label} · ${evidenceLabel}`}
                                 style={{
                                   minWidth: 0, height: '28px', padding: '2px', cursor: 'pointer',
                                   background: active ? `${color}2d` : 'rgba(255,255,255,0.035)',
                                   color: active ? '#fff' : 'rgba(255,255,255,0.72)',
-                                  border: `1px ${dashed ? 'dotted' : 'solid'} ${color}`,
+                                  border: `1px ${dotted ? 'dotted' : 'solid'} ${color}`,
                                   borderRadius: '7px', fontSize: '8px', fontWeight: 850,
                                 }}
                               >
@@ -3357,7 +3364,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           );
                         })}
                         <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
-                          Farbe = dominante/nächste Phasenklasse · fein gepunktet = Evidenz unsicher. Erst nach vollständigem Scan.
+                          Farbe = Phasenleistung · Einzelpunkte = leicht unsicher · Punktpaare = schwache Evidenz. Erst nach vollständigem Scan.
                         </div>
                       </>
                     )}
