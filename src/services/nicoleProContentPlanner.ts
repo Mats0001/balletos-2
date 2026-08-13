@@ -10,6 +10,8 @@ import {
   projectNicoleProStatementText,
   formatNicoleProEvidenceValue,
   type NicoleProTrustedValidationAuthorityV1,
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
   NICOLE_PRO_VALIDATOR_VERSION,
   validateNicoleProDraft,
 } from './nicoleProContentValidator';
@@ -25,9 +27,42 @@ import type {
   NicoleProEvidencePacketV1,
   NicoleProKnowledgeStatementV1,
 } from '../types/nicoleProContent';
+import {
+  createNicoleProExactFrameArtifactId,
+  createNicoleProVersionedDraftId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  type NicoleProLandmarkModel,
+} from './nicoleProArtifactIdentity';
+
+export {
+  createNicoleProExactFrameArtifactId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  type NicoleProLandmarkModel,
+} from './nicoleProArtifactIdentity';
 
 export const NICOLE_PRO_PLANNER_ID = 'balletos-nicole-pro-deterministic-planner' as const;
 export const NICOLE_PRO_PLANNER_VERSION = '1.0.0' as const;
+
+export function createNicoleProDraftId(
+  context: AnalysisContextEpochV1,
+  mediaTimeUs: number,
+  landmarkModel: NicoleProLandmarkModel,
+  metricId: string,
+  policyVersion: string,
+): string {
+  return createNicoleProVersionedDraftId({
+    context,
+    mediaTimeUs,
+    landmarkModel,
+    metricId,
+    policyVersion,
+    registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+    registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+    plannerId: NICOLE_PRO_PLANNER_ID,
+    plannerVersion: NICOLE_PRO_PLANNER_VERSION,
+    validatorVersion: NICOLE_PRO_VALIDATOR_VERSION,
+  });
+}
 
 const TEACHER_ONLY_TYPES = new Set<NicoleProClaimType>([
   'metric_observation', 'teacher_hypothesis', 'differentiation_test', 'technical_limitation',
@@ -117,21 +152,6 @@ export interface NicoleProGroundedPlannerInput {
 }
 
 export type NicoleProCaptureQuality = 'ready' | 'usable_with_caution';
-export type NicoleProLandmarkModel = Readonly<{ modelId: string; modelVersion: string }>;
-
-export const NICOLE_PRO_LANDMARK_MODEL_V1: NicoleProLandmarkModel = Object.freeze({
-  modelId: 'mediapipe-pose',
-  modelVersion: '0.5.1675469404:model-complexity-1',
-});
-
-export function createNicoleProExactFrameArtifactId(
-  context: AnalysisContextEpochV1,
-  mediaTimeUs: number,
-  landmarkModel: NicoleProLandmarkModel,
-): string {
-  return `exact-frame:${context.fingerprint}:${context.generation}:${mediaTimeUs}:${landmarkModel.modelId}@${landmarkModel.modelVersion}`;
-}
-
 const TARGET_IDS_BY_GROUNDED_METRIC = Object.freeze({
   spine_tilt_aplomb: [
     'bone.neck_sternum', 'bone.sternum_navel', 'bone.navel_pelvis', 'bone.torso_side_l', 'bone.torso_side_r',

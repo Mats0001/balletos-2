@@ -35,6 +35,7 @@ import { buildGroundedTeacherDraft, createBlockedGroundedTeacherDraft, findNeare
 import type { GroundedGuideFrameContext, GroundedTeacherDraft, ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import {
   createNicoleProExactFrameArtifactId,
+  createNicoleProDraftId,
   currentNicoleProDraftForGrounded,
   groundedDraftMatchesCurrentSelection,
   NICOLE_PRO_LANDMARK_MODEL_V1,
@@ -1456,7 +1457,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       view: captureView,
                       landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
                       captureQuality,
-                      draftId: `nicole-pro:${assessmentContext.generation}:${c.packetMediaTimeUs}:${refreshedDraft.kind === 'ready' ? refreshedDraft.evidence.metricId : 'blocked'}`,
+                      draftId: createNicoleProDraftId(
+                        assessmentContext,
+                        c.packetMediaTimeUs,
+                        NICOLE_PRO_LANDMARK_MODEL_V1,
+                        refreshedDraft.kind === 'ready' ? refreshedDraft.evidence.metricId : 'blocked',
+                        refreshedDraft.kind === 'ready' ? refreshedDraft.evidence.policyVersion : 'blocked',
+                      ),
                       generatedAt: new Date().toISOString(),
                     })
                     : null;
@@ -2544,6 +2551,59 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     setCuePoints(updated);
     const created = updated.find(cue => cue.reviewAudit?.origin.anchor.mediaTimeUs === currentGroundedDraft.evidence.mediaTimeUs
       && cue.reviewAudit.origin.anchor.targetId === selectedSkeletonTarget.targetId);
+    if (created) {
+      setExpandedCueIds(previous => new Set(previous).add(created.id));
+      setEditingCueId(created.id);
+      setEditForm({
+        poseName: created.poseName, headline: created.headline, cueMetaphor: created.cueMetaphor,
+        status: created.status, diagnosisText: created.diagnosisText ?? '', goalText: created.goalText ?? '',
+        practiceText: created.practiceText ?? '',
+      });
+    }
+    return Boolean(created);
+  };
+
+  const handleTakeOverNicoleProDraft = () => {
+    const currentContext = currentAnalysisContextEpochRef.current;
+    const currentGroundedDraft = assessmentValueForCurrentContext(
+      boundGroundedTeacherAssessment,
+      currentContext,
+    );
+    const gateStatus = teacherPhaseAnalysisRef.current?.gate.status;
+    const captureQuality: NicoleProCaptureQuality | null = gateStatus === 'ready'
+      ? 'ready'
+      : gateStatus === 'usable_with_caution'
+        ? 'usable_with_caution'
+        : null;
+    const proDraft = currentNicoleProDraftForGrounded({
+      groundedAssessment: boundGroundedTeacherAssessment,
+      proAssessment: boundNicoleProDraft,
+      currentContext,
+      selectedTarget: selectedSkeletonTarget,
+      captureQuality,
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    });
+    if (!currentContext || !currentGroundedDraft || !proDraft || !selectedSkeletonTarget || !captureQuality) {
+      return false;
+    }
+    let updated: VaganovaCuePoint[];
+    try {
+      updated = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+        selectedDevVideoUrl,
+        currentGroundedDraft,
+        proDraft,
+        selectedSkeletonTarget,
+        currentContext,
+        captureQuality,
+        motionClass.detectedPoseName,
+      );
+    } catch (error) {
+      showAnalyseToast(error instanceof Error ? error.message : 'Nicole-Pro-Entwurf konnte nicht gespeichert werden.');
+      return false;
+    }
+    setCuePoints(updated);
+    const created = updated.find(cue => cue.reviewAudit?.origin.kind === 'nicole_pro_draft'
+      && cue.reviewAudit.origin.nicoleProPayload?.draft.draftId === proDraft.draftId);
     if (created) {
       setExpandedCueIds(previous => new Set(previous).add(created.id));
       setEditingCueId(created.id);
@@ -4080,9 +4140,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   nicoleProDraft={currentNicoleProDraft}
                   nicoleProCaptureQuality={nicoleProCaptureQuality}
                   currentAnalysisContext={currentAnalysisContextEpoch}
-                  onAddToCueManager={groundedDraftTakeoverAvailable && !currentNicoleProDraft
-                    ? handleTakeOverGroundedDraft
-                    : undefined}
+                  onAddToCueManager={currentNicoleProDraft
+                    ? handleTakeOverNicoleProDraft
+                    : groundedDraftTakeoverAvailable
+                      ? handleTakeOverGroundedDraft
+                      : undefined}
                   onSaveNicoleReference={target.kind === 'bone'
                     && selectedSkeletonTarget?.frameStatus === 'exact_cache_frame'
                     && canCreateNicoleReferenceFromSource(selectedDevVideoUrl)
@@ -4878,6 +4940,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               const auditProjection = cue.reviewAudit && cueReviewAuditIsValid(cue.reviewAudit)
                 ? projectCueReviewAudit(cue.reviewAudit)
                 : null;
+              const nicoleProOrigin = cue.reviewAudit?.origin.kind === 'nicole_pro_draft'
+                ? cue.reviewAudit.origin.nicoleProPayload
+                : null;
 
               if (isEditing) {
                 return (
@@ -4906,7 +4971,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       <div style={{ background: 'rgba(100,210,255,0.07)', border: '1px solid rgba(100,210,255,0.25)', borderRadius: '7px', padding: '7px 9px', fontSize: '8.5px', color: 'rgba(255,255,255,0.68)', lineHeight: 1.45 }}>
                         {cue.reviewAudit?.origin.integrity === 'legacy_unverified'
                           ? '⚠ Legacy-Import · ursprünglicher KI-Stand nicht vollständig verifizierbar.'
-                          : '🔒 KI-Snapshot lokal integritätsgeprüft · exakter Analyseframe.'} Änderungen erzeugen eine neue Nicole-Revision. Lernenden-/Elternfreigaben werden dabei automatisch widerrufen.
+                          : nicoleProOrigin
+                            ? `🔒 Nicole-Pro-Snapshot lokal integritätsgeprüft · ${nicoleProOrigin.knowledgeRegistryId}@${nicoleProOrigin.knowledgeRegistryVersion}.`
+                            : '🔒 KI-Snapshot lokal integritätsgeprüft · exakter Analyseframe.'} Änderungen erzeugen eine neue Nicole-Revision. Lernenden-/Elternfreigaben werden dabei automatisch widerrufen.
                       </div>
                     )}
 
@@ -5069,7 +5136,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                         )}
                         {auditProjection && (
                           <span title={cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'Legacy-Import – erneute Nicole-Prüfung erforderlich' : 'Lokal integritätsgeprüfter KI-Snapshot mit Lehrerrevisionen'} style={{ color: cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? '#ffd60a' : '#64d2ff', fontSize: '7px', fontWeight: 900, flexShrink: 0, border: `1px solid ${cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'rgba(255,214,10,0.4)' : 'rgba(100,210,255,0.4)'}`, borderRadius: '4px', padding: '1px 4px' }}>
-                            NICOLE · R{auditProjection.revisionNumber} · {cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'LEGACY UNVERIFIZIERT' : 'KI-SNAPSHOT ✓'}
+                            NICOLE · R{auditProjection.revisionNumber} · {cue.reviewAudit?.origin.integrity === 'legacy_unverified' ? 'LEGACY UNVERIFIZIERT' : nicoleProOrigin ? 'PRO-SNAPSHOT ✓' : 'KI-SNAPSHOT ✓'}
                           </span>
                         )}
                       </span>
@@ -5335,11 +5402,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       <div style={{ fontSize: '8px', color: '#64d2ff', fontWeight: 900, letterSpacing: '0.5px' }}>
                         {cue.reviewAudit!.origin.integrity === 'legacy_unverified'
                           ? `⚠ LEGACY-IMPORT · URSPRÜNGLICHER KI-STAND NICHT VOLLSTÄNDIG VERIFIZIERBAR · NICOLE-REVISION ${auditProjection.revisionNumber}`
-                          : `🔒 KI-SNAPSHOT LOKAL INTEGRITÄTSGEPRÜFT · NICOLE-REVISION ${auditProjection.revisionNumber}`}
+                          : nicoleProOrigin
+                            ? `🔒 NICOLE-PRO-SNAPSHOT LOKAL INTEGRITÄTSGEPRÜFT · NICOLE-REVISION ${auditProjection.revisionNumber}`
+                            : `🔒 KI-SNAPSHOT LOKAL INTEGRITÄTSGEPRÜFT · NICOLE-REVISION ${auditProjection.revisionNumber}`}
                       </div>
                       <div style={{ fontSize: '8px', color: 'rgba(255,255,255,0.45)', lineHeight: 1.4 }}>
                         Frame {(cue.reviewAudit!.origin.anchor.mediaTimeUs / 1_000_000).toFixed(3)}s · {cue.reviewAudit!.origin.policyVersion} · {cue.reviewAudit!.origin.integrity === 'legacy_unverified' ? 'Legacy-Ursprung unverifiziert; erneute Nicole-Prüfung erforderlich.' : 'KI-Original bleibt unverändert.'}
                       </div>
+                      {nicoleProOrigin && (
+                        <div style={{ fontSize: '8px', color: 'rgba(100,210,255,0.72)', lineHeight: 1.4 }}>
+                          Wissensbasis {nicoleProOrigin.knowledgeRegistryId}@{nicoleProOrigin.knowledgeRegistryVersion} · {nicoleProOrigin.ruleVersions.map(rule => `${rule.ruleId}@${rule.version}`).join(' · ')}
+                        </div>
+                      )}
                       {auditProjection.provenance === 'nicole_rejected' ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
                           <span style={{ fontSize: '8px', color: '#ff453a', fontWeight: 800 }}>Von Nicole abgelehnt</span>

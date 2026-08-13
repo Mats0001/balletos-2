@@ -10,6 +10,7 @@ import {
   validateNicoleProDraft,
 } from '../services/nicoleProContentValidator';
 import {
+  createNicoleProDraftId,
   createNicoleProExactFrameArtifactId,
   currentNicoleProDraftForGrounded,
   groundedDraftMatchesCurrentSelection,
@@ -246,6 +247,24 @@ const GOLDEN_ACTION_COPY: Readonly<Record<GroundedMetricAdapterId, Readonly<Reco
 });
 
 describe('Nicole-Pro deterministic grounded vertical slice', () => {
+  it('derives draft identity from context, artifact and content contract versions', () => {
+    const a0 = context(4);
+    const a2 = context(6);
+    const b1 = createAnalysisContextEpoch({ ...a0.context, exerciseId: 'passe' }, 5);
+    const identity = (current: AnalysisContextEpochV1) => createNicoleProDraftId(
+      current,
+      2_500_000,
+      NICOLE_PRO_LANDMARK_MODEL_V1,
+      'spine_tilt_aplomb',
+      POLICY_VERSION,
+    );
+    expect(identity(a0)).toBe(identity(context(4)));
+    expect(identity(a0)).not.toBe(identity(b1));
+    expect(identity(a0)).not.toBe(identity(a2));
+    expect(identity(a0)).toContain('registry@balletos-nicole-pro-knowledge@1.2.0');
+    expect(identity(a0)).toContain('planner@balletos-nicole-pro-deterministic-planner@1.0.0');
+    expect(identity(a0)).toContain('validator@nicole-pro-validator-v1');
+  });
   it.each(GOLDEN_CASES)('uses a teacher signal produced by the current policy for %s at %s°', (metricId, value, state) => {
     const confidence = state.includes('_uncertain') ? 0.2 : 0.94;
     const packet = teacherHeuristicEngine.compute(
@@ -324,6 +343,12 @@ describe('Nicole-Pro deterministic grounded vertical slice', () => {
       ...common,
       groundedAssessment: spine.groundedAssessment,
       draftId: 'draft:profile-spine',
+    })).not.toBeNull();
+    expect(planNicoleProGroundedDraft({
+      ...common,
+      view: 'profile_right',
+      groundedAssessment: spine.groundedAssessment,
+      draftId: 'draft:profile-spine-right',
     })).not.toBeNull();
 
     const shoulder = buildFixture('shoulder_horizontal', 6.2, 'heuristic_attention', 'profile-shoulder');

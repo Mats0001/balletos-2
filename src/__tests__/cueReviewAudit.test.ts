@@ -3,11 +3,15 @@ import {
   approveCueReviewAudit,
   canonicalJson,
   contentFromGroundedDraft,
+  contentFromNicoleProDraft,
   createGroundedCueReviewAudit,
   createLegacyCueReviewAudit,
+  createNicoleProCueReviewAudit,
+  cueReviewContentIsAudienceSafe,
   cueReviewAuditIsValid,
   cueReviewExpectedState,
   projectCueReviewAudit,
+  projectCueReviewForAudience,
   rejectCueReviewAudit,
   reopenCueReviewAudit,
   reviseCueReviewAudit,
@@ -15,6 +19,18 @@ import {
   sha256Canonical,
 } from '../services/cueReviewAudit';
 import type { CueReviewCommandContext } from '../types/cueReviewAudit';
+import { bindAssessmentIfCurrent, createAnalysisContextEpoch } from '../services/analysisContextGuard';
+import {
+  createNicoleProExactFrameArtifactId,
+  createNicoleProDraftId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  planNicoleProGroundedDraft,
+} from '../services/nicoleProContentPlanner';
+import {
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE,
+  resolveNicoleProTrustedKnowledgeRegistry,
+  validateStoredNicoleProDraft,
+} from '../services/nicoleProContentValidator';
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 
@@ -68,6 +84,47 @@ function createAudit() {
   return { context, content, audit: createGroundedCueReviewAudit({ draft, target, content, context }) };
 }
 
+function createNicoleProFixture() {
+  const currentContext = createAnalysisContextEpoch({
+    schemaVersion: 1,
+    sourceId: target.sourceId,
+    studentId: 'student:emma-berger',
+    exerciseId: 'plie',
+    levelId: 'minis',
+  }, 3);
+  const groundedAssessment = bindAssessmentIfCurrent(currentContext, currentContext, draft);
+  if (!groundedAssessment) throw new Error('Test assessment must bind to the current context.');
+  const proDraft = planNicoleProGroundedDraft({
+    groundedAssessment,
+    currentContext,
+    analysisArtifactId: createNicoleProExactFrameArtifactId(
+      currentContext, evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+    ),
+    view: 'frontal',
+    landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    captureQuality: 'ready',
+    draftId: createNicoleProDraftId(
+      currentContext,
+      evidence.mediaTimeUs,
+      NICOLE_PRO_LANDMARK_MODEL_V1,
+      evidence.metricId,
+      evidence.policyVersion,
+    ),
+    generatedAt: '2026-08-13T20:00:00.000Z',
+  });
+  if (!proDraft) throw new Error('Test Nicole-Pro draft must be planned.');
+  const context = deterministicContext();
+  const content = contentFromNicoleProDraft(proDraft, 'Plié – Tiefpunkt');
+  const audit = createNicoleProCueReviewAudit({
+    draft: proDraft,
+    target,
+    poseName: content.poseName,
+    currentContext,
+    context,
+  });
+  return { audit, content, context, currentContext, proDraft };
+}
+
 describe('cue review audit', () => {
   it('canonicalizes key order and changes the digest for relevant content', () => {
     expect(canonicalJson({ b: 2, a: 1 })).toBe(canonicalJson({ a: 1, b: 2 }));
@@ -89,6 +146,158 @@ describe('cue review audit', () => {
       revisionNumber: 1, isApproved: false,
     });
     expect(() => { (audit.origin.originalContent as { headline: string }).headline = 'mutated'; }).toThrow();
+  });
+
+  it('captures the complete Nicole-Pro draft and rule versions as an immutable origin', () => {
+    const { audit, proDraft } = createNicoleProFixture();
+    const payload = audit.origin.nicoleProPayload;
+
+    expect(cueReviewAuditIsValid(audit)).toBe(true);
+    expect(audit.origin.kind).toBe('nicole_pro_draft');
+    expect(payload?.draft).toEqual(proDraft);
+    expect(payload?.knowledgeRegistryVersion).toBe('1.2.0');
+    expect(payload?.ruleVersions).toEqual([
+      { ruleId: 'knowledge:spine-aplomb:teacher-v1', version: '1.1.0' },
+    ]);
+    expect(projectCueReviewAudit(audit)).toMatchObject({
+      provenance: 'nicole_draft', learnerVisible: false, parentVisible: false,
+      revisionNumber: 1, isApproved: false,
+    });
+    expect(projectCueReviewForAudience(audit, 'learner')).toBeNull();
+    expect(() => { (payload!.draft as { draftId: string }).draftId = 'forged'; }).toThrow();
+  });
+
+  it('publishes only the narrow approved current revision and revokes it after an edit', () => {
+    const { audit, context } = createNicoleProFixture();
+    const approved = approveCueReviewAudit(audit, cueReviewExpectedState(audit), context);
+    const granted = setCueReviewAudience(
+      approved, 'learner', true, cueReviewExpectedState(approved), context,
+    );
+    const audienceProjection = projectCueReviewForAudience(granted, 'learner');
+
+    expect(audienceProjection).toMatchObject({
+      recordId: audit.recordId,
+      revisionId: audit.currentRevisionId,
+      audience: 'learner',
+      headline: 'Rumpfachse – Nicole-Pro',
+    });
+    expect(audienceProjection).not.toHaveProperty('diagnosisText');
+    expect(audienceProjection).not.toHaveProperty('technicalAnalysis');
+    expect(audienceProjection).not.toHaveProperty('reviewAudit');
+    expect(projectCueReviewForAudience(granted, 'parent')).toBeNull();
+
+    const revised = reviseCueReviewAudit(
+      granted, { headline: 'Nicoles präzisierte Rumpfbeobachtung' },
+      cueReviewExpectedState(granted), context,
+    );
+    expect(projectCueReviewForAudience(revised, 'learner')).toBeNull();
+    expect(revised.origin).toEqual(audit.origin);
+  });
+
+  it('blocks clinical or injury language from every audience projection', () => {
+    const { audit, context } = createNicoleProFixture();
+    const unsafe = reviseCueReviewAudit(
+      audit,
+      { headline: 'Eine Rotatorenmanschetten-Läsion ist die Diagnose.' },
+      cueReviewExpectedState(audit),
+      context,
+    );
+    const approved = approveCueReviewAudit(unsafe, cueReviewExpectedState(unsafe), context);
+    expect(() => setCueReviewAudience(
+      approved, 'learner', true, cueReviewExpectedState(approved), context,
+    )).toThrow(/safe student derivation/i);
+    expect(projectCueReviewForAudience(approved, 'learner')).toBeNull();
+  });
+
+  it.each([
+    'Du hast Skoliose.',
+    'Dein Gluteus medius ist schwach.',
+    'Die Adduktoren sind verkürzt.',
+    'Die Hüftmuskulatur ist zu kurz.',
+    'Ein Meniskusschaden ist die Ursache.',
+    'Diese Übung ist immer sicher.',
+  ])('rejects unsafe audience wording: %s', headline => {
+    const { content } = createNicoleProFixture();
+    expect(cueReviewContentIsAudienceSafe({ ...content, headline })).toBe(false);
+  });
+
+  it('requires a separate student derivation after outward teacher copy changes', () => {
+    const { audit, context } = createNicoleProFixture();
+    const revised = reviseCueReviewAudit(
+      audit,
+      { goalText: 'Nicoles neue, intern geprüfte Zielformulierung.' },
+      cueReviewExpectedState(audit),
+      context,
+    );
+    const approved = approveCueReviewAudit(revised, cueReviewExpectedState(revised), context);
+    expect(() => setCueReviewAudience(
+      approved, 'learner', true, cueReviewExpectedState(approved), context,
+    )).toThrow(/separate safe student derivation/i);
+  });
+
+  it('rejects tampered Nicole-Pro payloads and mismatched exact targets', () => {
+    const { audit, content, proDraft, context, currentContext } = createNicoleProFixture();
+    const tamperedDraft = JSON.parse(JSON.stringify(audit));
+    tamperedDraft.origin.nicoleProPayload.draft.claims[0].text = 'erfundener Befund';
+    const { originDigest: _oldDigest, digestAlgorithm: _algorithm, ...tamperedOriginCore } = tamperedDraft.origin;
+    tamperedDraft.origin.originDigest = sha256Canonical(tamperedOriginCore);
+    expect(cueReviewAuditIsValid(tamperedDraft)).toBe(false);
+    const tamperedRegistry = JSON.parse(JSON.stringify(audit));
+    tamperedRegistry.origin.nicoleProPayload.knowledgeRegistryVersion = '99.0.0';
+    expect(cueReviewAuditIsValid(tamperedRegistry)).toBe(false);
+    expect(() => createNicoleProCueReviewAudit({
+      draft: proDraft,
+      target: { ...target, sourceId: '/videos/other.mp4' },
+      poseName: content.poseName,
+      currentContext,
+      context,
+    })).toThrow(/exact-frame origin/i);
+  });
+
+  it('rejects a foreign pose model after every local storage digest is recomputed', () => {
+    const { audit, proDraft } = createNicoleProFixture();
+    const foreignModel = { modelId: 'unapproved-pose-model', modelVersion: '99.0' };
+    const foreignDraft = JSON.parse(JSON.stringify(proDraft));
+    foreignDraft.evidence[0].landmarkQuality.modelId = foreignModel.modelId;
+    foreignDraft.evidence[0].landmarkQuality.modelVersion = foreignModel.modelVersion;
+    foreignDraft.evidence[0].analysisArtifactId = createNicoleProExactFrameArtifactId(
+      createNicoleProFixture().currentContext,
+      foreignDraft.evidence[0].mediaTimeUs,
+      foreignModel,
+    );
+    expect(validateStoredNicoleProDraft(
+      foreignDraft,
+      'balletos-nicole-pro-knowledge',
+      '1.2.0',
+    ).valid).toBe(false);
+
+    const forged = JSON.parse(JSON.stringify(audit));
+    forged.origin.nicoleProPayload.draft = foreignDraft;
+    forged.origin.originalContent = contentFromNicoleProDraft(
+      foreignDraft,
+      forged.origin.originalContent.poseName,
+    );
+    const { originDigest: _originDigest, digestAlgorithm: _originAlgorithm, ...originCore } = forged.origin;
+    forged.origin.originDigest = sha256Canonical(originCore);
+    forged.revisions[0].content = forged.origin.originalContent;
+    forged.revisions[0].contentDigest = sha256Canonical(forged.revisions[0].content);
+    const { revisionDigest: _revisionDigest, ...revisionCore } = forged.revisions[0];
+    forged.revisions[0].revisionDigest = sha256Canonical(revisionCore);
+    forged.events[0].revisionDigest = forged.revisions[0].revisionDigest;
+    const { eventDigest: _eventDigest, digestAlgorithm: _eventAlgorithm, ...eventCore } = forged.events[0];
+    forged.events[0].eventDigest = sha256Canonical(eventCore);
+    expect(cueReviewAuditIsValid(forged)).toBe(false);
+  });
+
+  it('keeps the stored knowledge version in an immutable product archive', () => {
+    const archived = resolveNicoleProTrustedKnowledgeRegistry(
+      'balletos-nicole-pro-knowledge',
+      '1.2.0',
+    );
+    expect(archived).toBe(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE[0]);
+    expect(Object.isFrozen(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE)).toBe(true);
+    expect(Object.isFrozen(archived?.rules[0].statements[0])).toBe(true);
+    expect(resolveNicoleProTrustedKnowledgeRegistry('balletos-nicole-pro-knowledge', '99.0.0')).toBeNull();
   });
 
   it.each([

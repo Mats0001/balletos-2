@@ -10,9 +10,11 @@ import {
   canonicalJson,
   contentFromGroundedDraft,
   createGroundedCueReviewAudit,
+  createNicoleProCueReviewAudit,
   createLegacyCueReviewAudit,
   cueReviewAuditIsValid,
   freezeCueReviewAudit,
+  nicoleProImmutableOriginKey,
   projectCueReviewAudit,
   rejectCueReviewAudit,
   reopenCueReviewAudit,
@@ -21,6 +23,13 @@ import {
 } from './cueReviewAudit';
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
+import type { NicoleProDraftV1 } from '../types/nicoleProContent';
+import type { AnalysisContextEpochV1 } from './analysisContextGuard';
+import {
+  nicoleProDraftMatchesGroundedSelection,
+  type NicoleProCaptureQuality,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+} from './nicoleProContentPlanner';
 
 // ⚠️  AUDIT FIX (2026-08-10): Previous version faked AI analysis by switching
 //     on video filename and returning fabricated angle values (14°, 88°, 8°)
@@ -513,6 +522,61 @@ export class VaganovaPreAnalyzerService {
     const reviewAudit = createGroundedCueReviewAudit({ draft, target, content });
     const projected = projectCueReviewAudit(reviewAudit);
     const timeSeconds = draft.evidence.mediaTimeUs / 1_000_000;
+    const minutes = Math.floor(timeSeconds / 60);
+    const seconds = (timeSeconds % 60).toFixed(3).padStart(6, '0');
+    const cue: VaganovaCuePoint = projectAuditedCuePoint({
+      id: reviewAudit.recordId,
+      timeSeconds,
+      timecodeStr: `${String(minutes).padStart(2, '0')}:${seconds}`,
+      ...projected.content,
+      isCustom: true,
+      dataSource: 'TEACHER_CREATED',
+      learnerVisible: false,
+      parentVisible: false,
+      reviewAudit,
+    });
+    const updated = [...points, cue].sort((left, right) => left.timeSeconds - right.timeSeconds);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+
+  public addNicoleProTeacherDraft(
+    videoUrl: string,
+    groundedDraft: ReadyGroundedTeacherDraft,
+    proDraft: NicoleProDraftV1,
+    target: SelectedSkeletonTarget,
+    currentContext: AnalysisContextEpochV1,
+    captureQuality: NicoleProCaptureQuality,
+    poseName: string,
+  ): VaganovaCuePoint[] {
+    if (videoUrl !== groundedDraft.evidence.sourceId || videoUrl !== target.sourceId
+      || !nicoleProDraftMatchesGroundedSelection({
+        grounded: groundedDraft,
+        pro: proDraft,
+        currentContext,
+        selectedTarget: target,
+        captureQuality,
+        landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+      })) {
+      throw new Error('Nicole-Pro draft is stale or not bound to the current exact-frame assessment.');
+    }
+    const reviewAudit = createNicoleProCueReviewAudit({
+      draft: proDraft,
+      target,
+      poseName,
+      currentContext,
+    });
+    const candidateOriginKey = nicoleProImmutableOriginKey(reviewAudit);
+    if (!candidateOriginKey) throw new Error('Nicole-Pro immutable origin identity is unavailable.');
+    const points = this.getCuePoints(videoUrl);
+    if (points.some(point => point.reviewAudit
+      && nicoleProImmutableOriginKey(point.reviewAudit) === candidateOriginKey)) return points;
+    if (points.some(point => point.reviewAudit?.origin.kind === 'nicole_pro_draft'
+      && point.reviewAudit.origin.nicoleProPayload?.draft.draftId === proDraft.draftId)) {
+      throw new Error('Nicole-Pro draft ID collides with a different immutable analysis origin.');
+    }
+    const projected = projectCueReviewAudit(reviewAudit);
+    const timeSeconds = groundedDraft.evidence.mediaTimeUs / 1_000_000;
     const minutes = Math.floor(timeSeconds / 60);
     const seconds = (timeSeconds % 60).toFixed(3).padStart(6, '0');
     const cue: VaganovaCuePoint = projectAuditedCuePoint({

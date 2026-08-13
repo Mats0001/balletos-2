@@ -1,6 +1,22 @@
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { NicoleProClaimV1, NicoleProDraftV1 } from '../types/nicoleProContent';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
+import {
+  createNicoleProValidationAuthority,
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1,
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+  resolveNicoleProTrustedKnowledgeRegistry,
+  validateStoredNicoleProDraft,
+  validateNicoleProDraft,
+} from './nicoleProContentValidator';
+import type { AnalysisContextEpochV1 } from './analysisContextGuard';
+import {
+  createNicoleProExactFrameArtifactId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+} from './nicoleProArtifactIdentity';
 import type {
+  CueAudienceProjection,
   CueAiOriginSnapshot,
   CueAudience,
   CueReviewAudit,
@@ -11,6 +27,7 @@ import type {
   CueReviewExpectedState,
   CueReviewProjection,
   CueTeacherRevision,
+  NicoleProAiOriginPayload,
 } from '../types/cueReviewAudit';
 
 const DIGEST_ALGORITHM = 'sha256-canonical-json-v1' as const;
@@ -179,6 +196,191 @@ export function contentFromGroundedDraft(
   });
 }
 
+function claimsForSection(
+  draft: NicoleProDraftV1,
+  section: keyof NicoleProDraftV1['sections'],
+): readonly NicoleProClaimV1[] {
+  const byId = new Map(draft.claims.map(claim => [claim.claimId, claim]));
+  return draft.sections[section]
+    .map(claimId => byId.get(claimId))
+    .filter((claim): claim is NicoleProClaimV1 => Boolean(claim));
+}
+
+function joinedClaimText(
+  draft: NicoleProDraftV1,
+  section: keyof NicoleProDraftV1['sections'],
+): string {
+  return claimsForSection(draft, section).map(claim => claim.text).join('\n');
+}
+
+export function contentFromNicoleProDraft(
+  draft: NicoleProDraftV1,
+  poseName: string,
+): CueReviewContent {
+  const evidence = draft.evidence[0];
+  if (!evidence) throw new Error('Nicole-Pro draft has no primary evidence.');
+  const headline = evidence.metricId === 'shoulder_horizontal'
+    ? 'Schulterlinie – Nicole-Pro'
+    : evidence.metricId === 'projected_hip_line_obliquity'
+      ? 'Beckenlinie – Nicole-Pro'
+      : 'Rumpfachse – Nicole-Pro';
+  const hypotheses = claimsForSection(draft, 'hypotheses')
+    .map((claim, index) => `${index + 1}. ${claim.text}`).join('\n');
+  const tests = claimsForSection(draft, 'differentiationTests').map(claim => {
+    const hypothesisNumbers = claim.relatedClaimIds
+      .map(id => claimsForSection(draft, 'hypotheses').findIndex(item => item.claimId === id) + 1)
+      .filter(index => index > 0);
+    return `Test zu Hypothese ${hypothesisNumbers.join(', ')}: ${claim.text}`;
+  }).join('\n');
+  const targetClaims = claimsForSection(draft, 'targetAndPractice');
+  const textOfType = (type: NicoleProClaimV1['type']) => targetClaims
+    .filter(claim => claim.type === type).map(claim => claim.text).join('\n');
+  return cloneFreeze({
+    poseName,
+    status: evidence.teacherSignal.state === 'strong_attention' ? 'CORRECTION' : 'WARNING',
+    headline,
+    cueMetaphor: joinedClaimText(draft, 'metaphor'),
+    jointFocusId: evidence.metricId === 'shoulder_horizontal'
+      ? 'shoulder_line'
+      : evidence.metricId === 'projected_hip_line_obliquity'
+        ? 'pelvis_core'
+        : 'spine_center',
+    diagnosisText: [
+      `BEFUND\n${joinedClaimText(draft, 'finding')}`,
+      `BIOMECHANISCHE EINORDNUNG\n${joinedClaimText(draft, 'interpretation')}`,
+      `MÖGLICHE ERKLÄRUNGEN\n${hypotheses}`,
+      `SO PRÜFST DU ES\n${tests}`,
+    ].join('\n\n'),
+    goalText: [textOfType('teaching_target'), textOfType('immediate_cue'), textOfType('success_criterion')]
+      .filter(Boolean).join('\n\n'),
+    practiceText: textOfType('practice'),
+    technicalAnalysis: [
+      joinedClaimText(draft, 'measurementDetails'),
+      `Frame ${(evidence.mediaTimeUs / 1_000_000).toFixed(3)}s · ${evidence.metricId} · ${evidence.definitionVersion}`,
+      `Quelle ${evidence.sourceId} · Policy ${evidence.policyVersion}`,
+      `Modell ${evidence.landmarkQuality.modelId}@${evidence.landmarkQuality.modelVersion}`,
+      `Artifact ${evidence.analysisArtifactId}`,
+      `Planner ${draft.plannerId}@${draft.plannerVersion} · Validator ${draft.validatorVersion}`,
+    ].join('\n\n'),
+  });
+}
+
+const ALLOWED_TARGETS_BY_PRO_METRIC = Object.freeze({
+  spine_tilt_aplomb: new Set([
+    'bone.neck_sternum', 'bone.sternum_navel', 'bone.navel_pelvis',
+    'bone.torso_side_l', 'bone.torso_side_r',
+  ]),
+  shoulder_horizontal: new Set(['bone.shoulder_line']),
+  projected_hip_line_obliquity: new Set(['bone.pelvis_line']),
+});
+
+export function createNicoleProCueReviewAudit(input: {
+  draft: NicoleProDraftV1;
+  target: SelectedSkeletonTarget;
+  poseName: string;
+  currentContext: AnalysisContextEpochV1;
+  context?: CueReviewCommandContext;
+}): CueReviewAudit {
+  const commandContext = input.context ?? defaultCueReviewContext();
+  const content = contentFromNicoleProDraft(input.draft, input.poseName);
+  const evidence = input.draft.evidence.length === 1 ? input.draft.evidence[0] : null;
+  const allowedTargets = evidence
+    ? ALLOWED_TARGETS_BY_PRO_METRIC[evidence.metricId as keyof typeof ALLOWED_TARGETS_BY_PRO_METRIC]
+    : undefined;
+  const registryRules = new Map(
+    NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1.rules.map(rule => [rule.ruleId, rule]),
+  );
+  const authority = evidence ? createNicoleProValidationAuthority({
+    currentContext: input.currentContext,
+    assessment: {
+      schemaVersion: 1,
+      contextFingerprint: input.currentContext.fingerprint,
+      contextGeneration: input.currentContext.generation,
+      value: {
+        analysisArtifactId: evidence.analysisArtifactId,
+        sourceId: evidence.sourceId,
+        exerciseId: evidence.exerciseId,
+        policyVersion: evidence.policyVersion,
+        evidence: input.draft.evidence,
+      },
+    },
+  }) : null;
+  if (!evidence || input.draft.reviewState !== 'pending_nicole'
+    || input.draft.learnerVisible !== false || input.draft.parentVisible !== false
+    || input.target.frameStatus !== 'exact_cache_frame'
+    || input.target.sourceId !== evidence.sourceId
+    || input.target.mediaTimeUs !== evidence.mediaTimeUs
+    || evidence.landmarkQuality.modelId !== NICOLE_PRO_LANDMARK_MODEL_V1.modelId
+    || evidence.landmarkQuality.modelVersion !== NICOLE_PRO_LANDMARK_MODEL_V1.modelVersion
+    || evidence.analysisArtifactId !== createNicoleProExactFrameArtifactId(
+      input.currentContext, evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+    )
+    || !allowedTargets?.has(input.target.targetId)
+    || input.draft.policyVersion !== evidence.policyVersion
+    || input.draft.knowledgeRules.length === 0
+    || input.draft.knowledgeRules.some(rule => canonicalJson(rule) !== canonicalJson(registryRules.get(rule.ruleId)))
+    || !authority || !validateNicoleProDraft(input.draft, authority, input.currentContext).valid
+    || !validateStoredNicoleProDraft(
+      input.draft,
+      NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+      NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+    ).valid
+    || content.jointFocusId !== (evidence.metricId === 'shoulder_horizontal'
+      ? 'shoulder_line'
+      : evidence.metricId === 'projected_hip_line_obliquity' ? 'pelvis_core' : 'spine_center')) {
+    throw new Error('Nicole-Pro draft is not bound to one supported exact-frame origin.');
+  }
+  const origin = originWithDigest({
+    originId: commandContext.createId('origin'),
+    kind: 'nicole_pro_draft',
+    integrity: 'verified_application_snapshot',
+    videoSourceId: evidence.sourceId,
+    anchor: { mediaTimeUs: evidence.mediaTimeUs, targetId: input.target.targetId },
+    generatedAt: input.draft.generatedAt,
+    generatorId: `${input.draft.plannerId}@${input.draft.plannerVersion}`,
+    policyVersion: input.draft.policyVersion,
+    originalContent: cloneFreeze(content),
+    nicoleProPayload: cloneFreeze({
+      draft: input.draft,
+      knowledgeRegistryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+      knowledgeRegistryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+      ruleVersions: input.draft.knowledgeRules.map(rule => ({ ruleId: rule.ruleId, version: rule.version })),
+    }),
+  });
+  const revision = revisionWithDigest(content, 1, 1, null, commandContext);
+  const recordId = commandContext.createId('record');
+  const shell = {
+    schemaVersion: 1 as const,
+    recordId,
+    recordDigest: sha256Canonical({ schemaVersion: 1, recordId, originId: origin.originId }),
+    origin,
+  };
+  const events: CueReviewAuditEvent[] = [];
+  events.push(event('revision_created', shell, revision.revisionId, revision.revisionDigest, commandContext, {}, events));
+  return cloneFreeze({ ...shell, revisions: [revision], currentRevisionId: revision.revisionId, events });
+}
+
+/** Stable semantic identity; intentionally excludes generated IDs/timestamps. */
+export function nicoleProImmutableOriginKey(audit: CueReviewAudit): string | null {
+  if (audit.origin.kind !== 'nicole_pro_draft' || !audit.origin.nicoleProPayload) return null;
+  const draft = audit.origin.nicoleProPayload.draft;
+  return sha256Canonical({
+    videoSourceId: audit.origin.videoSourceId,
+    anchor: audit.origin.anchor,
+    policyVersion: audit.origin.policyVersion,
+    generatorId: audit.origin.generatorId,
+    originalContent: audit.origin.originalContent,
+    knowledgeRegistryId: audit.origin.nicoleProPayload.knowledgeRegistryId,
+    knowledgeRegistryVersion: audit.origin.nicoleProPayload.knowledgeRegistryVersion,
+    ruleVersions: audit.origin.nicoleProPayload.ruleVersions,
+    draft: {
+      ...draft,
+      draftId: undefined,
+      generatedAt: undefined,
+    },
+  });
+}
+
 export function createGroundedCueReviewAudit(input: {
   draft: ReadyGroundedTeacherDraft;
   target: SelectedSkeletonTarget;
@@ -281,7 +483,7 @@ export function projectCueReviewAudit(audit: CueReviewAudit): CueReviewProjectio
   const isArchived = audit.events.some(item => item.type === 'archived');
   const isApproved = decision === 'approved' && !isArchived;
   const audienceVisible = (audience: CueAudience) => {
-    if (!isApproved) return false;
+    if (!isApproved || !cueReviewContentIsAudienceEligible(audit, revision.content)) return false;
     const audienceEvents = audit.events.filter(item => item.revisionId === revision.revisionId
       && item.audience === audience
       && (item.type === 'audience_granted' || item.type === 'audience_revoked'));
@@ -302,6 +504,80 @@ export function projectCueReviewAudit(audit: CueReviewAudit): CueReviewProjectio
     revisionNumber: revision.revisionNumber,
     isApproved,
   });
+}
+
+export function projectCueReviewForAudience(
+  audit: CueReviewAudit,
+  audience: CueAudience,
+): CueAudienceProjection | null {
+  const projection = projectCueReviewAudit(audit);
+  const allowed = audience === 'learner' ? projection.learnerVisible : projection.parentVisible;
+  if (!allowed || !cueReviewContentIsAudienceEligible(audit, projection.content)) return null;
+  return cloneFreeze({
+    recordId: audit.recordId,
+    revisionId: audit.currentRevisionId,
+    audience,
+    poseName: projection.content.poseName,
+    headline: projection.content.headline,
+    cueMetaphor: projection.content.cueMetaphor,
+    goalText: projection.content.goalText,
+    practiceText: projection.content.practiceText,
+  });
+}
+
+const FORBIDDEN_AUDIENCE_LANGUAGE = Object.freeze([
+  /\bdiagnos(?:e|tisch|tiziert?)\w*/iu,
+  /\bdifferentialdiagnos\w*/iu,
+  /\b(?:verletz\w*|läsion\w*|syndrom\w*|patholog\w*|entzünd\w*|sehnenriss\w*)\b/iu,
+  /\b(?:schmerz\w*|gewebelast\w*|verletzungsrisik\w*|prognos\w*)\b/iu,
+  /\b(?:psoas\w*|rotatorenmanschett\w*|tiefe\s+muskulatur|kraftdefizit\w*|muskelursache\w*)\b/iu,
+  /\b(?:muskel\w*\s+(?:ist|sind|sei)\s+(?:geschwächt|verkürzt)|rein\s+muskulär)\b/iu,
+  /\b(?:skoliose\w*|menisk\w*|arthrose\w*|fraktur\w*|impingement\w*|luxation\w*|tendinopath\w*)\b/iu,
+  /\b(?:gluteus\w*|adduktor\w*|abduktor\w*|quadrizeps\w*|hamstring\w*|ischiocrural\w*|hüftmuskulatur\w*)\b[^\n.]{0,45}\b(?:schwach\w*|verkürzt\w*|zu\s+kurz|defizit\w*|ursäch\w*)\b/iu,
+  /\b(?:immer|nie|garantiert|zweifelsfrei|eindeutig|100\s*%)\b/iu,
+  /\b(?:ist|sind)\s+(?:die\s+)?ursache\b|\bverursach\w*\b|\bführt\s+(?:sicher\s+)?zu\b/iu,
+]);
+
+export function cueReviewContentIsAudienceSafe(content: CueReviewContent): boolean {
+  const externalCopy = [
+    content.poseName,
+    content.headline,
+    content.cueMetaphor,
+    content.goalText,
+    content.practiceText,
+  ].filter((value): value is string => typeof value === 'string').join('\n');
+  return !FORBIDDEN_AUDIENCE_LANGUAGE.some(pattern => pattern.test(externalCopy));
+}
+
+function audienceCopy(content: CueReviewContent): Readonly<{
+  poseName: string;
+  headline: string;
+  cueMetaphor: string;
+  goalText?: string;
+  practiceText?: string;
+}> {
+  return {
+    poseName: content.poseName,
+    headline: content.headline,
+    cueMetaphor: content.cueMetaphor,
+    goalText: content.goalText,
+    practiceText: content.practiceText,
+  };
+}
+
+/**
+ * E1 publishes only product-owned outward copy captured in a verified origin.
+ * Teacher edits to outward fields require the dedicated student-derivation
+ * workflow; internal diagnosis/hypothesis/technical edits may remain private.
+ */
+export function cueReviewContentIsAudienceEligible(
+  audit: CueReviewAudit,
+  content: CueReviewContent,
+): boolean {
+  return audit.origin.integrity === 'verified_application_snapshot'
+    && (audit.origin.kind === 'grounded_ai_draft' || audit.origin.kind === 'nicole_pro_draft')
+    && canonicalJson(audienceCopy(content)) === canonicalJson(audienceCopy(audit.origin.originalContent))
+    && cueReviewContentIsAudienceSafe(content);
 }
 
 export function cueReviewExpectedState(audit: CueReviewAudit): CueReviewExpectedState {
@@ -395,6 +671,9 @@ export function setCueReviewAudience(
   assertExpectedState(audit, expected);
   const projection = projectCueReviewAudit(audit);
   if (!projection.isApproved && visible) throw new Error('Only an approved current revision can be published.');
+  if (visible && !cueReviewContentIsAudienceEligible(audit, projection.content)) {
+    throw new Error('The current teacher revision requires a separate safe student derivation before publication.');
+  }
   const revision = currentRevision(audit);
   return cloneFreeze({
     ...audit,
@@ -402,6 +681,57 @@ export function setCueReviewAudience(
       audience, reason: 'teacher_action',
     }, audit.events)],
   });
+}
+
+function nicoleProPayloadIsValid(value: unknown): value is NicoleProAiOriginPayload {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as NicoleProAiOriginPayload;
+  const draft = payload.draft;
+  const archivedRegistry = resolveNicoleProTrustedKnowledgeRegistry(
+    payload.knowledgeRegistryId,
+    payload.knowledgeRegistryVersion,
+  );
+  if (!archivedRegistry
+    || !Array.isArray(payload.ruleVersions) || !draft || typeof draft !== 'object'
+    || draft.schemaVersion !== 1 || typeof draft.draftId !== 'string'
+    || typeof draft.plannerId !== 'string' || typeof draft.plannerVersion !== 'string'
+    || typeof draft.validatorVersion !== 'string' || typeof draft.policyVersion !== 'string'
+    || typeof draft.generatedAt !== 'string' || draft.reviewState !== 'pending_nicole'
+    || draft.learnerVisible !== false || draft.parentVisible !== false
+    || !Array.isArray(draft.evidence) || draft.evidence.length !== 1
+    || !Array.isArray(draft.knowledgeRules) || draft.knowledgeRules.length === 0
+    || !Array.isArray(draft.claims) || draft.claims.length === 0
+    || !draft.sections || typeof draft.sections !== 'object') return false;
+  const evidence = draft.evidence[0];
+  if (!evidence || typeof evidence !== 'object' || typeof evidence.evidenceId !== 'string'
+    || typeof evidence.analysisArtifactId !== 'string' || typeof evidence.sourceId !== 'string'
+    || !Number.isFinite(evidence.mediaTimeUs) || typeof evidence.metricId !== 'string'
+    || typeof evidence.definitionVersion !== 'string' || typeof evidence.policyVersion !== 'string'
+    || !evidence.landmarkQuality || typeof evidence.landmarkQuality.modelId !== 'string'
+    || typeof evidence.landmarkQuality.modelVersion !== 'string') return false;
+  if (!draft.knowledgeRules.every(rule => rule && typeof rule === 'object'
+      && typeof rule.ruleId === 'string' && typeof rule.version === 'string'
+      && Array.isArray(rule.statements))
+    || !draft.claims.every(claim => claim && typeof claim === 'object'
+      && typeof claim.claimId === 'string' && typeof claim.text === 'string'
+      && typeof claim.type === 'string' && typeof claim.statementId === 'string'
+      && Array.isArray(claim.evidenceIds) && Array.isArray(claim.knowledgeRuleIds)
+      && Array.isArray(claim.relatedClaimIds))) return false;
+  const sectionKeys: readonly (keyof NicoleProDraftV1['sections'])[] = [
+    'finding', 'interpretation', 'hypotheses', 'differentiationTests',
+    'targetAndPractice', 'metaphor', 'measurementDetails',
+  ];
+  if (!sectionKeys.every(key => Array.isArray(draft.sections[key])
+      && draft.sections[key].every(item => typeof item === 'string'))) return false;
+  const expectedRuleVersions = draft.knowledgeRules.map(rule => ({ ruleId: rule.ruleId, version: rule.version }));
+  const trustedRules = new Map(archivedRegistry.rules.map(rule => [rule.ruleId, rule]));
+  return canonicalJson(payload.ruleVersions) === canonicalJson(expectedRuleVersions)
+    && draft.knowledgeRules.every(rule => canonicalJson(rule) === canonicalJson(trustedRules.get(rule.ruleId)))
+    && validateStoredNicoleProDraft(
+      draft,
+      payload.knowledgeRegistryId,
+      payload.knowledgeRegistryVersion,
+    ).valid;
 }
 
 export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
@@ -415,7 +745,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     || Object.prototype.hasOwnProperty.call(candidate, 'archived')) return false;
   if (!candidate.revisions.every(item => item !== null && typeof item === 'object')
     || !candidate.events.every(item => item !== null && typeof item === 'object')) return false;
-  const originKinds = new Set(['grounded_ai_draft', 'legacy_ai_suggestion', 'legacy_unverified']);
+  const originKinds = new Set(['grounded_ai_draft', 'nicole_pro_draft', 'legacy_ai_suggestion', 'legacy_unverified']);
   const integrities = new Set(['verified_application_snapshot', 'legacy_unverified']);
   if (!originKinds.has(candidate.origin.kind) || !integrities.has(candidate.origin.integrity)
     || typeof candidate.origin.originId !== 'string' || typeof candidate.origin.generatedAt !== 'string'
@@ -443,9 +773,24 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   if (!contentIsValid(candidate.origin.originalContent)) return false;
   if (candidate.origin.kind === 'grounded_ai_draft' && (
     candidate.origin.integrity !== 'verified_application_snapshot' || !candidate.origin.groundedPayload
+    || candidate.origin.nicoleProPayload !== undefined
+  )) return false;
+  if (candidate.origin.kind === 'nicole_pro_draft' && (
+    candidate.origin.integrity !== 'verified_application_snapshot'
+    || !nicoleProPayloadIsValid(candidate.origin.nicoleProPayload)
+    || candidate.origin.groundedPayload !== undefined
+    || candidate.origin.nicoleProPayload.draft.evidence[0].sourceId !== candidate.origin.videoSourceId
+    || candidate.origin.nicoleProPayload.draft.evidence[0].mediaTimeUs !== candidate.origin.anchor.mediaTimeUs
+    || candidate.origin.nicoleProPayload.draft.policyVersion !== candidate.origin.policyVersion
+    || `${candidate.origin.nicoleProPayload.draft.plannerId}@${candidate.origin.nicoleProPayload.draft.plannerVersion}` !== candidate.origin.generatorId
+    || canonicalJson(candidate.origin.originalContent) !== canonicalJson(contentFromNicoleProDraft(
+      candidate.origin.nicoleProPayload.draft,
+      candidate.origin.originalContent.poseName,
+    ))
   )) return false;
   if (candidate.origin.kind === 'legacy_unverified' && (
     candidate.origin.integrity !== 'legacy_unverified' || !candidate.origin.legacyPayload
+    || candidate.origin.nicoleProPayload !== undefined
   )) return false;
   const revisionsValid = candidate.revisions.every((revision, index) => (
     revision.revisionNumber === index + 1

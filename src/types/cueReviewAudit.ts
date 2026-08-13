@@ -3,6 +3,7 @@ import type {
   GroundedTeacherDraftSections,
   GroundedTeacherEvidence,
 } from './groundedTeacherDraft';
+import type { NicoleProDraftV1 } from './nicoleProContent';
 
 export type CueReviewStatus = 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL';
 export type CueAudience = 'learner' | 'parent';
@@ -29,9 +30,17 @@ export interface GroundedAiOriginPayload {
   guide: GroundedTeacherGuide;
 }
 
+/** Immutable validated Nicole-Pro working copy captured before Nicole edits it. */
+export interface NicoleProAiOriginPayload {
+  draft: NicoleProDraftV1;
+  knowledgeRegistryId: string;
+  knowledgeRegistryVersion: string;
+  ruleVersions: readonly Readonly<{ ruleId: string; version: string }>[];
+}
+
 export interface CueAiOriginSnapshot {
   originId: string;
-  kind: 'grounded_ai_draft' | 'legacy_ai_suggestion' | 'legacy_unverified';
+  kind: 'grounded_ai_draft' | 'nicole_pro_draft' | 'legacy_ai_suggestion' | 'legacy_unverified';
   integrity: 'verified_application_snapshot' | 'legacy_unverified';
   videoSourceId: string;
   anchor: Readonly<{ mediaTimeUs: number; targetId: string }>;
@@ -40,6 +49,7 @@ export interface CueAiOriginSnapshot {
   policyVersion: string;
   originalContent: CueReviewContent;
   groundedPayload?: GroundedAiOriginPayload;
+  nicoleProPayload?: NicoleProAiOriginPayload;
   legacyPayload?: Readonly<Record<string, unknown>>;
   digestAlgorithm: 'sha256-canonical-json-v1';
   originDigest: string;
@@ -107,6 +117,18 @@ export interface CueReviewProjection {
   parentVisible: boolean;
   revisionNumber: number;
   isApproved: boolean;
+}
+
+/** Deliberately narrow audience payload; teacher hypotheses and technical data never cross this boundary. */
+export interface CueAudienceProjection {
+  recordId: string;
+  revisionId: string;
+  audience: CueAudience;
+  poseName: string;
+  headline: string;
+  cueMetaphor: string;
+  goalText?: string;
+  practiceText?: string;
 }
 
 export interface CueReviewCommandContext {

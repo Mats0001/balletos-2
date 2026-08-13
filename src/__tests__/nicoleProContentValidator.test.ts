@@ -147,7 +147,7 @@ function validDraft(): NicoleProDraftV1 {
   return {
     schemaVersion: 1,
     draftId: 'draft:shoulder:1',
-    plannerId: 'balletos-nicole-pro-planner',
+    plannerId: 'balletos-nicole-pro-deterministic-planner',
     plannerVersion: '1.0.0',
     validatorVersion: NICOLE_PRO_VALIDATOR_VERSION,
     policyVersion: evidence.policyVersion,

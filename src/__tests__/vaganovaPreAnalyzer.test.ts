@@ -19,6 +19,13 @@ import {
 import { cueReviewExpectedState } from '../services/cueReviewAudit';
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
+import { bindAssessmentIfCurrent, createAnalysisContextEpoch } from '../services/analysisContextGuard';
+import {
+  createNicoleProExactFrameArtifactId,
+  createNicoleProDraftId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  planNicoleProGroundedDraft,
+} from '../services/nicoleProContentPlanner';
 
 function installMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -250,6 +257,51 @@ describe('audited cue persistence guard', () => {
     guide: { kind: 'image_vertical', anchor: 'pelvis_center', label: 'Aplomb-Orientierung (2D) · Nicole prüft', reviewState: 'pending_nicole', evidence },
   };
 
+  function nicoleProFixture(
+    landmarkModel = NICOLE_PRO_LANDMARK_MODEL_V1,
+    contextGeneration = 1,
+  ) {
+    const proEvidence: ReadyGroundedTeacherDraft['evidence'] = {
+      ...evidence,
+      valueDeg: 5.5,
+      confidence: 0.94,
+    };
+    const proGrounded: ReadyGroundedTeacherDraft = {
+      ...draft,
+      evidence: proEvidence,
+      guide: { ...draft.guide, evidence: proEvidence },
+    };
+    const currentContext = createAnalysisContextEpoch({
+      schemaVersion: 1,
+      sourceId: target.sourceId,
+      studentId: 'student:emma-berger',
+      exerciseId: 'plie',
+      levelId: 'minis',
+    }, contextGeneration);
+    const groundedAssessment = bindAssessmentIfCurrent(currentContext, currentContext, proGrounded);
+    if (!groundedAssessment) throw new Error('Test assessment must bind to its context.');
+    const proDraft = planNicoleProGroundedDraft({
+      groundedAssessment,
+      currentContext,
+      analysisArtifactId: createNicoleProExactFrameArtifactId(
+        currentContext, proEvidence.mediaTimeUs, landmarkModel,
+      ),
+      view: 'frontal',
+      landmarkModel,
+      captureQuality: 'ready',
+      draftId: createNicoleProDraftId(
+        currentContext,
+        proEvidence.mediaTimeUs,
+        landmarkModel,
+        proEvidence.metricId,
+        proEvidence.policyVersion,
+      ),
+      generatedAt: '2026-08-13T20:00:00.000Z',
+    });
+    if (!proDraft) throw new Error('Test Nicole-Pro draft must be planned.');
+    return { currentContext, proDraft, proGrounded };
+  }
+
   it('roundtrips an audited draft and blocks generic mutation, deletion and reset', () => {
     installMemoryStorage();
     const created = vaganovaPreAnalyzer.addGroundedTeacherDraft(target.sourceId, draft, target, 'Plié');
@@ -269,6 +321,96 @@ describe('audited cue persistence guard', () => {
     expect(() => vaganovaPreAnalyzer.saveCuePoints('plain.mp4', [{ ...teacher, reviewAudit: audited.reviewAudit }])).toThrow(/cannot insert/i);
     expect(() => vaganovaPreAnalyzer.updateCuePoint('plain.mp4', teacher.id, { reviewAudit: audited.reviewAudit } as never)).toThrow(/cannot insert reviewAudit/i);
     expect(() => vaganovaPreAnalyzer.addCuePoint('plain.mp4', { ...teacher, reviewAudit: audited.reviewAudit } as never)).toThrow(/cannot insert reviewAudit/i);
+  });
+
+  it('persists one exact Nicole-Pro origin and deduplicates the same planned draft', () => {
+    installMemoryStorage();
+    const { currentContext, proDraft, proGrounded } = nicoleProFixture();
+    const first = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId,
+      proGrounded,
+      proDraft,
+      target,
+      currentContext,
+      'ready',
+      'Plié – Tiefpunkt',
+    );
+    const second = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId,
+      proGrounded,
+      proDraft,
+      target,
+      currentContext,
+      'ready',
+      'Plié – Tiefpunkt',
+    );
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+    expect(first[0].reviewAudit?.origin.kind).toBe('nicole_pro_draft');
+    expect(first[0].reviewAudit?.origin.nicoleProPayload?.draft).toEqual(proDraft);
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual(first);
+  });
+
+  it('stores different canonical assessment artifacts as separate origins', () => {
+    installMemoryStorage();
+    const first = nicoleProFixture(NICOLE_PRO_LANDMARK_MODEL_V1, 1);
+    vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, first.proGrounded, first.proDraft, target,
+      first.currentContext, 'ready', 'Plié',
+    );
+    const second = nicoleProFixture(NICOLE_PRO_LANDMARK_MODEL_V1, 2);
+    const updated = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, second.proGrounded, second.proDraft, target,
+      second.currentContext, 'ready', 'Plié',
+    );
+    expect(updated).toHaveLength(2);
+    expect(updated[0].reviewAudit?.origin.nicoleProPayload?.draft.draftId)
+      .not.toBe(updated[1].reviewAudit?.origin.nicoleProPayload?.draft.draftId);
+  });
+
+  it('rejects a noncanonical arbitrary draft ID before deduplication', () => {
+    installMemoryStorage();
+    const fixture = nicoleProFixture();
+    const arbitrary = { ...fixture.proDraft, draftId: 'arbitrary-draft-id' };
+    expect(() => vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, arbitrary, target,
+      fixture.currentContext, 'ready', 'Plié',
+    )).toThrow(/supported exact-frame origin|stale/i);
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
+  });
+
+  it('does not silently deduplicate different canonical outward content', () => {
+    installMemoryStorage();
+    const fixture = nicoleProFixture();
+    vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, fixture.proDraft, target,
+      fixture.currentContext, 'ready', 'Plié – Tiefpunkt',
+    );
+    expect(() => vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, fixture.proDraft, target,
+      fixture.currentContext, 'ready', 'Plié – anderer Titel',
+    )).toThrow(/collides.*different immutable analysis origin/i);
+  });
+
+  it('rejects stale context or a different pose model before writing Nicole-Pro content', () => {
+    installMemoryStorage();
+    const { currentContext, proDraft, proGrounded } = nicoleProFixture();
+    const changedContext = createAnalysisContextEpoch(currentContext.context, currentContext.generation + 1);
+    expect(() => vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, proGrounded, proDraft, target, changedContext, 'ready', 'Plié',
+    )).toThrow(/stale|exact-frame/i);
+    const foreign = nicoleProFixture({ modelId: 'unapproved-pose-model', modelVersion: '99.0' });
+    expect(() => vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId,
+      foreign.proGrounded,
+      foreign.proDraft,
+      target,
+      foreign.currentContext,
+      'ready',
+      'Plié',
+    )).toThrow(/stale|exact-frame/i);
+    expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual([]);
   });
 
   it('persists approval and audiences but revokes both after a new teacher revision', () => {

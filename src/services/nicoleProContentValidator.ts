@@ -16,10 +16,19 @@ import {
 } from '../types/nicoleProContent';
 import { MOTION_REGISTRY } from './motionRegistry';
 import {
+  analysisContextFingerprint,
+  createAnalysisContextEpoch,
   assessmentValueForCurrentContext,
+  type AnalysisContextV1,
   type AnalysisContextEpochV1,
   type BoundAssessmentV1,
 } from './analysisContextGuard';
+import {
+  createNicoleProExactFrameArtifactId,
+  createNicoleProVersionedDraftId,
+  NICOLE_PRO_ARTIFACT_KEY_SCHEME_V1,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+} from './nicoleProArtifactIdentity';
 
 export const NICOLE_PRO_VALIDATOR_VERSION = 'nicole-pro-validator-v1' as const;
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID = 'balletos-nicole-pro-knowledge' as const;
@@ -28,6 +37,7 @@ export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.2.0' as const;
 interface GroundedRuleProfile {
   key: string;
   ruleId: string;
+  ruleVersion: string;
   metricId: string;
   definitionVersion: string;
   side: NicoleProEvidencePacketV1['side'];
@@ -98,7 +108,7 @@ function createGroundedKnowledgeRule(profile: GroundedRuleProfile): NicoleProKno
   return {
     schemaVersion: 1,
     ruleId: profile.ruleId,
-    version: '1.0.0',
+    version: profile.ruleVersion,
     status: 'curated_internal',
     permittedClaimTypes: PERMITTED_TEACHER_CLAIMS,
     conceptIds: [
@@ -129,6 +139,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
   {
     key: 'shoulder-line',
     ruleId: 'knowledge:shoulder-line:teacher-v1',
+    ruleVersion: '1.0.0',
     metricId: 'shoulder_horizontal',
     definitionVersion: 'shoulder-horizontal-image-v1',
     side: 'bilateral',
@@ -152,6 +163,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
   {
     key: 'spine-aplomb',
     ruleId: 'knowledge:spine-aplomb:teacher-v1',
+    ruleVersion: '1.1.0',
     metricId: 'spine_tilt_aplomb',
     definitionVersion: 'spine-center-image-vertical-v1',
     side: 'center',
@@ -175,6 +187,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
   {
     key: 'pelvis-line',
     ruleId: 'knowledge:pelvis-line:teacher-v1',
+    ruleVersion: '1.0.0',
     metricId: 'projected_hip_line_obliquity',
     definitionVersion: 'pelvis-line-image-v1',
     side: 'bilateral',
@@ -203,6 +216,57 @@ export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1: NicoleProTrustedKnowledge
   registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
   rules: GROUNDED_RULE_PROFILES.map(createGroundedKnowledgeRule),
 });
+
+/**
+ * Product-owned immutable registry archive. Existing entries must never be
+ * rewritten or removed when a newer knowledge version is introduced because
+ * reviewed Nicole-Pro origins retain the exact version that created them.
+ */
+export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE: readonly NicoleProTrustedKnowledgeRegistryV1[] = cloneAndDeepFreeze([
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1,
+]);
+
+const NICOLE_PRO_REGISTRY_RUNTIME_ARCHIVE = cloneAndDeepFreeze([{
+  registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+  registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+  validatorVersions: [NICOLE_PRO_VALIDATOR_VERSION],
+  planners: [{ id: 'balletos-nicole-pro-deterministic-planner', version: '1.0.0' }],
+  artifactKeyScheme: NICOLE_PRO_ARTIFACT_KEY_SCHEME_V1,
+  landmarkModels: [NICOLE_PRO_LANDMARK_MODEL_V1],
+}]);
+
+export function resolveNicoleProTrustedKnowledgeRegistry(
+  registryId: string,
+  registryVersion: string,
+): NicoleProTrustedKnowledgeRegistryV1 | null {
+  return NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE.find(registry => (
+    registry.registryId === registryId && registry.registryVersion === registryVersion
+  )) ?? null;
+}
+
+function registryRuntimeIsCompatible(
+  registryId: string,
+  registryVersion: string,
+  plannerId: string,
+  plannerVersion: string,
+  validatorVersion: string,
+): boolean {
+  const entry = NICOLE_PRO_REGISTRY_RUNTIME_ARCHIVE.find(item => (
+    item.registryId === registryId && item.registryVersion === registryVersion
+  ));
+  return Boolean(entry
+    && entry.validatorVersions.includes(validatorVersion as typeof NICOLE_PRO_VALIDATOR_VERSION)
+    && entry.planners.some(planner => planner.id === plannerId && planner.version === plannerVersion));
+}
+
+function registryRuntimeFor(
+  registryId: string,
+  registryVersion: string,
+) {
+  return NICOLE_PRO_REGISTRY_RUNTIME_ARCHIVE.find(item => (
+    item.registryId === registryId && item.registryVersion === registryVersion
+  )) ?? null;
+}
 
 declare const trustedAuthorityBrand: unique symbol;
 export type NicoleProTrustedValidationAuthorityV1 = NicoleProValidationAuthorityV1 & Readonly<{
@@ -1001,9 +1065,11 @@ function authorityPayloadIsValid(
     issue(issues, 'invalid_knowledge_rule', 'authority.knowledgeRegistry', 'A valid trusted knowledge registry is required.');
     return false;
   }
-  if (value.knowledgeRegistry.registryId !== NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID
-    || value.knowledgeRegistry.registryVersion !== NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION
-    || canonicalJson(value.knowledgeRegistry) !== canonicalJson(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1)) {
+  const archivedRegistry = resolveNicoleProTrustedKnowledgeRegistry(
+    value.knowledgeRegistry.registryId,
+    value.knowledgeRegistry.registryVersion,
+  );
+  if (!archivedRegistry || canonicalJson(value.knowledgeRegistry) !== canonicalJson(archivedRegistry)) {
     issue(issues, 'invalid_knowledge_rule', 'authority.knowledgeRegistry', 'Knowledge authority is not the product-owned registry version.');
     return false;
   }
@@ -1030,6 +1096,7 @@ function authorityPayloadIsValid(
 export function createNicoleProValidationAuthority(input: Readonly<{
   assessment: BoundAssessmentV1<NicoleProAssessmentAuthorityValueV1>;
   currentContext: AnalysisContextEpochV1;
+  knowledgeRegistry?: NicoleProTrustedKnowledgeRegistryV1;
 }>): NicoleProTrustedValidationAuthorityV1 | null {
   if (!input || typeof input !== 'object'
     || !isObject(input.currentContext) || !isObject(input.currentContext.context)
@@ -1043,6 +1110,12 @@ export function createNicoleProValidationAuthority(input: Readonly<{
     || !Array.isArray(value.evidence)
     || value.evidence.length === 0) return null;
 
+  const requestedRegistry = input.knowledgeRegistry ?? NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1;
+  const archivedRegistry = resolveNicoleProTrustedKnowledgeRegistry(
+    requestedRegistry.registryId,
+    requestedRegistry.registryVersion,
+  );
+  if (!archivedRegistry || canonicalJson(requestedRegistry) !== canonicalJson(archivedRegistry)) return null;
   const authorityPayload: NicoleProValidationAuthorityV1 = {
     schemaVersion: 1,
     expectedAssessment: {
@@ -1054,7 +1127,7 @@ export function createNicoleProValidationAuthority(input: Readonly<{
       policyVersion: value.policyVersion,
     },
     evidence: value.evidence,
-    knowledgeRegistry: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1,
+    knowledgeRegistry: archivedRegistry,
   };
   const constructionIssues: NicoleProValidationIssue[] = [];
   if (!authorityPayloadIsValid(authorityPayload, constructionIssues)
@@ -1070,6 +1143,92 @@ export function createNicoleProValidationAuthority(input: Readonly<{
   const trusted = cloneAndDeepFreeze(authorityPayload) as NicoleProTrustedValidationAuthorityV1;
   trustedAuthorityDigests.set(trusted, canonicalJson(trusted));
   return trusted;
+}
+
+function contextEpochFromStoredEvidence(evidence: NicoleProEvidencePacketV1): AnalysisContextEpochV1 | null {
+  try {
+    const parsed = JSON.parse(evidence.analysisContextFingerprint) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 5 || parsed[0] !== 1
+      || parsed[1] !== evidence.sourceId || parsed[3] !== evidence.exerciseId
+      || typeof parsed[2] !== 'string'
+      || !['minis', 'kids', 'teens', 'adults', 'masterclass'].includes(String(parsed[4]))) return null;
+    const context: AnalysisContextV1 = Object.freeze({
+      schemaVersion: 1,
+      sourceId: parsed[1],
+      studentId: parsed[2],
+      exerciseId: parsed[3],
+      levelId: parsed[4] as AnalysisContextV1['levelId'],
+    });
+    if (analysisContextFingerprint(context) !== evidence.analysisContextFingerprint) return null;
+    return createAnalysisContextEpoch(context, evidence.analysisContextGeneration);
+  } catch {
+    return null;
+  }
+}
+
+/** Full semantic reload validation against the immutable product registry archive. */
+export function validateStoredNicoleProDraft(
+  value: unknown,
+  registryId: string,
+  registryVersion: string,
+): NicoleProValidationResult {
+  const invalid = (message: string): NicoleProValidationResult => Object.freeze({
+    valid: false,
+    issues: Object.freeze([Object.freeze({ code: 'invalid_shape' as const, path: '$', message })]),
+  });
+  if (!value || typeof value !== 'object') return invalid('Stored Nicole-Pro draft is malformed.');
+  const draft = value as NicoleProDraftV1;
+  if (!Array.isArray(draft.evidence) || draft.evidence.length !== 1) {
+    return invalid('Stored Nicole-Pro draft requires one exact evidence packet.');
+  }
+  const evidence = draft.evidence[0];
+  const context = contextEpochFromStoredEvidence(evidence);
+  const registry = resolveNicoleProTrustedKnowledgeRegistry(registryId, registryVersion);
+  const runtime = registryRuntimeFor(registryId, registryVersion);
+  const plannerRuntime = runtime?.planners.find(planner => (
+    planner.id === draft.plannerId && planner.version === draft.plannerVersion
+  ));
+  const landmarkModel = runtime?.landmarkModels.find(model => (
+    model.modelId === evidence.landmarkQuality.modelId
+    && model.modelVersion === evidence.landmarkQuality.modelVersion
+  ));
+  if (!context || !registry || !runtime || !plannerRuntime
+    || runtime.artifactKeyScheme !== NICOLE_PRO_ARTIFACT_KEY_SCHEME_V1
+    || !landmarkModel
+    || evidence.analysisArtifactId !== createNicoleProExactFrameArtifactId(
+      context, evidence.mediaTimeUs, landmarkModel,
+    )
+    || draft.draftId !== createNicoleProVersionedDraftId({
+      context,
+      mediaTimeUs: evidence.mediaTimeUs,
+      landmarkModel,
+      metricId: evidence.metricId,
+      policyVersion: evidence.policyVersion,
+      registryId,
+      registryVersion,
+      plannerId: plannerRuntime.id,
+      plannerVersion: plannerRuntime.version,
+      validatorVersion: draft.validatorVersion,
+    })) return invalid('Stored Nicole-Pro context, model, artifact, draft or registry version is unavailable.');
+  const authority = createNicoleProValidationAuthority({
+    currentContext: context,
+    knowledgeRegistry: registry,
+    assessment: {
+      schemaVersion: 1,
+      contextFingerprint: context.fingerprint,
+      contextGeneration: context.generation,
+      value: {
+        analysisArtifactId: evidence.analysisArtifactId,
+        sourceId: evidence.sourceId,
+        exerciseId: evidence.exerciseId,
+        policyVersion: evidence.policyVersion,
+        evidence: draft.evidence,
+      },
+    },
+  });
+  return authority
+    ? validateNicoleProDraft(draft, authority, context)
+    : invalid('Stored Nicole-Pro authority could not be reconstructed.');
 }
 
 function trustedAuthorityIsValid(
@@ -1160,7 +1319,13 @@ export function validateNicoleProDraft(
       || !nonEmptyString(draft.draftId)
       || !nonEmptyString(draft.plannerId)
       || !nonEmptyString(draft.plannerVersion)
-      || draft.validatorVersion !== NICOLE_PRO_VALIDATOR_VERSION
+      || !registryRuntimeIsCompatible(
+        authority.knowledgeRegistry.registryId,
+        authority.knowledgeRegistry.registryVersion,
+        draft.plannerId,
+        draft.plannerVersion,
+        draft.validatorVersion,
+      )
       || !nonEmptyString(draft.policyVersion)
       || !nonEmptyString(draft.generatedAt)
       || Number.isNaN(Date.parse(draft.generatedAt))
