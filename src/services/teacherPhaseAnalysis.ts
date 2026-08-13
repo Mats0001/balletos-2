@@ -261,31 +261,29 @@ export function summarizePhaseRegionStates(
   };
   for (const state of baseStates) counts[state]++;
   const sampleCount = baseStates.length;
-  const severities = baseStates.map(state => (
-    state === 'heuristic_match' ? 0 : state === 'heuristic_attention' ? 1 : 2
-  ));
-  const minSeverity = severities.length > 0 ? Math.min(...severities) : 1;
-  const maxSeverity = severities.length > 0 ? Math.max(...severities) : 1;
-  // Conservative phase corridor: only an entirely green phase is green and
-  // only an entirely red phase is red. Any boundary overlap is yellow.
-  const corridorResult: TeacherPhaseRegionSummary['corridorResult'] = minSeverity === 0 && maxSeverity === 0
+  const winningCount = Math.max(...Object.values(counts));
+  const winners = (Object.keys(counts) as TeacherHeuristicBaseState[])
+    .filter(state => counts[state] === winningCount && winningCount > 0);
+  // Die Grundfarbe ist die naechste/dominante Phasenklasse. Nur ein echter
+  // Gleichstand wird gelb aufgeloest. Zeitliche Streuung veraendert nicht
+  // heimlich die Farbe, sondern ausschliesslich das Strichmuster.
+  const base: TeacherHeuristicBaseState = winners.length === 1
+    ? winners[0]
+    : 'heuristic_attention';
+  const corridorResult: TeacherPhaseRegionSummary['corridorResult'] = base === 'heuristic_match'
     ? 'inside'
-    : minSeverity === 2 && maxSeverity === 2
+    : base === 'heuristic_strong_attention'
       ? 'outside'
       : 'overlap';
-  const base: TeacherHeuristicBaseState = corridorResult === 'inside'
-    ? 'heuristic_match'
-    : corridorResult === 'outside'
-      ? 'heuristic_strong_attention'
-      : 'heuristic_attention';
-  const agreement = Math.max(...Object.values(counts)) / Math.max(1, sampleCount);
+  const agreement = winningCount / Math.max(1, sampleCount);
   const uncertainRatio = states.filter(heuristicHasUncertainEvidence).length
     / Math.max(1, states.length);
-  // Crucially, a mixed colour corridor is not evidence uncertainty. It makes
-  // the base verdict yellow but keeps a solid line when the evidence is stable.
+  // Jede Luecke, jede abweichende Farbstichprobe und jedes unsichere
+  // Eingangssignal wird sichtbar gestrichelt. Die Grundfarbe bleibt erhalten.
   const uncertain = sampleCount < 3
-    || sampleCount / Math.max(1, states.length) < 0.8
-    || uncertainRatio > 0.25;
+    || sampleCount !== states.length
+    || agreement < 1
+    || uncertainRatio > 0;
   return {
     state: withUncertainEvidence(base, uncertain),
     corridorResult,
@@ -300,18 +298,24 @@ function aggregateRegion(samples: readonly PoseSample[], key: TeacherRegionKey):
 }
 
 function phaseDisplayState(regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>) {
-  const severities = TEACHER_REGION_KEYS.map(key => {
-    const base = heuristicBaseState(regions[key].state);
-    return base === 'heuristic_strong_attention' ? 2 : base === 'heuristic_attention' ? 1 : 0;
-  });
-  const average = severities.reduce<number>((sum, value) => sum + value, 0) / severities.length;
-  const base: TeacherHeuristicBaseState = average < 0.55
-    ? 'heuristic_match'
-    : average < 1.35
-      ? 'heuristic_attention'
-      : 'heuristic_strong_attention';
-  const uncertain = TEACHER_REGION_KEYS.filter(key => heuristicHasUncertainEvidence(regions[key].state)).length
-    > TEACHER_REGION_KEYS.length / 3;
+  const counts: Record<TeacherHeuristicBaseState, number> = {
+    heuristic_match: 0,
+    heuristic_attention: 0,
+    heuristic_strong_attention: 0,
+  };
+  for (const key of TEACHER_REGION_KEYS) {
+    const state = heuristicBaseState(regions[key].state);
+    if (state) counts[state]++;
+  }
+  const winningCount = Math.max(...Object.values(counts));
+  const winners = (Object.keys(counts) as TeacherHeuristicBaseState[])
+    .filter(state => counts[state] === winningCount && winningCount > 0);
+  const base: TeacherHeuristicBaseState = winners.length === 1
+    ? winners[0]
+    : 'heuristic_attention';
+  const uncertain = winners.length !== 1
+    || winningCount !== TEACHER_REGION_KEYS.length
+    || TEACHER_REGION_KEYS.some(key => heuristicHasUncertainEvidence(regions[key].state));
   return withUncertainEvidence(base, uncertain);
 }
 

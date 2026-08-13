@@ -509,7 +509,7 @@ export function renderSkeletonToCanvas(
 
   // ─── PLUMB LINE ───
   if (isSkeletonPointUsable(head)) {
-    drawLine(ctx, head.x, head.y - 30, head.x, 950, 'rgba(255,255,255,0.45)', 2, sx, sy, [6, 6]);
+    drawLine(ctx, head.x, head.y - 30, head.x, 950, 'rgba(255,255,255,0.45)', 1.25, sx, sy, [6, 6]);
   }
 
   // ─── MOTION TRAILS ───
@@ -551,7 +551,7 @@ export function renderSkeletonToCanvas(
       ? packetColor('cog')
       : COLOR_COG;
     const cogDash = mode === 'lehrer-ampel' ? packetDash('cog') : [];
-    drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 2.5, sx, sy, cogDash);
+    drawLine(ctx, cog.x, cog.y, cog.x, 950, cogC, 1.75, sx, sy, cogDash);
     drawCircle(ctx, cog.x, cog.y, 10,
       mode === 'lehrer-ampel' ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.25)',
       sx, sy, cogC, 3);
@@ -577,7 +577,7 @@ export function renderSkeletonToCanvas(
       ctx.beginPath();
       ctx.arc(anklePoint.x * sx, anklePoint.y * sy, 28 * avgS, Math.PI, 0);
       ctx.strokeStyle = tColor;
-      ctx.lineWidth = 3 * avgS;
+      ctx.lineWidth = 2 * avgS;
       ctx.setLineDash(mode === 'lehrer-ampel' ? turnoutStyle.dash : []);
       ctx.globalAlpha = stableAlpha(turnoutConf) * 0.7;
       ctx.fillStyle = mode === 'lehrer-ampel'
@@ -597,7 +597,7 @@ export function renderSkeletonToCanvas(
   if (isSkeletonPointUsable(head)) {
     drawCircle(ctx, head.x, head.y, 18,
       mode === 'lehrer-ampel' ? 'rgba(192,132,252,0.15)' : 'rgba(192,132,252,0.18)', sx, sy,
-      mode !== 'lehrer-ampel' && opts.selectedJointId === 'head_epaulement' ? selColor : headC, 2.5,
+      mode !== 'lehrer-ampel' && opts.selectedJointId === 'head_epaulement' ? selColor : headC, 1.75,
       mode === 'lehrer-ampel' ? packetDash('head') : []);
   }
   if (isSkeletonPointUsable(head) && isSkeletonPointUsable(neck)) {
@@ -608,7 +608,7 @@ export function renderSkeletonToCanvas(
       neck.x,
       neck.y,
       mode === 'lehrer-ampel' ? headC : boneColor(COLOR_SPINE),
-      3.5,
+      2.5,
       sx,
       sy,
       mode === 'lehrer-ampel' ? packetDash('head') : [],
@@ -621,9 +621,9 @@ export function renderSkeletonToCanvas(
   const spineC = mode === 'lehrer-ampel' ? packetColor('spine') : boneColor(COLOR_SPINE);
   const spineDash = mode === 'lehrer-ampel' ? packetDash('spine') : [];
   ctx.globalAlpha = stableAlpha(spineConf);
-  if (isSkeletonPointUsable(neck) && isSkeletonPointUsable(sternum)) drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy, spineDash);
-  if (isSkeletonPointUsable(sternum) && isSkeletonPointUsable(navel)) drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 4, sx, sy, spineDash);
-  if (isSkeletonPointUsable(navel) && isSkeletonPointUsable(pelvisCenter)) drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 4, sx, sy, spineDash);
+  if (isSkeletonPointUsable(neck) && isSkeletonPointUsable(sternum)) drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 2.75, sx, sy, spineDash);
+  if (isSkeletonPointUsable(sternum) && isSkeletonPointUsable(navel)) drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 2.75, sx, sy, spineDash);
+  if (isSkeletonPointUsable(navel) && isSkeletonPointUsable(pelvisCenter)) drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 2.75, sx, sy, spineDash);
   if (isSkeletonPointUsable(neck)) drawCircle(ctx, neck.x, neck.y, 5.5, mode === 'lehrer-ampel' ? spineC : COLOR_JOINT, sx, sy);
   if (isSkeletonPointUsable(sternum)) drawCircle(ctx, sternum.x, sternum.y, 5.5, mode === 'lehrer-ampel' ? spineC : COLOR_JOINT, sx, sy);
   if (isSkeletonPointUsable(navel)) drawCircle(ctx, navel.x, navel.y, 6.5, mode === 'lehrer-ampel' ? spineC : selColor, sx, sy);
@@ -647,19 +647,19 @@ export function renderSkeletonToCanvas(
   const shC = mode === 'lehrer-ampel' ? packetColor('shoulder') : boneColor(COLOR_ARM);
   const shDash = mode === 'lehrer-ampel' ? packetDash('shoulder') : [];
   ctx.globalAlpha = stableAlpha(shConf);
-  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(shoulderR)) drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy, shDash);
+  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(shoulderR)) drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 2.5, sx, sy, shDash);
   if (isSkeletonPointUsable(shoulderL)) drawCircle(ctx, shoulderL.x, shoulderL.y, 7, mode === 'lehrer-ampel' ? shC : COLOR_JOINT, sx, sy);
   if (isSkeletonPointUsable(shoulderR)) drawCircle(ctx, shoulderR.x, shoulderR.y, 7, mode === 'lehrer-ampel' ? shC : COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Linker Arm
   ctx.globalAlpha = stableAlpha(armLConf);
-  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(elbowL)) drawLine(ctx, shoulderL.x, shoulderL.y, elbowL.x, elbowL.y, armLColor, 4.5, sx, sy, armLDash);
-  if (isSkeletonPointUsable(elbowL) && isSkeletonPointUsable(wristL)) drawLine(ctx, elbowL.x, elbowL.y, wristL.x, wristL.y, armLColor, 4.5, sx, sy, armLDash);
+  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(elbowL)) drawLine(ctx, shoulderL.x, shoulderL.y, elbowL.x, elbowL.y, armLColor, 3, sx, sy, armLDash);
+  if (isSkeletonPointUsable(elbowL) && isSkeletonPointUsable(wristL)) drawLine(ctx, elbowL.x, elbowL.y, wristL.x, wristL.y, armLColor, 3, sx, sy, armLDash);
   // Rechter Arm
   ctx.globalAlpha = stableAlpha(armRConf);
-  if (isSkeletonPointUsable(shoulderR) && isSkeletonPointUsable(elbowR)) drawLine(ctx, shoulderR.x, shoulderR.y, elbowR.x, elbowR.y, armRColor, 4.5, sx, sy, armRDash);
-  if (isSkeletonPointUsable(elbowR) && isSkeletonPointUsable(wristR)) drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 4.5, sx, sy, armRDash);
+  if (isSkeletonPointUsable(shoulderR) && isSkeletonPointUsable(elbowR)) drawLine(ctx, shoulderR.x, shoulderR.y, elbowR.x, elbowR.y, armRColor, 3, sx, sy, armRDash);
+  if (isSkeletonPointUsable(elbowR) && isSkeletonPointUsable(wristR)) drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 3, sx, sy, armRDash);
   ctx.globalAlpha = 1.0;
 
   // Ellenbogen-Ringe: im Lehrer-Modus folgt auch das Strichmuster exakt dem
@@ -675,7 +675,7 @@ export function renderSkeletonToCanvas(
     sx,
     sy,
     mode === 'lehrer-ampel' ? armLStatusC : elbowC,
-    2,
+    1.5,
     mode === 'lehrer-ampel' ? armLDash : [3, 2],
   );
   ctx.globalAlpha = stableAlpha(armRConf ?? 0.8) * 0.85;
@@ -688,7 +688,7 @@ export function renderSkeletonToCanvas(
     sx,
     sy,
     mode === 'lehrer-ampel' ? armRStatusC : elbowC,
-    2,
+    1.5,
     mode === 'lehrer-ampel' ? armRDash : [3, 2],
   );
   ctx.globalAlpha = 1.0;
@@ -707,7 +707,7 @@ export function renderSkeletonToCanvas(
     shoulderR.x + 15,
     shoulderR.y,
     mode === 'lehrer-ampel' ? shC : COLOR_EPAULEMENT,
-    1.5,
+    1.25,
     sx,
     sy,
     mode === 'lehrer-ampel' ? shDash : [6, 3],
@@ -722,14 +722,14 @@ export function renderSkeletonToCanvas(
   const torsoDash = mode === 'lehrer-ampel' ? packetDash('torsoAlignment') : [];
   const torsoConf = opts.vaganovaAnalysis?.spineTilt?.confidence;
   ctx.globalAlpha = stableAlpha(torsoConf) * 0.75;
-  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(pelvisL)) drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, torsoAlignC, 2.5, sx, sy, torsoDash);
-  if (isSkeletonPointUsable(shoulderR) && isSkeletonPointUsable(pelvisR)) drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, torsoAlignC, 2.5, sx, sy, torsoDash);
+  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(pelvisL)) drawLine(ctx, shoulderL.x, shoulderL.y, pelvisL.x, pelvisL.y, torsoAlignC, 1.75, sx, sy, torsoDash);
+  if (isSkeletonPointUsable(shoulderR) && isSkeletonPointUsable(pelvisR)) drawLine(ctx, shoulderR.x, shoulderR.y, pelvisR.x, pelvisR.y, torsoAlignC, 1.75, sx, sy, torsoDash);
   // Becken-Leiste
   const pelvisConf = opts.vaganovaAnalysis?.pelvicTilt?.confidence;
   const pelvisC = mode === 'lehrer-ampel' ? packetColor('pelvis') : boneColor(COLOR_PELVIS);
   const pelvisDash = mode === 'lehrer-ampel' ? packetDash('pelvis') : [];
   ctx.globalAlpha = stableAlpha(pelvisConf);
-  if (isSkeletonPointUsable(pelvisL) && isSkeletonPointUsable(pelvisR)) drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 4, sx, sy, pelvisDash);
+  if (isSkeletonPointUsable(pelvisL) && isSkeletonPointUsable(pelvisR)) drawLine(ctx, pelvisL.x, pelvisL.y, pelvisR.x, pelvisR.y, pelvisC, 2.75, sx, sy, pelvisDash);
   ctx.globalAlpha = 1.0;
 
   // ─── BEINE (aus TeacherOverlayPacket) ───
@@ -745,8 +745,8 @@ export function renderSkeletonToCanvas(
 
   // Linkes Bein
   ctx.globalAlpha = stableAlpha(legLConf);
-  if (isSkeletonPointUsable(pelvisL) && isSkeletonPointUsable(kneeL)) drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 4.5, sx, sy, legLDash);
-  if (isSkeletonPointUsable(kneeL) && isSkeletonPointUsable(ankleL)) drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 4.5, sx, sy, legLDash);
+  if (isSkeletonPointUsable(pelvisL) && isSkeletonPointUsable(kneeL)) drawLine(ctx, pelvisL.x, pelvisL.y, kneeL.x, kneeL.y, legLC, 3, sx, sy, legLDash);
+  if (isSkeletonPointUsable(kneeL) && isSkeletonPointUsable(ankleL)) drawLine(ctx, kneeL.x, kneeL.y, ankleL.x, ankleL.y, legLC, 3, sx, sy, legLDash);
   const kneeLSize = opts.selectedJointId === 'left_knee' ? 9 : 6.5;
   if (isSkeletonPointUsable(kneeL)) drawCircle(ctx, kneeL.x, kneeL.y, kneeLSize,
     mode === 'lehrer-ampel' ? legLC
@@ -755,8 +755,8 @@ export function renderSkeletonToCanvas(
 
   // Rechtes Bein
   ctx.globalAlpha = stableAlpha(legRConf);
-  if (isSkeletonPointUsable(pelvisR) && isSkeletonPointUsable(kneeR)) drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 4.5, sx, sy, legRDash);
-  if (isSkeletonPointUsable(kneeR) && isSkeletonPointUsable(ankleR)) drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 4.5, sx, sy, legRDash);
+  if (isSkeletonPointUsable(pelvisR) && isSkeletonPointUsable(kneeR)) drawLine(ctx, pelvisR.x, pelvisR.y, kneeR.x, kneeR.y, legRC, 3, sx, sy, legRDash);
+  if (isSkeletonPointUsable(kneeR) && isSkeletonPointUsable(ankleR)) drawLine(ctx, kneeR.x, kneeR.y, ankleR.x, ankleR.y, legRC, 3, sx, sy, legRDash);
   const kneeRSize = opts.selectedJointId === 'right_knee' ? 9 : 6.5;
   if (isSkeletonPointUsable(kneeR)) drawCircle(ctx, kneeR.x, kneeR.y, kneeRSize,
     mode === 'lehrer-ampel' ? legRC
@@ -769,18 +769,18 @@ export function renderSkeletonToCanvas(
   const footLC = mode === 'lehrer-ampel' ? packetColor('footL') : boneColor(COLOR_LEG);
   const footRC = mode === 'lehrer-ampel' ? packetColor('footR') : boneColor(COLOR_LEG);
   if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL) && mode === 'lehrer-ampel') {
-    drawCircle(ctx, ankleL.x, ankleL.y, 8, footLC, sx, sy, footLC, 2);
+    drawCircle(ctx, ankleL.x, ankleL.y, 8, footLC, sx, sy, footLC, 1.5);
   }
   if (isSkeletonPointUsable(ankleR) && isSkeletonPointUsable(footR) && mode === 'lehrer-ampel') {
-    drawCircle(ctx, ankleR.x, ankleR.y, 8, footRC, sx, sy, footRC, 2);
+    drawCircle(ctx, ankleR.x, ankleR.y, 8, footRC, sx, sy, footRC, 1.5);
   }
   if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL)) {
-    drawLine(ctx, ankleL.x, ankleL.y, footL.x, footL.y, footLC, 3.5, sx, sy,
+    drawLine(ctx, ankleL.x, ankleL.y, footL.x, footL.y, footLC, 2.25, sx, sy,
       mode === 'lehrer-ampel' ? packetDash('footL') : []);
     drawCircle(ctx, footL.x, footL.y, 5, mode === 'lehrer-ampel' ? footLC : COLOR_JOINT, sx, sy);
   }
   if (isSkeletonPointUsable(ankleR) && isSkeletonPointUsable(footR)) {
-    drawLine(ctx, ankleR.x, ankleR.y, footR.x, footR.y, footRC, 3.5, sx, sy,
+    drawLine(ctx, ankleR.x, ankleR.y, footR.x, footR.y, footRC, 2.25, sx, sy,
       mode === 'lehrer-ampel' ? packetDash('footR') : []);
     drawCircle(ctx, footR.x, footR.y, 5, mode === 'lehrer-ampel' ? footRC : COLOR_JOINT, sx, sy);
   }

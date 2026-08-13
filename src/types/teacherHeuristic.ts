@@ -144,11 +144,11 @@ export const HEURISTIC_DASH: Record<TeacherHeuristicState, number[]> = Object.fr
   heuristic_match:            [],
   heuristic_attention:        [],
   heuristic_strong_attention: [],
-  heuristic_match_uncertain:            [7, 4],
-  heuristic_attention_uncertain:        [7, 4],
-  heuristic_strong_attention_uncertain: [7, 4],
-  heuristic_review:           [7, 4],
-  blocked:                    [5, 4],
+  heuristic_match_uncertain:            [10, 7],
+  heuristic_attention_uncertain:        [10, 7],
+  heuristic_strong_attention_uncertain: [10, 7],
+  heuristic_review:           [10, 7],
+  blocked:                    [7, 6],
 });
 
 // ─── HELPER ─────────────────────────────────────────────────────────────────

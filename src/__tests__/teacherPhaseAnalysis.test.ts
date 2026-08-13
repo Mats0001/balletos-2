@@ -83,15 +83,24 @@ describe('teacher phase-based post analysis', () => {
     expect(packet.streamEpoch).toBe(91);
   });
 
-  it('classifies the phase corridor independently from evidence uncertainty', () => {
+  it('keeps the nearest phase colour and expresses temporal disagreement only as dashes', () => {
     const inside = summarizePhaseRegionStates([
       'heuristic_match', 'heuristic_match', 'heuristic_match',
     ]);
     const outside = summarizePhaseRegionStates([
       'heuristic_strong_attention', 'heuristic_strong_attention', 'heuristic_strong_attention',
     ]);
-    const overlap = summarizePhaseRegionStates([
-      'heuristic_match', 'heuristic_attention', 'heuristic_strong_attention',
+    const nearestGreen = summarizePhaseRegionStates([
+      'heuristic_match', 'heuristic_match', 'heuristic_attention',
+    ]);
+    const nearestYellow = summarizePhaseRegionStates([
+      'heuristic_attention', 'heuristic_attention', 'heuristic_strong_attention',
+    ]);
+    const nearestRed = summarizePhaseRegionStates([
+      'heuristic_strong_attention', 'heuristic_strong_attention', 'heuristic_attention',
+    ]);
+    const tie = summarizePhaseRegionStates([
+      'heuristic_match', 'heuristic_strong_attention',
     ]);
     const uncertainOutside = summarizePhaseRegionStates([
       'heuristic_strong_attention_uncertain',
@@ -101,10 +110,25 @@ describe('teacher phase-based post analysis', () => {
 
     expect(inside).toMatchObject({ state: 'heuristic_match', corridorResult: 'inside' });
     expect(outside).toMatchObject({ state: 'heuristic_strong_attention', corridorResult: 'outside' });
-    expect(overlap).toMatchObject({ state: 'heuristic_attention', corridorResult: 'overlap' });
+    expect(nearestGreen).toMatchObject({ state: 'heuristic_match_uncertain', corridorResult: 'inside' });
+    expect(nearestYellow).toMatchObject({ state: 'heuristic_attention_uncertain', corridorResult: 'overlap' });
+    expect(nearestRed).toMatchObject({ state: 'heuristic_strong_attention_uncertain', corridorResult: 'outside' });
+    expect(tie).toMatchObject({ state: 'heuristic_attention_uncertain', corridorResult: 'overlap' });
     expect(uncertainOutside).toMatchObject({
       state: 'heuristic_strong_attention_uncertain',
       corridorResult: 'outside',
+    });
+  });
+
+  it('ignores blocked samples as colour votes but keeps their evidence gap visible', () => {
+    const result = summarizePhaseRegionStates([
+      'heuristic_match', 'heuristic_match', 'blocked',
+    ]);
+
+    expect(result).toMatchObject({
+      state: 'heuristic_match_uncertain',
+      corridorResult: 'inside',
+      sampleCount: 2,
     });
   });
 

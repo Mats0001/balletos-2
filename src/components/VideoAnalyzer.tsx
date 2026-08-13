@@ -3023,9 +3023,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     Phasenbasierte Nachanalyse. Aufnahmefehler werden zuerst korrigiert, nicht farblich geraten.
                   </div>
                   <div style={{ marginTop: '5px', display: 'grid', gap: '2px', fontSize: '8px', lineHeight: 1.35 }}>
-                    <span><b style={{ color: '#30d158' }}>━━ Grün</b> · vollständig im Phasenkorridor</span>
-                    <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · Korridor überlappt die Grenze</span>
-                    <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · vollständig außerhalb</span>
+                    <span><b style={{ color: '#30d158' }}>━━ Grün</b> · nächste Phasenklasse: im Korridor</span>
+                    <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · nächste Phasenklasse: Grenzbereich</span>
+                    <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · nächste Phasenklasse: außerhalb</span>
                     <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>┄┄</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ┄┄</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ┄┄</b> · gleiche Farbe, Evidenz unsicher</span>
                   </div>
                 </button>
@@ -3357,7 +3357,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           );
                         })}
                         <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
-                          Farbe = Phasenurteil · gestrichelt = Evidenz unsicher. Erst nach vollständigem Scan.
+                          Farbe = dominante/nächste Phasenklasse · gestrichelt = Evidenz unsicher. Erst nach vollständigem Scan.
                         </div>
                       </>
                     )}

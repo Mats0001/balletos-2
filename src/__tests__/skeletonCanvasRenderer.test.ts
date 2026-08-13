@@ -31,17 +31,18 @@ const EXPECTED = {
   heuristic_match: { color: '#30d158', dash: [] },
   heuristic_attention: { color: '#ffd60a', dash: [] },
   heuristic_strong_attention: { color: '#ff453a', dash: [] },
-  heuristic_match_uncertain: { color: '#30d158', dash: [7, 4] },
-  heuristic_attention_uncertain: { color: '#ffd60a', dash: [7, 4] },
-  heuristic_strong_attention_uncertain: { color: '#ff453a', dash: [7, 4] },
-  heuristic_review: { color: '#ffd60a', dash: [7, 4] },
-  blocked: { color: '#ffd60a', dash: [5, 4] },
+  heuristic_match_uncertain: { color: '#30d158', dash: [10, 7] },
+  heuristic_attention_uncertain: { color: '#ffd60a', dash: [10, 7] },
+  heuristic_strong_attention_uncertain: { color: '#ff453a', dash: [10, 7] },
+  heuristic_review: { color: '#ffd60a', dash: [10, 7] },
+  blocked: { color: '#ffd60a', dash: [7, 6] },
 } satisfies Record<TeacherHeuristicState, { color: string; dash: number[] }>;
 
 interface StrokeRecord {
   color: string;
   alpha: number;
   dash: number[];
+  width: number;
 }
 
 function createRecordingCanvas(cssWidth = 1000) {
@@ -74,6 +75,7 @@ function createRecordingCanvas(cssWidth = 1000) {
         color: String(this.strokeStyle),
         alpha: this.globalAlpha,
         dash: [...currentDash],
+        width: this.lineWidth,
       });
     },
   };
@@ -311,6 +313,14 @@ describe('trusted skeleton color contract', () => {
       .filter(({ color }) => color === EXPECTED.heuristic_match.color);
 
     expect(trafficStrokes(0.05)).toEqual(trafficStrokes(0.99));
+  });
+
+  it('uses fine body strokes while keeping uncertain dashes visibly separated', () => {
+    const strokes = renderTeacherPacket(0.95);
+    const traffic = strokes.filter(({ color }) => color === EXPECTED.heuristic_match.color);
+
+    expect(Math.max(...traffic.map(({ width }) => width))).toBeLessThanOrEqual(3);
+    expect(EXPECTED.heuristic_match_uncertain.dash[1]).toBeGreaterThan(5);
   });
 
   it('renders a mismatched packet as neutral dashed geometry', () => {

@@ -10,7 +10,6 @@ import { PoseLandmark } from '../services/realMediaPipePose';
 import { FrameEntry } from '../services/frameInterpolator';
 import {
   createBlockedPacket,
-  heuristicBaseState,
   heuristicHasUncertainEvidence,
   TeacherHeuristicState,
   TeacherOverlayPacket,
@@ -312,7 +311,7 @@ describe('buildPausedTeacherOverlayEvidence', () => {
     expectOnlyReviewStates(result);
   });
 
-  it('keeps provisional lower-body and centre colours while marking their evidence uncertain', () => {
+  it('does not invent lower-body and centre colour votes from invisible geometry', () => {
     const input = validInput();
     const lowVisibilityIndices = [25, 26, 27, 28, 31, 32];
     input.frames = input.frames.map(frame => ({
@@ -327,8 +326,7 @@ describe('buildPausedTeacherOverlayEvidence', () => {
     const result = buildPausedTeacherOverlayEvidence(input);
 
     for (const key of ['legL', 'legR', 'footL', 'footR', 'cog'] as const) {
-      expect(heuristicBaseState(result[key])).not.toBeNull();
-      expect(heuristicHasUncertainEvidence(result[key])).toBe(true);
+      expect(result[key]).toBe('blocked');
     }
   });
 });

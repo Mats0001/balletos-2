@@ -12,10 +12,12 @@
 > **„Aufnahme korrigieren“**; das System rät dann keine Ampelfarbe. Nach
 > bestandenem Gate wird ein vollständiger Plié-Zyklus in Ausgangsposition,
 > Abwärtsbewegung, Tiefpunkt, Aufwärtsbewegung und Abschluss segmentiert. Die
-> Grundfarbe Grün/Gelb/Rot stammt aus dem Frame-Korridor der ganzen Phase:
-> vollständig im Kandidatenkorridor = Grün, Überlappung = Gelb, vollständig
-> außerhalb = Rot. Der Linienstil ist davon unabhängig: durchgezogen = stabile
-> Evidenz, gestrichelt = dieselbe Grundfarbe bei unsicherer Evidenz. Die Ampel
+> Grundfarbe Grün/Gelb/Rot stammt aus der dominanten, nächstliegenden
+> Ampelklasse aller auswertbaren Frames der Phase; ein echter Gleichstand wird
+> als Grenzbereich Gelb aufgelöst. Abweichende Frameklassen, Evidenzlücken oder
+> unsichere Eingangssignale färben nicht pauschal Gelb, sondern machen die
+> ermittelte Grundfarbe sichtbar gestrichelt. Durchgezogen bedeutet, dass alle
+> auswertbaren Frames dieselbe Grundklasse tragen. Die Ampel
 > wird aus der abgeschlossenen Nachanalyse bezogen, nicht aus einem zufälligen
 > Live-Einzelbild.
 >
@@ -153,7 +155,7 @@ Handlungsanweisung.
 
 Nach bestandenem Gate gilt orthogonal:
 
-- Farbe: Grün / Gelb / Rot = Phasenurteil.
+- Farbe: Grün / Gelb / Rot = dominante/nächstliegende Phasenklasse; Gleichstand = Gelb.
 - Linie: durchgezogen = stabile Evidenz; gestrichelt = unsichere Evidenz.
 
 Damit kann auch ein vorläufig grünes oder rotes Phasenurteil gestrichelt sein,
@@ -189,7 +191,7 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
 | `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Farbe und Evidenzunsicherheit sind getrennt |
-| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und phasenweite Grün-/Gelb-/Rot-Aggregation; Unsicherheit → dieselbe Farbe gestrichelt |
+| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und dominante/nächstliegende Grün-/Gelb-/Rot-Aggregation; Streuung oder Unsicherheit → dieselbe Farbe gestrichelt |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
@@ -205,6 +207,7 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 - [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
 - [x] Armfarben sind an sichtbare Position, Geometrie und Confidence gebunden
 - [x] Soft unsichere Evidenz → fachliches Grundurteil Grün/Gelb/Rot bleibt erhalten und wird gestrichelt
+- [x] Gemischte Frameklassen → dominante/nächstliegende Grundfarbe bleibt erhalten; kein pauschaler Gelb-Sammelzustand
 - [x] Hart gescheitertes Aufnahme-Gate → keine Ampel, sondern konkrete Aufforderung „Aufnahme korrigieren“
 - [x] Keine graue oder ausgelassene Region im Lehrer-Ampelmodus
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar

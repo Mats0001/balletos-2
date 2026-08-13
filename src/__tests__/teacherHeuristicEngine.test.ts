@@ -126,17 +126,17 @@ describe('TeacherHeuristicEngine evidence gates', () => {
     expect(complete.torsoAlignment).toBe('heuristic_match');
     expect(missingShoulder.spine).toBe('heuristic_match');
     expect(missingShoulder.pelvis).toBe('heuristic_match');
-    expect(missingShoulder.shoulder).toBe('heuristic_attention_uncertain');
-    expect(missingShoulder.torsoAlignment).toBe('heuristic_attention_uncertain');
+    expect(missingShoulder.shoulder).toBe('blocked');
+    expect(missingShoulder.torsoAlignment).toBe('heuristic_match_uncertain');
   });
 
   it.each([
-    ['NaN value', measurement(Number.NaN)],
-    ['infinite value', measurement(Number.POSITIVE_INFINITY)],
-    ['NaN confidence', measurement(1, Number.NaN)],
-    ['confidence above one', measurement(1, 1.1)],
-    ['negative confidence', measurement(1, -0.1)],
-  ])('blocks invalid numeric evidence: %s', (_label, invalid) => {
+    ['NaN value', measurement(Number.NaN), 'blocked'],
+    ['infinite value', measurement(Number.POSITIVE_INFINITY), 'blocked'],
+    ['NaN confidence', measurement(1, Number.NaN), 'heuristic_match_uncertain'],
+    ['confidence above one', measurement(1, 1.1), 'heuristic_match_uncertain'],
+    ['negative confidence', measurement(1, -0.1), 'heuristic_match_uncertain'],
+  ] as const)('keeps invalid numeric evidence fail-closed or visibly uncertain: %s', (_label, invalid, expected) => {
     const packet = engine.compute(
       analysis({ spineTilt: invalid }),
       skeleton,
@@ -144,19 +144,17 @@ describe('TeacherHeuristicEngine evidence gates', () => {
       1000,
     );
 
-    expect(heuristicBaseState(packet.spine)).not.toBeNull();
-    expect(heuristicHasUncertainEvidence(packet.spine)).toBe(true);
+    expect(packet.spine).toBe(expected);
     expect(heuristicBaseState(packet.torsoAlignment)).not.toBeNull();
     expect(heuristicHasUncertainEvidence(packet.torsoAlignment)).toBe(true);
   });
 
-  it('keeps a provisional base colour while marking missing foot and centre context as uncertain', () => {
+  it('does not inject yellow votes when foot context is uncertain or centre geometry is missing', () => {
     const packet = engine.compute(analysis(), skeleton, 1, 1000);
 
-    for (const state of [packet.footL, packet.footR, packet.cog]) {
-      expect(heuristicBaseState(state)).not.toBeNull();
-      expect(heuristicHasUncertainEvidence(state)).toBe(true);
-    }
+    expect(packet.footL).toBe('heuristic_strong_attention_uncertain');
+    expect(packet.footR).toBe('heuristic_strong_attention_uncertain');
+    expect(packet.cog).toBe('blocked');
   });
 
   it.each([24, -24])(
@@ -230,7 +228,6 @@ describe('TeacherHeuristicEngine evidence gates', () => {
       frontalPlieContext,
     );
 
-    expect(heuristicBaseState(packet.cog)).not.toBeNull();
-    expect(heuristicHasUncertainEvidence(packet.cog)).toBe(true);
+    expect(packet.cog).toBe('blocked');
   });
 });
