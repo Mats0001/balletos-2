@@ -4,11 +4,12 @@
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaFrameCache } from './vaganovaFrameCache';
 import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
-import type { CueReviewAudit, CueReviewContent, CueReviewEditablePatch, CueReviewExpectedState } from '../types/cueReviewAudit';
+import type { CueNicoleProClaimDecision, CueReviewAudit, CueReviewContent, CueReviewEditablePatch, CueReviewExpectedState } from '../types/cueReviewAudit';
 import {
   approveCueReviewAudit,
   canonicalJson,
   contentFromGroundedDraft,
+  createNicoleProStudentDerivation,
   createGroundedCueReviewAudit,
   createNicoleProCueReviewAudit,
   createLegacyCueReviewAudit,
@@ -17,6 +18,7 @@ import {
   nicoleProImmutableOriginKey,
   projectCueReviewAudit,
   rejectCueReviewAudit,
+  reviewNicoleProClaim,
   reopenCueReviewAudit,
   reviseCueReviewAudit,
   setCueReviewAudience,
@@ -612,6 +614,18 @@ export class VaganovaPreAnalyzerService {
     this.writeCuePoints(videoUrl, updated);
     return updated;
   }
+
+  public reviewNicoleProClaim(videoUrl: string, cueId: string, claimId: string, decision: CueNicoleProClaimDecision, editedText: string | undefined, selectedForStudentDerivation: boolean, expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = reviewAuditedNicoleProClaim(this.getCuePoints(videoUrl), cueId, claimId, decision, editedText, selectedForStudentDerivation, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
+
+  public deriveReviewedStudentCopy(videoUrl: string, cueId: string, selectedClaimReviewEventIds: readonly string[], expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = deriveAuditedNicoleProStudentCopy(this.getCuePoints(videoUrl), cueId, selectedClaimReviewEventIds, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
 }
 
 type AuditTransition = 'approve' | 'reject' | 'reopen';
@@ -656,6 +670,39 @@ export function setAuditedCueAudience(
   if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
   return points.map(point => point.id === cueId && point.reviewAudit
     ? projectAuditedCuePoint({ ...point, reviewAudit: setCueReviewAudience(point.reviewAudit, audience, visible, expected) })
+    : point);
+}
+
+export function reviewAuditedNicoleProClaim(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  claimId: string,
+  decision: CueNicoleProClaimDecision,
+  editedText: string | undefined,
+  selectedForStudentDerivation: boolean,
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({
+      ...point,
+      reviewAudit: reviewNicoleProClaim(point.reviewAudit, claimId, decision, editedText, selectedForStudentDerivation, expected),
+    })
+    : point);
+}
+
+export function deriveAuditedNicoleProStudentCopy(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  selectedClaimReviewEventIds: readonly string[],
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({
+      ...point,
+      reviewAudit: createNicoleProStudentDerivation(point.reviewAudit, selectedClaimReviewEventIds, expected),
+    })
     : point);
 }
 

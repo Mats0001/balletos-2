@@ -75,10 +75,46 @@ export type CueReviewAuditEventType =
   | 'approved'
   | 'rejected'
   | 'reopened'
+  | 'claim_reviewed'
+  | 'student_derivation_created'
   | 'audience_granted'
   | 'audience_revoked'
   | 'archived'
   | 'legacy_import';
+
+export type CueNicoleProClaimDecision = 'accepted' | 'edited' | 'rejected';
+
+/** Nicole's append-only decision about one immutable claim in the Pro origin. */
+export interface CueNicoleProClaimReview {
+  claimId: string;
+  decision: CueNicoleProClaimDecision;
+  editedText?: string;
+  selectedForStudentDerivation: boolean;
+}
+
+/** The only pedagogical fields that may cross the teacher/audience boundary. */
+export interface CueStudentDerivationContent {
+  poseName: string;
+  headline: string;
+  cueMetaphor: string;
+  goalText?: string;
+  practiceText?: string;
+}
+
+/** Versioned, digest-bound student copy derived from explicitly reviewed Pro claims. */
+export interface CueStudentDerivation {
+  schemaVersion: 1;
+  derivationId: string;
+  basedOnRevisionId: string;
+  basedOnRevisionDigest: string;
+  actorId: string;
+  createdAt: string;
+  claimReviewEventIds: readonly string[];
+  claimReviewSetDigest: string;
+  content: CueStudentDerivationContent;
+  digestAlgorithm: 'sha256-canonical-json-v1';
+  derivationDigest: string;
+}
 
 export interface CueReviewAuditEvent {
   eventId: string;
@@ -90,7 +126,10 @@ export interface CueReviewAuditEvent {
   revisionDigest: string;
   originId: string;
   audience?: CueAudience;
+  studentDerivationRef?: Readonly<{ derivationId: string; derivationDigest: string }>;
   reason?: 'superseded_by_revision' | 'teacher_action' | 'legacy_migration';
+  claimReview?: CueNicoleProClaimReview;
+  studentDerivation?: CueStudentDerivation;
   previousEventDigest: string | null;
   digestAlgorithm: 'sha256-canonical-json-v1';
   eventDigest: string;
@@ -134,7 +173,7 @@ export interface CueAudienceProjection {
 export interface CueReviewCommandContext {
   actorId: string;
   now: () => string;
-  createId: (prefix: 'record' | 'origin' | 'revision' | 'event') => string;
+  createId: (prefix: 'record' | 'origin' | 'revision' | 'event' | 'derivation') => string;
 }
 
 /** Optimistic concurrency token for the exact review state visible to Nicole. */

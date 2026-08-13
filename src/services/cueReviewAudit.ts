@@ -26,6 +26,10 @@ import type {
   CueReviewEditablePatch,
   CueReviewExpectedState,
   CueReviewProjection,
+  CueNicoleProClaimDecision,
+  CueNicoleProClaimReview,
+  CueStudentDerivation,
+  CueStudentDerivationContent,
   CueTeacherRevision,
   NicoleProAiOriginPayload,
 } from '../types/cueReviewAudit';
@@ -153,7 +157,7 @@ function event(
   revisionId: string,
   revisionDigest: string,
   context: CueReviewCommandContext,
-  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason'> = {},
+  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason' | 'claimReview' | 'studentDerivation' | 'studentDerivationRef'> = {},
   previousEvents: readonly CueReviewAuditEvent[] = [],
 ): CueReviewAuditEvent {
   const previousEventDigest = previousEvents.length > 0
@@ -473,6 +477,165 @@ function currentRevision(audit: CueReviewAudit): CueTeacherRevision {
   return revision;
 }
 
+const STUDENT_DERIVATION_CLAIM_TYPES = Object.freeze([
+  'visual_observation', 'teaching_target', 'immediate_cue',
+  'practice', 'success_criterion', 'metaphor',
+] as const satisfies readonly NicoleProClaimV1['type'][]);
+
+export function nicoleProClaimCanEnterStudentDerivation(claim: NicoleProClaimV1): boolean {
+  return claim.studentEligibility === 'candidate_after_nicole_approval'
+    && STUDENT_DERIVATION_CLAIM_TYPES.includes(
+      claim.type as typeof STUDENT_DERIVATION_CLAIM_TYPES[number],
+    );
+}
+
+function latestClaimReviewEvents(
+  audit: CueReviewAudit,
+  revisionId: string,
+  beforeEventSequence: number = Number.POSITIVE_INFINITY,
+): Map<string, CueReviewAuditEvent> {
+  const reviews = new Map<string, CueReviewAuditEvent>();
+  for (const auditEvent of audit.events) {
+    if (auditEvent.eventSequence >= beforeEventSequence) break;
+    if (auditEvent.revisionId === revisionId && auditEvent.type === 'claim_reviewed' && auditEvent.claimReview) {
+      reviews.set(auditEvent.claimReview.claimId, auditEvent);
+    }
+  }
+  return reviews;
+}
+
+function reviewedClaimText(claim: NicoleProClaimV1, review: CueNicoleProClaimReview): string | null {
+  if (review.decision === 'rejected') return null;
+  return review.decision === 'edited' ? review.editedText?.trim() || null : claim.text;
+}
+
+function deriveStudentContentFromClaimReviews(
+  audit: CueReviewAudit,
+  revision: CueTeacherRevision,
+  beforeEventSequence: number = Number.POSITIVE_INFINITY,
+  selectedReviewEventIds?: readonly string[],
+): Readonly<{ content: CueStudentDerivationContent; claimReviewEventIds: readonly string[] }> | null {
+  const draft = audit.origin.nicoleProPayload?.draft;
+  if (audit.origin.kind !== 'nicole_pro_draft' || !draft) return null;
+  const latestReviews = latestClaimReviewEvents(audit, revision.revisionId, beforeEventSequence);
+  const claimByType = new Map<NicoleProClaimV1['type'], string[]>();
+  const reviewEventIds: string[] = [];
+  const selectedIds = selectedReviewEventIds ? new Set(selectedReviewEventIds) : null;
+  for (const type of STUDENT_DERIVATION_CLAIM_TYPES) {
+    const candidates = draft.claims.filter(claim => (
+      claim.type === type && nicoleProClaimCanEnterStudentDerivation(claim)
+    ));
+    if (candidates.length === 0) return null;
+    const acceptedTexts: string[] = [];
+    for (const claim of candidates) {
+      const reviewEvent = latestReviews.get(claim.claimId);
+      if (!reviewEvent?.claimReview || !reviewEvent.claimReview.selectedForStudentDerivation
+        || (selectedIds && !selectedIds.has(reviewEvent.eventId))) continue;
+      reviewEventIds.push(reviewEvent.eventId);
+      const text = reviewedClaimText(claim, reviewEvent.claimReview);
+      if (text) acceptedTexts.push(text);
+    }
+    if (acceptedTexts.length === 0) return null;
+    if (acceptedTexts.length > 1) return null;
+    claimByType.set(type, acceptedTexts);
+  }
+  const join = (...types: NicoleProClaimV1['type'][]) => types
+    .flatMap(type => claimByType.get(type) ?? [])
+    .join(' ')
+    .trim();
+  const content = cloneFreeze({
+    poseName: audit.origin.originalContent.poseName,
+    headline: join('visual_observation'),
+    cueMetaphor: join('metaphor'),
+    goalText: join('teaching_target', 'immediate_cue', 'success_criterion'),
+    practiceText: join('practice'),
+  });
+  if (selectedIds && (selectedIds.size !== reviewEventIds.length
+    || reviewEventIds.some(id => !selectedIds.has(id)))) return null;
+  return cloneFreeze({ content, claimReviewEventIds: [...new Set(reviewEventIds)] });
+}
+
+function latestStudentDerivation(audit: CueReviewAudit, revisionId: string): CueStudentDerivation | null {
+  let latestClaimReviewSequence = 0;
+  for (const item of audit.events) {
+    if (item.revisionId === revisionId && item.type === 'claim_reviewed') {
+      latestClaimReviewSequence = item.eventSequence;
+    }
+  }
+  let derivation: CueStudentDerivation | null = null;
+  for (const item of audit.events) {
+    if (item.revisionId === revisionId && item.type === 'student_derivation_created'
+      && item.studentDerivation && item.eventSequence > latestClaimReviewSequence) {
+      derivation = item.studentDerivation;
+    }
+  }
+  return derivation;
+}
+
+function latestStudentDerivationEvent(audit: CueReviewAudit, revisionId: string): CueReviewAuditEvent | null {
+  const derivation = latestStudentDerivation(audit, revisionId);
+  if (!derivation) return null;
+  let matching: CueReviewAuditEvent | null = null;
+  for (const item of audit.events) {
+    if (item.revisionId === revisionId && item.type === 'student_derivation_created'
+      && item.studentDerivation?.derivationId === derivation.derivationId
+      && item.studentDerivation.derivationDigest === derivation.derivationDigest) matching = item;
+  }
+  return matching;
+}
+
+export interface NicoleProClaimReviewProjection {
+  claim: NicoleProClaimV1;
+  decision: CueNicoleProClaimDecision | null;
+  reviewedText: string | null;
+  eventId: string | null;
+  selectedForStudentDerivation: boolean;
+}
+
+export function projectNicoleProClaimReviews(audit: CueReviewAudit): readonly NicoleProClaimReviewProjection[] {
+  if (!cueReviewAuditIsValid(audit) || audit.origin.kind !== 'nicole_pro_draft'
+    || !audit.origin.nicoleProPayload) return Object.freeze([]);
+  const revision = currentRevision(audit);
+  const reviews = latestClaimReviewEvents(audit, revision.revisionId);
+  return cloneFreeze(audit.origin.nicoleProPayload.draft.claims.map(claim => {
+    const reviewEvent = reviews.get(claim.claimId);
+    return {
+      claim,
+      decision: reviewEvent?.claimReview?.decision ?? null,
+      reviewedText: reviewEvent?.claimReview ? reviewedClaimText(claim, reviewEvent.claimReview) : null,
+      eventId: reviewEvent?.eventId ?? null,
+      selectedForStudentDerivation: reviewEvent?.claimReview?.selectedForStudentDerivation ?? false,
+    };
+  }));
+}
+
+export function projectCurrentStudentDerivation(audit: CueReviewAudit): CueStudentDerivation | null {
+  if (!cueReviewAuditIsValid(audit)) return null;
+  return latestStudentDerivation(audit, audit.currentRevisionId);
+}
+
+export function nicoleProStudentDerivationReadiness(audit: CueReviewAudit): Readonly<{
+  ready: boolean;
+  reviewedRequiredClaims: number;
+  requiredClaims: number;
+}> {
+  if (!cueReviewAuditIsValid(audit) || audit.origin.kind !== 'nicole_pro_draft'
+    || !audit.origin.nicoleProPayload) {
+    return Object.freeze({ ready: false, reviewedRequiredClaims: 0, requiredClaims: 0 });
+  }
+  const revision = currentRevision(audit);
+  const required = audit.origin.nicoleProPayload.draft.claims.filter(claim => (
+    nicoleProClaimCanEnterStudentDerivation(claim)
+  ));
+  const reviews = latestClaimReviewEvents(audit, revision.revisionId);
+  const reviewed = required.filter(claim => reviews.get(claim.claimId)?.claimReview?.selectedForStudentDerivation).length;
+  return cloneFreeze({
+    ready: deriveStudentContentFromClaimReviews(audit, revision) !== null,
+    reviewedRequiredClaims: reviewed,
+    requiredClaims: required.length,
+  });
+}
+
 export function projectCueReviewAudit(audit: CueReviewAudit): CueReviewProjection {
   if (!cueReviewAuditIsValid(audit)) throw new Error('Cue review audit is invalid.');
   const revision = currentRevision(audit);
@@ -484,13 +647,25 @@ export function projectCueReviewAudit(audit: CueReviewAudit): CueReviewProjectio
   const isApproved = decision === 'approved' && !isArchived;
   const audienceVisible = (audience: CueAudience) => {
     if (!isApproved || !cueReviewContentIsAudienceEligible(audit, revision.content)) return false;
+    const currentDerivation = audit.origin.kind === 'nicole_pro_draft'
+      ? latestStudentDerivation(audit, revision.revisionId)
+      : null;
+    const currentDerivationEvent = audit.origin.kind === 'nicole_pro_draft'
+      ? latestStudentDerivationEvent(audit, revision.revisionId)
+      : null;
     const audienceEvents = audit.events.filter(item => item.revisionId === revision.revisionId
       && item.audience === audience
       && (item.type === 'audience_granted' || item.type === 'audience_revoked'));
     const latest = audienceEvents[audienceEvents.length - 1];
     return latest?.type === 'audience_granted'
       && latestDecision !== undefined
-      && latest.eventSequence > latestDecision.eventSequence;
+      && latest.eventSequence > latestDecision.eventSequence
+      && (audit.origin.kind !== 'nicole_pro_draft'
+        || (currentDerivation !== null
+          && currentDerivationEvent !== null
+          && latest.eventSequence > currentDerivationEvent.eventSequence
+          && latest.studentDerivationRef?.derivationId === currentDerivation.derivationId
+          && latest.studentDerivationRef?.derivationDigest === currentDerivation.derivationDigest));
   };
   return cloneFreeze({
     content: revision.content,
@@ -513,32 +688,42 @@ export function projectCueReviewForAudience(
   const projection = projectCueReviewAudit(audit);
   const allowed = audience === 'learner' ? projection.learnerVisible : projection.parentVisible;
   if (!allowed || !cueReviewContentIsAudienceEligible(audit, projection.content)) return null;
+  const derived = audit.origin.kind === 'nicole_pro_draft'
+    ? latestStudentDerivation(audit, audit.currentRevisionId)?.content ?? null
+    : null;
+  const outward = derived ?? audienceCopy(projection.content);
   return cloneFreeze({
     recordId: audit.recordId,
     revisionId: audit.currentRevisionId,
     audience,
-    poseName: projection.content.poseName,
-    headline: projection.content.headline,
-    cueMetaphor: projection.content.cueMetaphor,
-    goalText: projection.content.goalText,
-    practiceText: projection.content.practiceText,
+    ...outward,
   });
 }
 
 const FORBIDDEN_AUDIENCE_LANGUAGE = Object.freeze([
   /\bdiagnos(?:e|tisch|tiziert?)\w*/iu,
   /\bdifferentialdiagnos\w*/iu,
+  /\b[\p{L}-]*(?:sehne|kreuzband|seitenband|bandapparat|ligament|menisk|knorpel|gelenkkapsel|knochen)\w*\b/iu,
+  /\b[\p{L}-]*(?:muskel|muskulatur)\w*\b/iu,
+  /\bfaser(?:\s|-)?riss\w*\b/iu,
   /\b(?:verletz\w*|läsion\w*|syndrom\w*|patholog\w*|entzünd\w*|sehnenriss\w*)\b/iu,
+  /\b(?:kaputt\w*|beschädigt\w*|gebroch\w*|eingeriss\w*|angeriss\w*|geriss\w*|ruptur\w*|geschädigt\w*|erkrankt\w*|krank\w*|überlastet\w*|instabil\w*|schmerzt\w*)\b|\btut\s+weh\b/iu,
+  /\b(?:kreuzband\w*|seitenband\w*|bandapparat\w*|knorpel\w*|bandscheib\w*)\b[^\n.]{0,55}\b(?:geschädigt\w*|gerissen\w*|instabil\w*|überlastet\w*)\b/iu,
   /\b(?:schmerz\w*|gewebelast\w*|verletzungsrisik\w*|prognos\w*)\b/iu,
   /\b(?:psoas\w*|rotatorenmanschett\w*|tiefe\s+muskulatur|kraftdefizit\w*|muskelursache\w*)\b/iu,
   /\b(?:muskel\w*\s+(?:ist|sind|sei)\s+(?:geschwächt|verkürzt)|rein\s+muskulär)\b/iu,
+  /\b[\p{L}-]*(?:muskel|muskulatur)\w*\b[^\n.]{0,55}\b(?:zu\s+wenig\s+kraft|kraftmangel\w*|kraftdefizit\w*)\b/iu,
   /\b(?:skoliose\w*|menisk\w*|arthrose\w*|fraktur\w*|impingement\w*|luxation\w*|tendinopath\w*)\b/iu,
+  /\b(?:osteoporose\w*|arthritis\w*|bursitis\w*|rheuma\w*|erkrankung\w*|krankheit\w*)\b/iu,
+  /\b[\p{L}-]*(?:sehne|band|ligament|knorpel|menisk|knochen|gelenkkapsel)\w*\b[^\n.]{0,55}\b(?:geriss\w*|riss\w*|geschädigt\w*|entzündet\w*|überlastet\w*|instabil\w*|ruptur\w*|degeneriert\w*|krank\w*)\b/iu,
+  /\b[\p{L}-]*(?:muskel|muskulatur)\w*\b[^\n.]{0,55}\b(?:schwach\w*|geschwächt\w*|verkürzt\w*|zu\s+kurz|defizit\w*|ursäch\w*)\b/iu,
   /\b(?:gluteus\w*|adduktor\w*|abduktor\w*|quadrizeps\w*|hamstring\w*|ischiocrural\w*|hüftmuskulatur\w*)\b[^\n.]{0,45}\b(?:schwach\w*|verkürzt\w*|zu\s+kurz|defizit\w*|ursäch\w*)\b/iu,
+  /\b(?:bauchmuskel\w*|rückenmuskel\w*|wadenmuskel\w*|gesäßmuskel\w*|beckenboden\w*)\b[^\n.]{0,55}\b(?:schwach\w*|verkürzt\w*|zu\s+kurz|defizit\w*|ursäch\w*)\b/iu,
   /\b(?:immer|nie|garantiert|zweifelsfrei|eindeutig|100\s*%)\b/iu,
   /\b(?:ist|sind)\s+(?:die\s+)?ursache\b|\bverursach\w*\b|\bführt\s+(?:sicher\s+)?zu\b/iu,
 ]);
 
-export function cueReviewContentIsAudienceSafe(content: CueReviewContent): boolean {
+function studentCopyIsAudienceSafe(content: CueStudentDerivationContent): boolean {
   const externalCopy = [
     content.poseName,
     content.headline,
@@ -546,7 +731,14 @@ export function cueReviewContentIsAudienceSafe(content: CueReviewContent): boole
     content.goalText,
     content.practiceText,
   ].filter((value): value is string => typeof value === 'string').join('\n');
-  return !FORBIDDEN_AUDIENCE_LANGUAGE.some(pattern => pattern.test(externalCopy));
+  return externalCopy.length <= 4_500
+    && !/[<>]/u.test(externalCopy)
+    && !/[-+]?\d+(?:[.,]\d+)?\s?(?:°|%|kg|cm|mm|Nm|N|Grad|Prozent|Kilogramm|Zentimeter|Millimeter|Newton(?:meter)?)/iu.test(externalCopy)
+    && !FORBIDDEN_AUDIENCE_LANGUAGE.some(pattern => pattern.test(externalCopy));
+}
+
+export function cueReviewContentIsAudienceSafe(content: CueReviewContent): boolean {
+  return studentCopyIsAudienceSafe(audienceCopy(content));
 }
 
 function audienceCopy(content: CueReviewContent): Readonly<{
@@ -574,8 +766,12 @@ export function cueReviewContentIsAudienceEligible(
   audit: CueReviewAudit,
   content: CueReviewContent,
 ): boolean {
-  return audit.origin.integrity === 'verified_application_snapshot'
-    && (audit.origin.kind === 'grounded_ai_draft' || audit.origin.kind === 'nicole_pro_draft')
+  if (audit.origin.integrity !== 'verified_application_snapshot') return false;
+  if (audit.origin.kind === 'nicole_pro_draft') {
+    const derivation = latestStudentDerivation(audit, audit.currentRevisionId);
+    return derivation !== null && studentCopyIsAudienceSafe(derivation.content);
+  }
+  return audit.origin.kind === 'grounded_ai_draft'
     && canonicalJson(audienceCopy(content)) === canonicalJson(audienceCopy(audit.origin.originalContent))
     && cueReviewContentIsAudienceSafe(content);
 }
@@ -661,6 +857,116 @@ export const approveCueReviewAudit = (audit: CueReviewAudit, expected: CueReview
 export const rejectCueReviewAudit = (audit: CueReviewAudit, expected: CueReviewExpectedState, context?: CueReviewCommandContext) => appendDecision(audit, 'rejected', expected, context);
 export const reopenCueReviewAudit = (audit: CueReviewAudit, expected: CueReviewExpectedState, context?: CueReviewCommandContext) => appendDecision(audit, 'reopened', expected, context);
 
+export function reviewNicoleProClaim(
+  audit: CueReviewAudit,
+  claimId: string,
+  decision: CueNicoleProClaimDecision,
+  editedText: string | undefined,
+  selectedForStudentDerivation: boolean,
+  expected: CueReviewExpectedState,
+  context: CueReviewCommandContext = defaultCueReviewContext(),
+): CueReviewAudit {
+  assertExpectedState(audit, expected);
+  if (audit.events.some(item => item.type === 'archived')) throw new Error('Archived reviews cannot be changed.');
+  if (projectCueReviewAudit(audit).provenance === 'nicole_rejected') {
+    throw new Error('Reopen the rejected Nicole revision before reviewing claims.');
+  }
+  const draft = audit.origin.nicoleProPayload?.draft;
+  if (audit.origin.kind !== 'nicole_pro_draft' || !draft) {
+    throw new Error('Claim review is available only for Nicole-Pro origins.');
+  }
+  const claim = draft.claims.find(item => item.claimId === claimId);
+  if (!claim) throw new Error('Nicole-Pro claim is not part of the immutable origin.');
+  if (!['accepted', 'edited', 'rejected'].includes(decision)) throw new Error('Unknown claim-review decision.');
+  const normalizedText = editedText?.trim();
+  if (decision === 'edited' && (!normalizedText || normalizedText.length > 1_400)) {
+    throw new Error('An edited claim requires 1 to 1400 characters.');
+  }
+  if (decision !== 'edited' && editedText !== undefined) {
+    throw new Error('Only an edited claim may carry replacement text.');
+  }
+  if (selectedForStudentDerivation && claim.studentEligibility !== 'candidate_after_nicole_approval') {
+    throw new Error('Teacher-only claims cannot be selected for student derivation.');
+  }
+  if (selectedForStudentDerivation && !nicoleProClaimCanEnterStudentDerivation(claim)) {
+    throw new Error('This claim type is not allowed in the student derivation.');
+  }
+  if (selectedForStudentDerivation && decision === 'rejected') {
+    throw new Error('A rejected claim cannot be selected for student derivation.');
+  }
+  const revision = currentRevision(audit);
+  const latest = latestClaimReviewEvents(audit, revision.revisionId).get(claimId)?.claimReview;
+  const nextReview = cloneFreeze({
+    claimId,
+    decision,
+    ...(decision === 'edited' ? { editedText: normalizedText } : {}),
+    selectedForStudentDerivation,
+  }) as CueNicoleProClaimReview;
+  if (latest && canonicalJson(latest) === canonicalJson(nextReview)) return audit;
+  const nextEvents = [...audit.events];
+  for (const audience of ['learner', 'parent'] as CueAudience[]) {
+    nextEvents.push(event('audience_revoked', audit, revision.revisionId, revision.revisionDigest, context, {
+      audience, reason: 'teacher_action',
+    }, nextEvents));
+  }
+  nextEvents.push(event('claim_reviewed', audit, revision.revisionId, revision.revisionDigest, context, {
+    claimReview: nextReview,
+  }, nextEvents));
+  return cloneFreeze({ ...audit, events: nextEvents });
+}
+
+export function createNicoleProStudentDerivation(
+  audit: CueReviewAudit,
+  selectedClaimReviewEventIds: readonly string[],
+  expected: CueReviewExpectedState,
+  context: CueReviewCommandContext = defaultCueReviewContext(),
+): CueReviewAudit {
+  assertExpectedState(audit, expected);
+  const projection = projectCueReviewAudit(audit);
+  if (!projection.isApproved) throw new Error('Approve the current Nicole revision before deriving student copy.');
+  const revision = currentRevision(audit);
+  if (new Set(selectedClaimReviewEventIds).size !== selectedClaimReviewEventIds.length) {
+    throw new Error('Student-derivation claim selections must be unique.');
+  }
+  const derived = deriveStudentContentFromClaimReviews(audit, revision, Number.POSITIVE_INFINITY, selectedClaimReviewEventIds);
+  if (!derived) {
+    throw new Error('Review the student-eligible finding, target, cue, practice, success and metaphor claims first.');
+  }
+  if (!studentCopyIsAudienceSafe(derived.content)) {
+    throw new Error('The reviewed claims are not safe for student or parent output.');
+  }
+  const existing = latestStudentDerivation(audit, revision.revisionId);
+  if (existing && canonicalJson(existing.content) === canonicalJson(derived.content)
+    && canonicalJson(existing.claimReviewEventIds) === canonicalJson(derived.claimReviewEventIds)) return audit;
+  const derivationCore = cloneFreeze({
+    schemaVersion: 1 as const,
+    derivationId: context.createId('derivation'),
+    basedOnRevisionId: revision.revisionId,
+    basedOnRevisionDigest: revision.revisionDigest,
+    actorId: context.actorId,
+    createdAt: context.now(),
+    claimReviewEventIds: derived.claimReviewEventIds,
+    claimReviewSetDigest: sha256Canonical(derived.claimReviewEventIds),
+    content: derived.content,
+    digestAlgorithm: DIGEST_ALGORITHM,
+  });
+  const studentDerivation = cloneFreeze({
+    ...derivationCore,
+    derivationDigest: sha256Canonical(derivationCore),
+  });
+  const derivationEventContext: CueReviewCommandContext = {
+    ...context,
+    now: () => studentDerivation.createdAt,
+  };
+  return cloneFreeze({
+    ...audit,
+    events: [...audit.events, event(
+      'student_derivation_created', audit, revision.revisionId, revision.revisionDigest,
+      derivationEventContext, { studentDerivation }, audit.events,
+    )],
+  });
+}
+
 export function setCueReviewAudience(
   audit: CueReviewAudit,
   audience: CueAudience,
@@ -672,13 +978,22 @@ export function setCueReviewAudience(
   const projection = projectCueReviewAudit(audit);
   if (!projection.isApproved && visible) throw new Error('Only an approved current revision can be published.');
   if (visible && !cueReviewContentIsAudienceEligible(audit, projection.content)) {
-    throw new Error('The current teacher revision requires a separate safe student derivation before publication.');
+    throw new Error('Create a reviewed, safe student derivation before publication.');
   }
   const revision = currentRevision(audit);
+  const currentDerivation = audit.origin.kind === 'nicole_pro_draft'
+    ? latestStudentDerivation(audit, revision.revisionId)
+    : null;
   return cloneFreeze({
     ...audit,
     events: [...audit.events, event(visible ? 'audience_granted' : 'audience_revoked', audit, revision.revisionId, revision.revisionDigest, context, {
       audience, reason: 'teacher_action',
+      ...(visible && currentDerivation ? {
+        studentDerivationRef: {
+          derivationId: currentDerivation.derivationId,
+          derivationDigest: currentDerivation.derivationDigest,
+        },
+      } : {}),
     }, audit.events)],
   });
 }
@@ -756,6 +1071,10 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   if (candidate.revisions.length === 0 || candidate.currentRevisionId !== candidate.revisions[candidate.revisions.length - 1].revisionId) return false;
   if (new Set(candidate.revisions.map(item => item.revisionId)).size !== candidate.revisions.length
     || new Set(candidate.events.map(item => item.eventId)).size !== candidate.events.length) return false;
+  const derivationIds = candidate.events
+    .filter(item => item.type === 'student_derivation_created' && item.studentDerivation)
+    .map(item => item.studentDerivation!.derivationId);
+  if (new Set(derivationIds).size !== derivationIds.length) return false;
   const statuses = new Set(['GOOD', 'CORRECTION', 'WARNING', 'NEUTRAL']);
   const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
   const contentIsValid = (content: unknown): content is CueReviewContent => {
@@ -797,6 +1116,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     && revision.contentVersion === index + 1
     && revision.contentSchemaVersion === 1
     && typeof revision.revisionId === 'string' && typeof revision.actorId === 'string' && typeof revision.createdAt === 'string'
+    && (() => { try { return new Date(revision.createdAt).toISOString() === revision.createdAt; } catch { return false; } })()
     && contentIsValid(revision.content)
     && revision.digestAlgorithm === DIGEST_ALGORITHM
     && revision.contentDigest === sha256Canonical(revision.content)
@@ -806,15 +1126,100 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   if (!revisionsValid) return false;
   const revisionIds = new Set(candidate.revisions.map(revision => revision.revisionId));
   const eventTypes = new Set([
-    'revision_created', 'approved', 'rejected', 'reopened', 'audience_granted',
+    'revision_created', 'approved', 'rejected', 'reopened', 'claim_reviewed',
+    'student_derivation_created', 'audience_granted',
     'audience_revoked', 'archived', 'legacy_import',
   ]);
   const structurallyValid = candidate.events.every((auditEvent, index) => {
     const { eventDigest: _eventDigest, digestAlgorithm: _digestAlgorithm, ...eventCore } = auditEvent;
     const audienceEvent = auditEvent.type === 'audience_granted' || auditEvent.type === 'audience_revoked';
+    const claimReviewEvent = auditEvent.type === 'claim_reviewed';
+    const studentDerivationEvent = auditEvent.type === 'student_derivation_created';
+    const claimReview = auditEvent.claimReview;
+    const studentDerivation = auditEvent.studentDerivation;
+    const claimReviewValid = !claimReviewEvent ? claimReview === undefined : (
+      candidate.origin.kind === 'nicole_pro_draft'
+      && claimReview !== undefined
+      && Object.keys(claimReview).every(key => ['claimId', 'decision', 'editedText', 'selectedForStudentDerivation'].includes(key))
+      && typeof claimReview.claimId === 'string'
+      && candidate.origin.nicoleProPayload?.draft.claims.some(claim => claim.claimId === claimReview.claimId)
+      && ['accepted', 'edited', 'rejected'].includes(claimReview.decision)
+      && typeof claimReview.selectedForStudentDerivation === 'boolean'
+      && (!claimReview.selectedForStudentDerivation
+        || (candidate.origin.nicoleProPayload?.draft.claims.some(claim => claim.claimId === claimReview.claimId
+          && nicoleProClaimCanEnterStudentDerivation(claim))
+          && claimReview.decision !== 'rejected'))
+      && (claimReview.decision === 'edited'
+        ? typeof claimReview.editedText === 'string' && claimReview.editedText.trim() === claimReview.editedText
+          && claimReview.editedText.length > 0 && claimReview.editedText.length <= 1_400
+        : claimReview.editedText === undefined)
+    );
+    const studentContentValid = studentDerivation?.content
+      && typeof studentDerivation.content.poseName === 'string'
+      && typeof studentDerivation.content.headline === 'string'
+      && typeof studentDerivation.content.cueMetaphor === 'string'
+      && optionalString(studentDerivation.content.goalText)
+      && optionalString(studentDerivation.content.practiceText)
+      && studentCopyIsAudienceSafe(studentDerivation.content);
+    const studentDerivationValid = !studentDerivationEvent ? studentDerivation === undefined : (
+      studentDerivation !== undefined
+      && Object.keys(studentDerivation).every(key => [
+        'schemaVersion', 'derivationId', 'basedOnRevisionId', 'basedOnRevisionDigest', 'actorId', 'createdAt',
+        'claimReviewEventIds', 'claimReviewSetDigest', 'content', 'digestAlgorithm', 'derivationDigest',
+      ].includes(key))
+      && studentDerivation.schemaVersion === 1
+      && typeof studentDerivation.derivationId === 'string'
+      && studentDerivation.basedOnRevisionId === auditEvent.revisionId
+      && studentDerivation.basedOnRevisionDigest === auditEvent.revisionDigest
+      && typeof studentDerivation.actorId === 'string'
+      && typeof studentDerivation.createdAt === 'string'
+      && Array.isArray(studentDerivation.claimReviewEventIds)
+      && studentDerivation.claimReviewEventIds.length > 0
+      && studentDerivation.claimReviewEventIds.every((item: string) => typeof item === 'string')
+      && new Set(studentDerivation.claimReviewEventIds).size === studentDerivation.claimReviewEventIds.length
+      && studentDerivation.claimReviewSetDigest === sha256Canonical(studentDerivation.claimReviewEventIds)
+      && studentContentValid
+      && studentDerivation.digestAlgorithm === DIGEST_ALGORITHM
+      && studentDerivation.derivationDigest === sha256Canonical(Object.fromEntries(
+        Object.entries(studentDerivation).filter(([key]) => key !== 'derivationDigest'),
+      ))
+    );
+    const baseEventKeys = [
+      'eventId', 'eventSequence', 'type', 'actorId', 'at', 'revisionId', 'revisionDigest',
+      'originId', 'previousEventDigest', 'digestAlgorithm', 'eventDigest',
+    ];
+    const allowedExtraKeys = audienceEvent
+      ? ['audience', 'reason', ...(auditEvent.type === 'audience_granted' && candidate.origin.kind === 'nicole_pro_draft'
+        ? ['studentDerivationRef'] : [])]
+      : claimReviewEvent ? ['claimReview']
+        : studentDerivationEvent ? ['studentDerivation']
+          : auditEvent.type === 'legacy_import' ? ['reason'] : [];
+    const exactEventShape = Object.keys(auditEvent).every(key => [...baseEventKeys, ...allowedExtraKeys].includes(key));
+    const canonicalIso = (value: string) => {
+      try { return new Date(value).toISOString() === value; } catch { return false; }
+    };
     return eventTypes.has(auditEvent.type)
+      && exactEventShape
       && typeof auditEvent.eventId === 'string' && typeof auditEvent.actorId === 'string' && typeof auditEvent.at === 'string'
+      && canonicalIso(auditEvent.at)
+      && (audienceEvent
+        ? auditEvent.reason === 'teacher_action' || auditEvent.reason === 'superseded_by_revision'
+        : auditEvent.type === 'legacy_import'
+          ? auditEvent.reason === 'legacy_migration'
+          : auditEvent.reason === undefined)
       && (audienceEvent ? auditEvent.audience === 'learner' || auditEvent.audience === 'parent' : auditEvent.audience === undefined)
+      && (auditEvent.type === 'audience_granted' && candidate.origin.kind === 'nicole_pro_draft'
+        ? auditEvent.studentDerivationRef === undefined || (
+          Object.keys(auditEvent.studentDerivationRef).every(key => ['derivationId', 'derivationDigest'].includes(key))
+          && typeof auditEvent.studentDerivationRef.derivationId === 'string'
+          && typeof auditEvent.studentDerivationRef.derivationDigest === 'string')
+        : auditEvent.studentDerivationRef === undefined)
+      && claimReviewValid
+      && studentDerivationValid
+      && (!studentDerivationEvent || (
+        studentDerivation!.actorId === auditEvent.actorId
+        && studentDerivation!.createdAt === auditEvent.at
+      ))
       && auditEvent.eventSequence === index + 1
       && auditEvent.originId === candidate.origin.originId
       && revisionIds.has(auditEvent.revisionId)
@@ -825,14 +1230,31 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   });
   if (!structurallyValid) return false;
 
+  for (const auditEvent of candidate.events) {
+    if (auditEvent.type !== 'student_derivation_created' || !auditEvent.studentDerivation) continue;
+    const revision = candidate.revisions.find(item => item.revisionId === auditEvent.revisionId);
+    if (!revision) return false;
+    const expectedDerivation = deriveStudentContentFromClaimReviews(
+      candidate, revision, auditEvent.eventSequence, auditEvent.studentDerivation.claimReviewEventIds,
+    );
+    if (!expectedDerivation
+      || canonicalJson(expectedDerivation.content) !== canonicalJson(auditEvent.studentDerivation.content)
+      || canonicalJson(expectedDerivation.claimReviewEventIds) !== canonicalJson(auditEvent.studentDerivation.claimReviewEventIds)) return false;
+  }
+
   const created = new Set<string>();
   const state = new Map<string, 'pending' | 'approved' | 'rejected'>();
+  const latestClaimReview = new Map<string, number>();
+  const latestStudentDerivationSequence = new Map<string, number>();
+  const latestStudentDerivationValue = new Map<string, CueStudentDerivation>();
   let archived = false;
+  let activeRevisionId: string | null = null;
   for (const auditEvent of candidate.events) {
     if (archived && auditEvent.type !== 'audience_revoked') return false;
     if (auditEvent.type === 'revision_created') {
       if (created.has(auditEvent.revisionId)) return false;
-      created.add(auditEvent.revisionId); state.set(auditEvent.revisionId, 'pending'); continue;
+      created.add(auditEvent.revisionId); state.set(auditEvent.revisionId, 'pending');
+      activeRevisionId = auditEvent.revisionId; continue;
     }
     if (!created.has(auditEvent.revisionId)) return false;
     const current = state.get(auditEvent.revisionId);
@@ -845,7 +1267,24 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     } else if (auditEvent.type === 'reopened') {
       if (current !== 'approved' && current !== 'rejected') return false;
       state.set(auditEvent.revisionId, 'pending');
-    } else if (auditEvent.type === 'audience_granted' && current !== 'approved') return false;
+    } else if (auditEvent.type === 'claim_reviewed') {
+      if (auditEvent.revisionId !== activeRevisionId || current === 'rejected') return false;
+      latestClaimReview.set(auditEvent.revisionId, auditEvent.eventSequence);
+    } else if (auditEvent.type === 'student_derivation_created') {
+      if (auditEvent.revisionId !== activeRevisionId || current !== 'approved') return false;
+      latestStudentDerivationSequence.set(auditEvent.revisionId, auditEvent.eventSequence);
+      latestStudentDerivationValue.set(auditEvent.revisionId, auditEvent.studentDerivation!);
+    } else if (auditEvent.type === 'audience_granted') {
+      if (current !== 'approved') return false;
+      const derivation = latestStudentDerivationValue.get(auditEvent.revisionId);
+      if (candidate.origin.kind === 'nicole_pro_draft') {
+        if (!derivation) return false;
+        if ((latestStudentDerivationSequence.get(auditEvent.revisionId) ?? 0)
+          <= (latestClaimReview.get(auditEvent.revisionId) ?? 0)) return false;
+        if (auditEvent.studentDerivationRef?.derivationId !== derivation.derivationId
+          || auditEvent.studentDerivationRef?.derivationDigest !== derivation.derivationDigest) return false;
+      }
+    }
     else if (auditEvent.type === 'archived') {
       if (archived) return false;
       archived = true;

@@ -50,8 +50,16 @@ import {
   resolveSkeletonTargetAnchor,
 } from '../services/skeletonTargetRegistry';
 import type { GroundedMetricAdapterId, SelectedSkeletonTarget, SkeletonTargetFocusId, SkeletonTargetId } from '../types/skeletonTarget';
-import { cueReviewAuditIsValid, cueReviewExpectedState, projectCueReviewAudit } from '../services/cueReviewAudit';
-import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
+import {
+  cueReviewAuditIsValid,
+  cueReviewExpectedState,
+  projectCueReviewAudit,
+  projectCurrentStudentDerivation,
+  projectNicoleProClaimReviews,
+  nicoleProStudentDerivationReadiness,
+  nicoleProClaimCanEnterStudentDerivation,
+} from '../services/cueReviewAudit';
+import type { CueNicoleProClaimDecision, CueReviewEditablePatch } from '../types/cueReviewAudit';
 import {
   getNicoleReferenceLine,
   loadNicoleReferenceLines,
@@ -455,6 +463,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
+  const [claimEditState, setClaimEditState] = useState<Readonly<{
+    cueId: string;
+    claimId: string;
+    text: string;
+  }> | null>(null);
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
   const [summaryOpen, setSummaryOpen] = useState<boolean>(true);
   const [summaryTab, setSummaryTab] = useState<number>(0);
@@ -2516,6 +2529,51 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     } catch (error) {
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
       showAnalyseToast(error instanceof Error ? error.message : 'Freigabe konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleNicoleProClaimReview = (
+    cueId: string,
+    claimId: string,
+    decision: CueNicoleProClaimDecision,
+    editedText?: string,
+    selectedForStudentDerivation: boolean = false,
+  ) => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.reviewNicoleProClaim(
+        selectedDevVideoUrl,
+        cueId,
+        claimId,
+        decision,
+        editedText,
+        selectedForStudentDerivation,
+        cueReviewExpectedState(cue.reviewAudit),
+      ));
+      setClaimEditState(null);
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Claim-Prüfung konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleDeriveNicoleProStudentCopy = (cueId: string) => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.deriveReviewedStudentCopy(
+        selectedDevVideoUrl,
+        cueId,
+        projectNicoleProClaimReviews(cue.reviewAudit)
+          .filter(item => item.eventId && nicoleProClaimCanEnterStudentDerivation(item.claim)
+            && item.decision !== 'rejected' && item.selectedForStudentDerivation)
+          .map(item => item.eventId!),
+        cueReviewExpectedState(cue.reviewAudit),
+      ));
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Schülerfassung konnte nicht abgeleitet werden.');
     }
   };
 
@@ -4943,6 +5001,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               const nicoleProOrigin = cue.reviewAudit?.origin.kind === 'nicole_pro_draft'
                 ? cue.reviewAudit.origin.nicoleProPayload
                 : null;
+              const nicoleProClaimReviews = cue.reviewAudit && nicoleProOrigin
+                ? projectNicoleProClaimReviews(cue.reviewAudit)
+                : [];
+              const currentStudentDerivation = cue.reviewAudit && nicoleProOrigin
+                ? projectCurrentStudentDerivation(cue.reviewAudit)
+                : null;
+              const studentDerivationReadiness = cue.reviewAudit && nicoleProOrigin
+                ? nicoleProStudentDerivationReadiness(cue.reviewAudit)
+                : null;
+              const audienceNeedsStudentDerivation = Boolean(auditProjection && nicoleProOrigin && !currentStudentDerivation);
 
               if (isEditing) {
                 return (
@@ -5414,6 +5482,80 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           Wissensbasis {nicoleProOrigin.knowledgeRegistryId}@{nicoleProOrigin.knowledgeRegistryVersion} · {nicoleProOrigin.ruleVersions.map(rule => `${rule.ruleId}@${rule.version}`).join(' · ')}
                         </div>
                       )}
+                      {nicoleProOrigin && (
+                        <details style={{ background: 'rgba(0,0,0,0.18)', borderRadius: '7px', padding: '6px 7px' }}>
+                          <summary style={{ cursor: 'pointer', fontSize: '9px', color: 'rgba(255,255,255,0.72)', fontWeight: 800 }}>
+                            Pro-Claims einzeln prüfen · {nicoleProClaimReviews.filter(item => item.decision).length}/{nicoleProClaimReviews.length}
+                          </summary>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '7px' }}>
+                            {nicoleProClaimReviews.map(item => {
+                              const editingClaim = claimEditState?.cueId === cue.id && claimEditState.claimId === item.claim.claimId;
+                              const isStudentCandidate = nicoleProClaimCanEnterStudentDerivation(item.claim);
+                              const typeLabel = item.claim.type === 'teacher_hypothesis'
+                                ? 'Mögliche Erklärung · intern'
+                                : item.claim.type === 'differentiation_test'
+                                  ? 'Lehrertest · intern'
+                                  : item.claim.type.replace(/_/g, ' ');
+                              return (
+                                <div key={item.claim.claimId} style={{ borderLeft: `2px solid ${item.decision === 'accepted' ? '#30d158' : item.decision === 'edited' ? '#64d2ff' : item.decision === 'rejected' ? '#ff453a' : 'rgba(255,255,255,0.16)'}`, paddingLeft: '7px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                  <div style={{ fontSize: '8px', color: isStudentCandidate ? 'rgba(100,210,255,0.8)' : 'rgba(255,255,255,0.42)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.35px' }}>{typeLabel}</div>
+                                  {editingClaim ? (
+                                    <textarea
+                                      value={claimEditState.text}
+                                      onChange={event => setClaimEditState({ ...claimEditState, text: event.target.value })}
+                                      onClick={event => event.stopPropagation()}
+                                      style={{ width: '100%', minHeight: '64px', resize: 'vertical', boxSizing: 'border-box', background: 'rgba(0,0,0,0.32)', border: '1px solid rgba(100,210,255,0.35)', color: '#fff', borderRadius: '6px', padding: '6px', fontSize: '10px', lineHeight: 1.45 }}
+                                    />
+                                  ) : (
+                                    <div style={{ fontSize: '10px', color: item.decision === 'rejected' ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.82)', lineHeight: 1.45 }}>{item.reviewedText ?? item.claim.text}</div>
+                                  )}
+                                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                    {editingClaim ? (
+                                      <>
+                                        <button onClick={(event) => { event.stopPropagation(); handleNicoleProClaimReview(cue.id, item.claim.claimId, 'edited', claimEditState.text, item.selectedForStudentDerivation); }} style={{ background: 'rgba(100,210,255,0.14)', border: '1px solid rgba(100,210,255,0.35)', color: '#64d2ff', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Änderung speichern</button>
+                                        <button onClick={(event) => { event.stopPropagation(); setClaimEditState(null); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.55)', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Abbrechen</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button onClick={(event) => { event.stopPropagation(); handleNicoleProClaimReview(cue.id, item.claim.claimId, 'accepted', undefined, item.selectedForStudentDerivation); }} style={{ background: item.decision === 'accepted' ? 'rgba(48,209,88,0.18)' : 'transparent', border: '1px solid rgba(48,209,88,0.35)', color: '#30d158', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Akzeptieren</button>
+                                        <button onClick={(event) => { event.stopPropagation(); setClaimEditState({ cueId: cue.id, claimId: item.claim.claimId, text: item.reviewedText ?? item.claim.text }); }} style={{ background: item.decision === 'edited' ? 'rgba(100,210,255,0.14)' : 'transparent', border: '1px solid rgba(100,210,255,0.3)', color: '#64d2ff', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Bearbeiten</button>
+                                        <button onClick={(event) => { event.stopPropagation(); handleNicoleProClaimReview(cue.id, item.claim.claimId, 'rejected'); }} style={{ background: item.decision === 'rejected' ? 'rgba(255,69,58,0.12)' : 'transparent', border: '1px solid rgba(255,69,58,0.28)', color: '#ff453a', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Verwerfen</button>
+                                        {isStudentCandidate && item.decision && item.decision !== 'rejected' && (
+                                          <button onClick={(event) => { event.stopPropagation(); handleNicoleProClaimReview(cue.id, item.claim.claimId, item.decision!, item.decision === 'edited' ? item.reviewedText ?? undefined : undefined, !item.selectedForStudentDerivation); }} style={{ background: item.selectedForStudentDerivation ? 'rgba(192,132,252,0.18)' : 'transparent', border: '1px solid rgba(192,132,252,0.32)', color: '#c084fc', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>{item.selectedForStudentDerivation ? '✓ Schülerfassung' : '+ Schülerfassung'}</button>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
+                      {nicoleProOrigin && auditProjection.isApproved && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', background: 'rgba(192,132,252,0.055)', border: '1px solid rgba(192,132,252,0.18)', borderRadius: '7px', padding: '6px 7px' }}>
+                          <div style={{ fontSize: '9px', color: '#c084fc', fontWeight: 900 }}>Schülerfassung · separat</div>
+                          <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.55)', lineHeight: 1.4 }}>
+                            {currentStudentDerivation
+                              ? 'Aktuelle sichere Fassung vorhanden. Jede Claim-Änderung widerruft ihre Freigabe.'
+                              : `${studentDerivationReadiness?.reviewedRequiredClaims ?? 0}/${studentDerivationReadiness?.requiredClaims ?? 0} notwendige Claims ausdrücklich ausgewählt.`}
+                          </div>
+                          {currentStudentDerivation && (
+                            <details>
+                              <summary style={{ cursor: 'pointer', fontSize: '9px', color: 'rgba(255,255,255,0.64)', fontWeight: 800 }}>Schülerfassung ansehen</summary>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '5px', fontSize: '10px', lineHeight: 1.45, color: 'rgba(255,255,255,0.76)' }}>
+                                <strong>{currentStudentDerivation.content.headline}</strong>
+                                <span>{currentStudentDerivation.content.goalText}</span>
+                                <span>{currentStudentDerivation.content.practiceText}</span>
+                                <em>{currentStudentDerivation.content.cueMetaphor}</em>
+                              </div>
+                            </details>
+                          )}
+                          {!currentStudentDerivation && (
+                            <button disabled={!studentDerivationReadiness?.ready} onClick={(event) => { event.stopPropagation(); handleDeriveNicoleProStudentCopy(cue.id); }} style={{ alignSelf: 'flex-start', background: studentDerivationReadiness?.ready ? 'rgba(192,132,252,0.18)' : 'rgba(255,255,255,0.04)', border: `1px solid ${studentDerivationReadiness?.ready ? 'rgba(192,132,252,0.4)' : 'rgba(255,255,255,0.12)'}`, color: studentDerivationReadiness?.ready ? '#c084fc' : 'rgba(255,255,255,0.3)', borderRadius: '5px', padding: '4px 8px', fontSize: '9px', fontWeight: 800, cursor: studentDerivationReadiness?.ready ? 'pointer' : 'not-allowed' }}>Sichere Schülerfassung erzeugen</button>
+                          )}
+                        </div>
+                      )}
                       {auditProjection.provenance === 'nicole_rejected' ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
                           <span style={{ fontSize: '8px', color: '#ff453a', fontWeight: 800 }}>Von Nicole abgelehnt</span>
@@ -5438,12 +5580,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   {((cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (!auditProjection || auditProjection.isApproved)) && (
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Bestätigt</span>
-                      <button onClick={(e) => { e.stopPropagation(); auditProjection ? handleReviewedAudience(cue.id, 'learner', !cue.learnerVisible) : persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
-                        style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
-                      >{cue.learnerVisible ? '👁 Lernende: an' : '👁 Für Lernende'}</button>
-                      <button onClick={(e) => { e.stopPropagation(); auditProjection ? handleReviewedAudience(cue.id, 'parent', !cue.parentVisible) : persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
-                        style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: 'pointer' }}
-                      >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : '👨‍👩‍👧 Für Eltern'}</button>
+                      <button disabled={audienceNeedsStudentDerivation} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceNeedsStudentDerivation) return; auditProjection ? handleReviewedAudience(cue.id, 'learner', !cue.learnerVisible) : persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
+                        style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceNeedsStudentDerivation ? 'not-allowed' : 'pointer', opacity: audienceNeedsStudentDerivation ? 0.55 : 1 }}
+                      >{cue.learnerVisible ? '👁 Lernende: an' : audienceNeedsStudentDerivation ? '👁 Schülerfassung zuerst' : '👁 Für Lernende'}</button>
+                      <button disabled={audienceNeedsStudentDerivation} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceNeedsStudentDerivation) return; auditProjection ? handleReviewedAudience(cue.id, 'parent', !cue.parentVisible) : persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
+                        style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceNeedsStudentDerivation ? 'not-allowed' : 'pointer', opacity: audienceNeedsStudentDerivation ? 0.55 : 1 }}
+                      >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : audienceNeedsStudentDerivation ? '👨‍👩‍👧 Schülerfassung zuerst' : '👨‍👩‍👧 Für Eltern'}</button>
                     </div>
                   )}
 

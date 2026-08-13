@@ -14,6 +14,8 @@ import {
   approveCueReviewAudit,
   contentFromGroundedDraft,
   createGroundedCueReviewAudit,
+  projectCurrentStudentDerivation,
+  projectNicoleProClaimReviews,
   setCueReviewAudience,
 } from '../services/cueReviewAudit';
 import { cueReviewExpectedState } from '../services/cueReviewAudit';
@@ -351,6 +353,44 @@ describe('audited cue persistence guard', () => {
     expect(first[0].reviewAudit?.origin.nicoleProPayload?.draft).toEqual(proDraft);
     expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual(first);
   });
+
+  it('persists append-only claim reviews and a separate derived student copy', () => {
+    installMemoryStorage();
+    const fixture = nicoleProFixture();
+    let [point] = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, fixture.proDraft, target,
+      fixture.currentContext, 'ready', 'Plié – Tiefpunkt',
+    );
+    const outwardTypes = new Set([
+      'visual_observation', 'teaching_target', 'immediate_cue',
+      'practice', 'success_criterion', 'metaphor',
+    ]);
+    for (const claim of fixture.proDraft.claims) {
+      if (!outwardTypes.has(claim.type)) continue;
+      [point] = vaganovaPreAnalyzer.reviewNicoleProClaim(
+        target.sourceId, point.id, claim.claimId, 'accepted', undefined, true,
+        cueReviewExpectedState(point.reviewAudit!),
+      );
+    }
+    [point] = vaganovaPreAnalyzer.transitionReviewedCue(
+      target.sourceId, point.id, 'approve', cueReviewExpectedState(point.reviewAudit!),
+    );
+    const reviewIds = projectNicoleProClaimReviews(point.reviewAudit!)
+      .filter(item => item.selectedForStudentDerivation && item.eventId)
+      .map(item => item.eventId!);
+    [point] = vaganovaPreAnalyzer.deriveReviewedStudentCopy(
+      target.sourceId, point.id, reviewIds, cueReviewExpectedState(point.reviewAudit!),
+    );
+    [point] = vaganovaPreAnalyzer.setReviewedAudience(
+      target.sourceId, point.id, 'learner', true, cueReviewExpectedState(point.reviewAudit!),
+    );
+
+    expect(point.learnerVisible).toBe(true);
+    expect(projectCurrentStudentDerivation(point.reviewAudit!)?.claimReviewEventIds).toHaveLength(6);
+    const reloaded = vaganovaPreAnalyzer.getCuePoints(target.sourceId)[0];
+    expect(reloaded.reviewAudit).toEqual(point.reviewAudit);
+    expect(reloaded.learnerVisible).toBe(true);
+  }, 15_000);
 
   it('stores different canonical assessment artifacts as separate origins', () => {
     installMemoryStorage();

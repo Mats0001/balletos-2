@@ -7,14 +7,19 @@ import {
   createGroundedCueReviewAudit,
   createLegacyCueReviewAudit,
   createNicoleProCueReviewAudit,
+  createNicoleProStudentDerivation,
   cueReviewContentIsAudienceSafe,
   cueReviewAuditIsValid,
   cueReviewExpectedState,
   projectCueReviewAudit,
   projectCueReviewForAudience,
+  projectCurrentStudentDerivation,
+  projectNicoleProClaimReviews,
+  nicoleProStudentDerivationReadiness,
   rejectCueReviewAudit,
   reopenCueReviewAudit,
   reviseCueReviewAudit,
+  reviewNicoleProClaim,
   setCueReviewAudience,
   sha256Canonical,
 } from '../services/cueReviewAudit';
@@ -125,6 +130,42 @@ function createNicoleProFixture() {
   return { audit, content, context, currentContext, proDraft };
 }
 
+function reviewAndDeriveStudentCopy() {
+  const { audit, context, ...fixture } = createNicoleProFixture();
+  const requiredTypes = new Set([
+    'visual_observation', 'teaching_target', 'immediate_cue',
+    'practice', 'success_criterion', 'metaphor',
+  ]);
+  let reviewed = audit;
+  for (const claim of fixture.proDraft.claims) {
+    if (!requiredTypes.has(claim.type)) continue;
+    reviewed = reviewNicoleProClaim(
+      reviewed, claim.claimId, 'accepted', undefined, true,
+      cueReviewExpectedState(reviewed), context,
+    );
+  }
+  const approved = approveCueReviewAudit(reviewed, cueReviewExpectedState(reviewed), context);
+  const selectedReviewIds = projectNicoleProClaimReviews(approved)
+    .filter(item => item.selectedForStudentDerivation && item.eventId)
+    .map(item => item.eventId!);
+  const derived = createNicoleProStudentDerivation(
+    approved, selectedReviewIds, cueReviewExpectedState(approved), context,
+  );
+  return { audit, context, reviewed, approved, derived, ...fixture };
+}
+
+function redigestStoredEvents(stored: any): void {
+  let previous: string | null = null;
+  for (const auditEvent of stored.events) {
+    auditEvent.previousEventDigest = previous;
+    const core = Object.fromEntries(Object.entries(auditEvent).filter(
+      ([key]) => key !== 'eventDigest' && key !== 'digestAlgorithm',
+    ));
+    auditEvent.eventDigest = sha256Canonical(core);
+    previous = auditEvent.eventDigest;
+  }
+}
+
 describe('cue review audit', () => {
   it('canonicalizes key order and changes the digest for relevant content', () => {
     expect(canonicalJson({ b: 2, a: 1 })).toBe(canonicalJson({ a: 1, b: 2 }));
@@ -168,8 +209,7 @@ describe('cue review audit', () => {
   });
 
   it('publishes only the narrow approved current revision and revokes it after an edit', () => {
-    const { audit, context } = createNicoleProFixture();
-    const approved = approveCueReviewAudit(audit, cueReviewExpectedState(audit), context);
+    const { audit, derived: approved, context } = reviewAndDeriveStudentCopy();
     const granted = setCueReviewAudience(
       approved, 'learner', true, cueReviewExpectedState(approved), context,
     );
@@ -179,8 +219,8 @@ describe('cue review audit', () => {
       recordId: audit.recordId,
       revisionId: audit.currentRevisionId,
       audience: 'learner',
-      headline: 'Rumpfachse – Nicole-Pro',
     });
+    expect(audienceProjection?.headline).toContain('Rumpfachse');
     expect(audienceProjection).not.toHaveProperty('diagnosisText');
     expect(audienceProjection).not.toHaveProperty('technicalAnalysis');
     expect(audienceProjection).not.toHaveProperty('reviewAudit');
@@ -194,6 +234,137 @@ describe('cue review audit', () => {
     expect(revised.origin).toEqual(audit.origin);
   });
 
+  it('reviews immutable Pro claims append-only and derives exactly six selected outward claim types', () => {
+    const { audit, derived, proDraft } = reviewAndDeriveStudentCopy();
+    const claimReviews = projectNicoleProClaimReviews(derived);
+    const studentDerivation = projectCurrentStudentDerivation(derived);
+
+    expect(derived.origin).toEqual(audit.origin);
+    expect(claimReviews.filter(item => item.selectedForStudentDerivation)).toHaveLength(6);
+    expect(nicoleProStudentDerivationReadiness(derived)).toMatchObject({ ready: true, requiredClaims: 6 });
+    expect(studentDerivation?.claimReviewEventIds).toHaveLength(6);
+    expect(studentDerivation?.content).toMatchObject({
+      poseName: 'Plié – Tiefpunkt',
+    });
+    expect(studentDerivation?.content.headline).toBe(
+      proDraft.claims.find(item => item.type === 'visual_observation')?.text,
+    );
+    const serialized = canonicalJson(studentDerivation?.content);
+    expect(serialized).not.toMatch(/teacher_hypothesis|differentiation_test|metric_observation|evidenceId/i);
+  });
+
+  it('binds audience grants to the exact current student derivation and invalidates it after a claim edit', () => {
+    const { derived, context } = reviewAndDeriveStudentCopy();
+    const granted = setCueReviewAudience(
+      derived, 'learner', true, cueReviewExpectedState(derived), context,
+    );
+    expect(projectCueReviewAudit(granted).learnerVisible).toBe(true);
+    const selected = projectNicoleProClaimReviews(granted).find(item => item.selectedForStudentDerivation)!;
+    const changed = reviewNicoleProClaim(
+      granted, selected.claim.claimId, 'edited', 'Im Bild bleibt die Organisation klar sichtbar.', true,
+      cueReviewExpectedState(granted), context,
+    );
+    expect(projectCueReviewAudit(changed).learnerVisible).toBe(false);
+    expect(projectCurrentStudentDerivation(changed)).toBeNull();
+    expect(projectCueReviewForAudience(changed, 'learner')).toBeNull();
+  }, 15_000);
+
+  it('blocks teacher-only, rejected, duplicate or unsafe claim selections from student derivation', () => {
+    const { audit, context, proDraft } = createNicoleProFixture();
+    const hypothesis = proDraft.claims.find(item => item.type === 'teacher_hypothesis')!;
+    expect(() => reviewNicoleProClaim(
+      audit, hypothesis.claimId, 'accepted', undefined, true,
+      cueReviewExpectedState(audit), context,
+    )).toThrow(/teacher-only/i);
+    const visual = proDraft.claims.find(item => item.type === 'visual_observation')!;
+    expect(() => reviewNicoleProClaim(
+      audit, visual.claimId, 'rejected', undefined, true,
+      cueReviewExpectedState(audit), context,
+    )).toThrow(/rejected claim/i);
+    const unsafe = reviewNicoleProClaim(
+      audit, visual.claimId, 'edited', 'Du hast Skoliose.', true,
+      cueReviewExpectedState(audit), context,
+    );
+    const approved = approveCueReviewAudit(unsafe, cueReviewExpectedState(unsafe), context);
+    const eventId = projectNicoleProClaimReviews(approved).find(item => item.claim.claimId === visual.claimId)!.eventId!;
+    expect(() => createNicoleProStudentDerivation(
+      approved, [eventId, eventId], cueReviewExpectedState(approved), context,
+    )).toThrow(/unique/i);
+
+    const complete = reviewAndDeriveStudentCopy();
+    const currentVisual = projectNicoleProClaimReviews(complete.derived)
+      .find(item => item.claim.type === 'visual_observation')!;
+    const unsafeComplete = reviewNicoleProClaim(
+      complete.derived, currentVisual.claim.claimId, 'edited', 'Du hast Skoliose.', true,
+      cueReviewExpectedState(complete.derived), complete.context,
+    );
+    const selected = projectNicoleProClaimReviews(unsafeComplete)
+      .filter(item => item.selectedForStudentDerivation && item.eventId)
+      .map(item => item.eventId!);
+    expect(() => createNicoleProStudentDerivation(
+      unsafeComplete, selected, cueReviewExpectedState(unsafeComplete), complete.context,
+    )).toThrow(/not safe/i);
+  });
+
+  it('rejects recomputed claim, derivation and grant tampering on reload', () => {
+    const { derived, context } = reviewAndDeriveStudentCopy();
+    const granted = setCueReviewAudience(derived, 'learner', true, cueReviewExpectedState(derived), context);
+    expect(cueReviewAuditIsValid(granted)).toBe(true);
+    for (const mutate of [
+      (stored: any) => { stored.events.find((item: any) => item.type === 'claim_reviewed').claimReview.selectedForStudentDerivation = false; },
+      (stored: any) => {
+        const derivation = stored.events.find((item: any) => item.type === 'student_derivation_created').studentDerivation;
+        derivation.content.headline = 'forged';
+        derivation.derivationDigest = sha256Canonical(Object.fromEntries(
+          Object.entries(derivation).filter(([key]) => key !== 'derivationDigest'),
+        ));
+      },
+      (stored: any) => { stored.events.find((item: any) => item.type === 'audience_granted').studentDerivationRef.derivationDigest = 'f'.repeat(64); },
+    ]) {
+      const stored = JSON.parse(JSON.stringify(granted));
+      mutate(stored);
+      redigestStoredEvents(stored);
+      expect(cueReviewAuditIsValid(stored)).toBe(false);
+    }
+  });
+
+  it('rejects a derivation-bound audience grant moved before its derivation', () => {
+    const { derived, context } = reviewAndDeriveStudentCopy();
+    const granted = setCueReviewAudience(
+      derived, 'learner', true, cueReviewExpectedState(derived), context,
+    );
+    const stored = JSON.parse(JSON.stringify(granted));
+    const derivationIndex = stored.events.findIndex((item: any) => item.type === 'student_derivation_created');
+    const grantIndex = stored.events.findIndex((item: any) => item.type === 'audience_granted');
+    expect(derivationIndex).toBeGreaterThan(-1);
+    expect(grantIndex).toBeGreaterThan(derivationIndex);
+    [stored.events[derivationIndex], stored.events[grantIndex]] = [
+      stored.events[grantIndex], stored.events[derivationIndex],
+    ];
+    stored.events.forEach((item: any, index: number) => { item.eventSequence = index + 1; });
+    redigestStoredEvents(stored);
+
+    expect(cueReviewAuditIsValid(stored)).toBe(false);
+  });
+
+  it('binds a stored derivation to the exact actor and canonical event timestamp', () => {
+    const { derived } = reviewAndDeriveStudentCopy();
+    for (const mutate of [
+      (studentDerivation: any) => { studentDerivation.actorId = 'forged-actor'; },
+      (studentDerivation: any) => { studentDerivation.createdAt = '2026-08-12T12:59:59.000Z'; },
+    ]) {
+      const stored = JSON.parse(JSON.stringify(derived));
+      const derivationEvent = stored.events.find((item: any) => item.type === 'student_derivation_created');
+      mutate(derivationEvent.studentDerivation);
+      derivationEvent.studentDerivation.derivationDigest = sha256Canonical(Object.fromEntries(
+        Object.entries(derivationEvent.studentDerivation).filter(([key]) => key !== 'derivationDigest'),
+      ));
+      redigestStoredEvents(stored);
+
+      expect(cueReviewAuditIsValid(stored)).toBe(false);
+    }
+  });
+
   it('blocks clinical or injury language from every audience projection', () => {
     const { audit, context } = createNicoleProFixture();
     const unsafe = reviseCueReviewAudit(
@@ -205,20 +376,50 @@ describe('cue review audit', () => {
     const approved = approveCueReviewAudit(unsafe, cueReviewExpectedState(unsafe), context);
     expect(() => setCueReviewAudience(
       approved, 'learner', true, cueReviewExpectedState(approved), context,
-    )).toThrow(/safe student derivation/i);
+    )).toThrow(/student derivation/i);
     expect(projectCueReviewForAudience(approved, 'learner')).toBeNull();
   });
 
   it.each([
     'Du hast Skoliose.',
     'Dein Gluteus medius ist schwach.',
+    'Deine Bauchmuskeln sind zu schwach.',
     'Die Adduktoren sind verkürzt.',
     'Die Hüftmuskulatur ist zu kurz.',
     'Ein Meniskusschaden ist die Ursache.',
+    'Dein Kreuzband ist geschädigt.',
+    'Deine Patellasehne ist gerissen.',
+    'Dein Oberschenkelmuskel ist zu schwach.',
+    'Du hast Osteoporose.',
+    'Dein Knochen ist gebrochen.',
+    'Deine Sehne ist eingerissen.',
+    'Dein Muskel ist gerissen.',
+    'Dein Gelenk ist krank.',
+    'Dein vorderes Kreuzband ist kaputt.',
+    'Deine Patellasehne ist beschädigt.',
+    'Du hast einen Muskelriss.',
+    'Dein Muskel hat einen Faserriss.',
+    'Dein Muskel hat zu wenig Kraft.',
+    'Dein Muskel hat nicht genug Kraft.',
+    'Dein Muskel ist kraftlos.',
+    'Du hast einen Muskelfaser Riss.',
+    'Du hast einen Faserriss.',
+    'Die Achse weicht um 50 Grad ab.',
     'Diese Übung ist immer sicher.',
   ])('rejects unsafe audience wording: %s', headline => {
     const { content } = createNicoleProFixture();
     expect(cueReviewContentIsAudienceSafe({ ...content, headline })).toBe(false);
+  });
+
+  it('keeps an ordinary visual ballet cue eligible for student derivation', () => {
+    const { content } = createNicoleProFixture();
+    for (const headline of [
+      'Dein Knie bleibt über dem zweiten Zeh.',
+      'Vom Schulterblatt läuft ein Seidenband bis zur Hand.',
+      'Der sichtbare Umriss bleibt während der Bewegung ruhig.',
+    ]) {
+      expect(cueReviewContentIsAudienceSafe({ ...content, headline })).toBe(true);
+    }
   });
 
   it('requires a separate student derivation after outward teacher copy changes', () => {
@@ -232,7 +433,7 @@ describe('cue review audit', () => {
     const approved = approveCueReviewAudit(revised, cueReviewExpectedState(revised), context);
     expect(() => setCueReviewAudience(
       approved, 'learner', true, cueReviewExpectedState(approved), context,
-    )).toThrow(/separate safe student derivation/i);
+    )).toThrow(/student derivation/i);
   });
 
   it('rejects tampered Nicole-Pro payloads and mismatched exact targets', () => {
