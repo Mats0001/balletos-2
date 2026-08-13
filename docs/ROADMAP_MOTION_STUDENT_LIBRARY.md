@@ -52,7 +52,7 @@ Kurven vergleichen zunächst `heute ↔ vorheriger vergleichbarer Versuch`. Erst
 
 1. Übungsauswahl und Motion-Registry sichtbar halten.
 2. Single-Clock-Avatar für Tendu, Passé, Jeté und Changement.
-3. Mehrzyklus-Phasenengine mit Richtung, Hysterese und Konfidenz härten.
+3. Mehrzyklus-Phasenengine mit Richtung, Hysterese und Konfidenz härten. **Technischer Pilot umgesetzt:** variable Wiederholungen, linke/rechte Arbeitsseite, kurze Sichtbarkeitslücken, lange Aufnahmeunterbrechungen als Segmentgrenze, Richtungskonsens über alle Jeté-Zyklen und Evidenzabdeckung je Phase. Die fachlichen Korridore bleiben weiterhin Nicole-abhängig.
 4. Live-Aufnahmeassistent vervollständigen.
 5. Schülerbibliothek auf das obige Session-/Attempt-Modell migrieren und Lernkurven erweitern.
 6. Cross-Video-Bibliothek als echte Filter- und Verwaltungsoberfläche ausbauen.

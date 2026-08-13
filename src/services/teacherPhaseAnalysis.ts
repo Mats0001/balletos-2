@@ -684,7 +684,9 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     : technicalDetection?.direction ?? null;
   const directionConfidence = exerciseId === 'tendu'
     ? tenduDetection?.directionConfidence ?? 0
-    : technicalDetection?.directionConfidence ?? 1;
+    : phaseAuthority === 'technical_phase_pilot'
+      ? technicalDetection?.directionConfidence ?? 0
+      : 1;
   const phaseEngineConfidence = exerciseId === 'tendu'
     ? tenduDetection?.confidence ?? 0
     : technicalDetection?.confidence ?? (boundaries ? 0.9 : 0);
