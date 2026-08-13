@@ -71,6 +71,8 @@ import {
   studentAttemptHistory,
 } from '../services/studentAttemptHistory';
 import { MOTION_REGISTRY, resolveMotionRegistryEntry } from '../services/motionRegistry';
+import { MOTION_REFERENCE_LIBRARY } from '../services/motionReferenceLibrary';
+import { MotionReferenceLibraryPanel } from './MotionReferenceLibraryPanel';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -115,6 +117,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const overlayMenuRef = useRef<HTMLDivElement>(null);
   const [overlayMenuPosition, setOverlayMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [splitScreenMode, setSplitScreenMode] = useState<boolean>(false);
+  const [showReferenceLibrary, setShowReferenceLibrary] = useState<boolean>(false);
   const [selectedFrameTime, setSelectedFrameTime] = useState<string>('00:02.160');
   const [selectedJointId, setSelectedJointId] = useState<string>('');
   /** Index of the actually clicked landmark (for glow positioning on exact joint) */
@@ -2412,6 +2415,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     () => studentAttemptHistory.list(),
     [attemptHistoryRevision],
   );
+  const nicoleReferenceLibraryRecords = useMemo(
+    () => loadNicoleReferenceLines(localStorage),
+    [nicoleReferenceStorageRevision],
+  );
   const currentAttemptPreview = useMemo(() => teacherPhaseAnalysis
     ? createStudentAttemptSnapshot({
       analysis: teacherPhaseAnalysis,
@@ -2612,6 +2619,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         onClose={() => setIsCurriculumModalOpen(false)}
         report={curriculumReport}
         studentName="Emma Berger (6 J.)"
+      />
+
+      <MotionReferenceLibraryPanel
+        open={showReferenceLibrary}
+        onClose={() => setShowReferenceLibrary(false)}
+        currentExerciseId={resolveMotionRegistryEntry(exerciseName)?.id ?? 'all'}
+        currentVideoSourceId={selectedDevVideoUrl}
+        nicoleRecords={nicoleReferenceLibraryRecords}
+        technicalSources={MOTION_REFERENCE_LIBRARY}
+        attempts={attemptHistoryRecords}
       />
 
       {/* 🖼 ANNOTATION LIGHTBOX */}
@@ -3042,6 +3059,26 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
             }}
           >
             Avatar
+          </button>
+
+          <button
+            onClick={() => setShowReferenceLibrary(true)}
+            title="Nicole‑Referenzen, technische Quellen und Schülerverläufe öffnen"
+            style={{
+              background: showReferenceLibrary ? 'rgba(103,232,249,0.16)' : 'transparent',
+              color: showReferenceLibrary ? '#67e8f9' : 'rgba(255,255,255,0.55)',
+              border: showReferenceLibrary ? '1px solid rgba(103,232,249,0.32)' : '1px solid transparent',
+              padding: '5px 9px',
+              borderRadius: '9px',
+              fontSize: '10px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            <BookOpen size={12} /> Referenzen
           </button>
 
           {/* Overlay-Modus Selector – PROJECT_DECISION 2026-08-10: volle Ampel freigegeben */}
