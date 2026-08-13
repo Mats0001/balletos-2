@@ -10,7 +10,7 @@
  *
  * TeacherHeuristicState ist absichtlich NICHT 'CORRECT'/'WARNING'/'ERROR':
  *   - Verhindert Verwechslung mit validierten wissenschaftlichen Schwellen
- *   - Erst die UI-Schicht übersetzt in Grün/Gelb/Rot/Grau
+ *   - Erst die UI-Schicht übersetzt in Grün/Gelb/Rot
  */
 
 // ─── INTERNE HEURISTIK-ZUSTÄNDE ────────────────────────────────────────────
@@ -24,13 +24,15 @@
  *   heuristic_match            → Grün
  *   heuristic_attention        → Gelb/Orange
  *   heuristic_strong_attention → Rot
- *   blocked                    → Grau (gestrichelt)
+ *   heuristic_review           → Gelb (gestrichelt, Nicole prüft)
+ *   blocked                    → Gelb (gestrichelt, keine verwertbare Evidenz)
  */
 export type TeacherHeuristicState =
   | 'heuristic_match'              // Sieht gut aus – KI-Vorschlag "korrekt"
   | 'heuristic_attention'          // Prüf-/Beobachtungsbedarf
   | 'heuristic_strong_attention'   // Deutliche Abweichung – Korrekturbedarf
-  | 'blocked';                     // Keine Evidenz – neutral, niemals Grün
+  | 'heuristic_review'             // Kontext/Evidenz reicht nur für Nicoles Prüfung
+  | 'blocked';                     // Keine Evidenz – gelb gestrichelt, niemals Grün/Rot
 
 // ─── OVERLAY PACKET ─────────────────────────────────────────────────────────
 
@@ -61,10 +63,10 @@ export interface TeacherOverlayPacket {
   /** Armlinienqualität rechts */
   armR: TeacherHeuristicState;
 
-  /** Bein-Heuristik links (Knieflexion + Valgus-Drift) */
+  /** Sichtbare Knie-Fuß-Projektion links; keine Valgus-/Ursachendiagnose */
   legL: TeacherHeuristicState;
 
-  /** Bein-Heuristik rechts */
+  /** Sichtbare Knie-Fuß-Projektion rechts; keine Valgus-/Ursachendiagnose */
   legR: TeacherHeuristicState;
 
   /**
@@ -111,16 +113,18 @@ export const HEURISTIC_COLORS: Record<TeacherHeuristicState, string> = Object.fr
   heuristic_match:            '#30d158',              // Grün
   heuristic_attention:        '#ffd60a',              // Gelb
   heuristic_strong_attention: '#ff453a',              // Rot
-  blocked:                    'rgba(255,255,255,0.18)', // Grau – fehlende Evidenz
+  heuristic_review:           '#ffd60a',              // Gelb gestrichelt – Nicole prüft
+  blocked:                    '#ffd60a',              // Gelb gestrichelt – fehlende Evidenz
 });
 
 /**
- * Strich-Muster für 'blocked'-Zustand (gestrichelt = visuell neutral).
+ * Strich-Muster für Review-Zustände (gestrichelt = Nicole prüft).
  */
 export const HEURISTIC_DASH: Record<TeacherHeuristicState, number[]> = Object.freeze({
   heuristic_match:            [],
   heuristic_attention:        [],
   heuristic_strong_attention: [],
+  heuristic_review:           [7, 4],
   blocked:                    [5, 4],
 });
 
@@ -157,7 +161,7 @@ export function createBlockedPacket(framePtsSeconds: number, streamEpoch: number
     footR: 'blocked',
     cog: 'blocked',
     head: 'blocked',
-    policyVersion: '0.2.0-teacher-ampel',
+    policyVersion: '0.3.0-pedagogical-full-coverage',
     streamEpoch,
     framePtsSeconds,
   };

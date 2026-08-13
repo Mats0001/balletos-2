@@ -12,6 +12,21 @@ export interface PoseResultsData {
 
 export type PoseProcessStatus = 'processed' | 'busy' | 'unavailable' | 'error';
 
+const LOCAL_POSE_ASSET_DIRECTORY = 'mediapipe/wasm';
+
+/**
+ * Keep inference assets on the same origin as BalletOS. This removes CDN
+ * availability/CORS from the pose-critical path and makes browser QA match the
+ * packaged application. MediaPipe requests only flat package filenames.
+ */
+export function resolveMediaPipePoseAsset(file: string, baseUrl = '/'): string {
+  if (!/^[a-zA-Z0-9._-]+$/.test(file)) {
+    throw new Error(`Unsupported MediaPipe pose asset path: ${file}`);
+  }
+  const normalizedBase = `/${baseUrl}`.replace(/\/+/g, '/').replace(/\/?$/, '/');
+  return `${normalizedBase}${LOCAL_POSE_ASSET_DIRECTORY}/${file}`;
+}
+
 export class RealMediaPipePoseService {
   private pose: any = null;
   private isInitialized = false;
@@ -22,9 +37,10 @@ export class RealMediaPipePoseService {
 
     try {
       const PoseClass = (window as any).Pose || (await import('@mediapipe/pose')).Pose;
+      const baseUrl = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
 
       this.pose = new PoseClass({
-        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        locateFile: (file: string) => resolveMediaPipePoseAsset(file, baseUrl),
       });
 
       // BALANCED MODEL (modelComplexity: 1) — good accuracy + real-time performance

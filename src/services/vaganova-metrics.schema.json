@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://balletos.io/schemas/vaganova-metrics/v1.0.0",
+  "$id": "https://balletos.io/schemas/vaganova-metrics/v1.1.0",
   "title": "BalletOS Vaganova Metrics Schema",
   "description": "Machine-readable rule model for Vaganova-based ballet skeleton analysis. Each metric entry specifies the epistemological class, measurement validity, and source provenance. NO research_observation or pedagogical_nominal_angle values may be used as health or error thresholds without system validation.",
-  "version": "1.0.0",
-  "schema_date": "2026-08-10",
+  "version": "1.1.0",
+  "schema_date": "2026-08-13",
   "authors": ["BalletOS Team", "Nicole Schönewolf (pedagogy)"],
   "references": {
     "vaganova_primary": "Vaganova, А.Я. Основы классического танца, 6th ed., 2000. ISBN 978-5-8114-0397-8",
@@ -133,17 +133,84 @@
     {
       "metric_id": "arm_line_port_de_bras",
       "movement_id": "port_de_bras_any",
-      "label_de": "Arm-Linie Port de Bras (Ellbogen-Winkel)",
+      "label_de": "Sichtbare 2D-Armform",
       "phase": "any",
-      "measurement_class": "validated_system_threshold",
-      "coordinate_frame": "frontal_view_calibrated",
-      "target": { "operator": "between", "min": 145, "max": 175, "unit": "deg" },
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view_2d_projection",
+      "target_type": "position_dependent_teacher_candidate_band",
+      "target": {
+        "rounded_positions_green_deg": [120, 150],
+        "rounded_positions_attention_deg": [100, 165],
+        "allonge_green_min_deg": 160,
+        "allonge_attention_min_deg": 145
+      },
       "anatomical_joint_angle": false,
-      "note": "No universal shoulder angle for 2nd position (Vaganova). This 3-point elbow angle is a valid proxy only in calibrated frontal view.",
+      "note": "Position-dependent experimental teacher relation. TRANSITION, missing visibility or low pose confidence must render yellow-dashed for Nicole review. No muscle, strength or cause claim.",
       "source": { "work": "Vaganova, Основы", "edition": "6th, 2000" },
       "mediapipe_landmarks_used": [11, 12, 13, 14, 15, 16],
-      "mediapipe_validity": "requires_calibrated_frontal_view",
-      "validation_status": "proxy_unvalidated"
+      "mediapipe_validity": "requires_visible_shoulder_elbow_wrist_and_classified_arm_position",
+      "validation_status": "pedagogical_candidate_unvalidated",
+      "teacher_review_status": "pending_nicole_per_observation"
+    },
+    {
+      "metric_id": "projected_knee_foot_relation_teacher",
+      "movement_id": "frontal_non_arabesque",
+      "label_de": "Sichtbare Knie-Fuß-Projektion",
+      "phase": "any",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view_2d_projection",
+      "target_type": "body_normalized_teacher_candidate_band",
+      "target": {
+        "green_max_abs_knee_foot_offset_per_leg_length": 0.10,
+        "attention_max_abs_knee_foot_offset_per_leg_length": 0.20
+      },
+      "anatomical_joint_angle": false,
+      "note": "Visible knee-to-foot relation only. It is not the retired knee-axis baseline, not a valgus measurement and carries no medial/lateral, muscle or cause diagnosis.",
+      "source": { "work": "BalletOS pedagogical pilot rule", "date": "2026-08-13" },
+      "mediapipe_landmarks_used": [23, 24, 25, 26, 27, 28, 31, 32],
+      "mediapipe_validity": "frontal_non_arabesque_with_visible_hip_knee_ankle_foot",
+      "validation_status": "pedagogical_candidate_unvalidated",
+      "teacher_review_status": "pending_nicole_per_observation"
+    },
+    {
+      "metric_id": "projected_foot_outward_relation_teacher",
+      "movement_id": "frontal_non_arabesque",
+      "label_de": "Sichtbare Fußfortsetzung",
+      "phase": "outside_plie",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view_2d_projection",
+      "target_type": "direction_and_body_normalized_teacher_candidate",
+      "target": {
+        "must_continue_away_from_body_center": true,
+        "attention_below_horizontal_reach_per_leg_length": 0.035
+      },
+      "anatomical_joint_angle": false,
+      "note": "Display relation only; does not measure anatomical turnout, pronation, supination, floor pressure or force.",
+      "source": { "work": "BalletOS pedagogical pilot rule", "date": "2026-08-13" },
+      "mediapipe_landmarks_used": [23, 24, 27, 28, 31, 32],
+      "mediapipe_validity": "frontal_non_arabesque_with_visible_hip_ankle_foot",
+      "validation_status": "pedagogical_candidate_unvalidated",
+      "teacher_review_status": "pending_nicole_per_observation"
+    },
+    {
+      "metric_id": "projected_torso_center_support_relation_teacher",
+      "movement_id": "frontal_non_arabesque",
+      "label_de": "Projizierte Rumpfmitte über sichtbarer Standfläche",
+      "phase": "any",
+      "measurement_class": "vaganova_relation",
+      "coordinate_frame": "frontal_view_2d_projection",
+      "target_type": "visible_support_width_percentage_candidate",
+      "target": {
+        "green_percent": [35, 65],
+        "attention_percent": [15, 85]
+      },
+      "anatomical_joint_angle": false,
+      "note": "Weighted image-space torso-center proxy only. It is not center of pressure, ground reaction force, load distribution or a balance diagnosis.",
+      "source": { "work": "BalletOS pedagogical pilot rule", "date": "2026-08-13" },
+      "mediapipe_landmarks_used": [11, 12, 23, 24, 27, 28, 31, 32],
+      "mediapipe_validity": "frontal_non_arabesque_with_visible_torso_ankles_and_feet",
+      "validation_status": "pedagogical_candidate_unvalidated",
+      "teacher_review_status": "pending_nicole_per_observation"
     },
     {
       "metric_id": "spine_tilt_aplomb",

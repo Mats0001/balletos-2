@@ -54,7 +54,7 @@ function makeOverlayPacket(overrides: Partial<TeacherOverlayPacket> = {}): Teach
     footR: 'heuristic_match',
     cog: 'heuristic_match',
     head: 'heuristic_match',
-    policyVersion: '0.2.0-teacher-ampel',
+    policyVersion: '0.3.0-pedagogical-full-coverage',
     streamEpoch: 1000,
     framePtsSeconds: 1,
     ...overrides,

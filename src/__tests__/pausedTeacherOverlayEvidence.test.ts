@@ -20,14 +20,7 @@ const REGION_KEYS = [
   'footL', 'footR', 'cog', 'head',
 ] as const;
 
-const PAUSED_CONFIRMABLE_KEYS = [
-  'torsoAlignment', 'spine', 'shoulder', 'pelvis',
-  'armL', 'armR', 'head',
-] as const;
-
-const PAUSED_NEUTRAL_ONLY_KEYS = [
-  'legL', 'legR', 'footL', 'footR', 'cog',
-] as const;
+const PAUSED_CONFIRMABLE_KEYS = REGION_KEYS;
 
 function makePacket(
   state: TeacherHeuristicState,
@@ -47,7 +40,7 @@ function makePacket(
     footR: state,
     cog: state,
     head: state,
-    policyVersion: '0.2.0-teacher-ampel',
+    policyVersion: '0.3.0-pedagogical-full-coverage',
     streamEpoch: 1000,
     framePtsSeconds,
     ...overrides,
@@ -69,6 +62,12 @@ function packets(
 
 function expectAllBlocked(packet: TeacherOverlayPacket): void {
   for (const key of REGION_KEYS) expect(packet[key]).toBe('blocked');
+}
+
+function expectOnlyReviewStates(packet: TeacherOverlayPacket): void {
+  for (const key of REGION_KEYS) {
+    expect(['blocked', 'heuristic_review']).toContain(packet[key]);
+  }
 }
 
 function makeLandmarks(): PoseLandmark[] {
@@ -128,7 +127,6 @@ describe('confirmCausalTeacherOverlayEvidence', () => {
       1,
     );
     for (const key of PAUSED_CONFIRMABLE_KEYS) expect(result[key]).toBe(state);
-    for (const key of PAUSED_NEUTRAL_ONLY_KEYS) expect(result[key]).toBe('blocked');
   });
 
   it('keeps composite torso evidence neutral when any constituent is blocked', () => {
@@ -255,8 +253,7 @@ describe('buildPausedTeacherOverlayEvidence', () => {
     const before = JSON.stringify(input.frames);
     const result = buildPausedTeacherOverlayEvidence(input);
 
-    expect(REGION_KEYS.some(key => result[key] !== 'blocked')).toBe(true);
-    for (const key of PAUSED_NEUTRAL_ONLY_KEYS) expect(result[key]).toBe('blocked');
+    for (const key of REGION_KEYS) expect(result[key]).not.toBe('blocked');
     expect(result.framePtsSeconds).toBe(0.65);
     expect(result.streamEpoch).toBe(1000);
     expect(JSON.stringify(input.frames)).toBe(before);
@@ -310,10 +307,10 @@ describe('buildPausedTeacherOverlayEvidence', () => {
       landmarks: null,
     };
     const result = buildPausedTeacherOverlayEvidence(input);
-    expectAllBlocked(result);
+    expectOnlyReviewStates(result);
   });
 
-  it('keeps lower-body and center-of-gravity colors neutral with low-visibility evidence', () => {
+  it('marks lower-body and center-of-gravity uncertainty as yellow review', () => {
     const input = validInput();
     const lowVisibilityIndices = [25, 26, 27, 28, 31, 32];
     input.frames = input.frames.map(frame => ({
@@ -327,7 +324,9 @@ describe('buildPausedTeacherOverlayEvidence', () => {
 
     const result = buildPausedTeacherOverlayEvidence(input);
 
-    for (const key of PAUSED_NEUTRAL_ONLY_KEYS) expect(result[key]).toBe('blocked');
+    for (const key of ['legL', 'legR', 'footL', 'footR', 'cog'] as const) {
+      expect(result[key]).toBe('heuristic_review');
+    }
   });
 });
 

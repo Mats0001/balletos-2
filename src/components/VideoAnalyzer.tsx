@@ -1004,6 +1004,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                         c.sk,
                         analysisFramePtsSeconds,
                         streamEpochRef.current,
+                        {
+                          motion: c.motionCls,
+                          cogX: c.cogPt.x,
+                        },
                       );
                       overlayPacket = overlayStabilizer.stabilize(
                         rawPacket, framePump.generation
@@ -2633,7 +2637,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
           {/* CoG Lot */}
           <button
             onClick={() => setShowCoG(!showCoG)}
-            title="Schwerpunkt-Lot: zeigt ob der Körperschwerpunkt über der Standfläche liegt"
+            title="2D-Rumpfmitte: zeigt ihre Bildprojektion über der sichtbaren Standfläche (kein Druck-/COP-Messwert)"
             style={{
               background: showCoG ? 'rgba(48,209,88,0.18)' : 'transparent',
               color: showCoG ? '#30d158' : 'rgba(255,255,255,0.45)',
@@ -2941,7 +2945,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({ onVaganovaAnalysis
                     {overlayMode === 'lehrer-ampel' && <span style={{ fontSize: '8px', color: '#30d158', marginLeft: 'auto' }}>⭐ Gespeichert</span>}
                   </div>
                   <div style={{ opacity: 0.65, fontSize: '9px', lineHeight: 1.4 }}>
-                    Vollständige KI-Ampelheuristik. Grün/Gelb/Rot nach Vaganova. Nicole entscheidet über jeden Vorschlag. Fehlende Evidenz → Grau.
+                    Vollständige pädagogische KI-Ampel. Keine grauen Regionen.
+                  </div>
+                  <div style={{ marginTop: '5px', display: 'grid', gap: '2px', fontSize: '8px', lineHeight: 1.35 }}>
+                    <span><b style={{ color: '#30d158' }}>━━ Grün</b> · sichtbare Relation passt</span>
+                    <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · konkret beachten</span>
+                    <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · klare sichtbare Abweichung</span>
+                    <span><b style={{ color: '#ffd60a', letterSpacing: '1px' }}>┄┄ Gelb</b> · Kontext fehlt, Nicole prüft</span>
                   </div>
                 </button>
                 {/* Mode 2: Anatomisch */}

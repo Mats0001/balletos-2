@@ -81,7 +81,7 @@ function readyInput(): GroundedTeacherDraftInput {
       mediaTimeUs: 2_500_000,
       videoWidth: 960,
       videoHeight: 1280,
-      policyVersion: '0.2.0-teacher-ampel',
+      policyVersion: '0.3.0-pedagogical-full-coverage',
     },
   };
 }

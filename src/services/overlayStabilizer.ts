@@ -6,7 +6,7 @@
 // is based exclusively on progressing video media time, never wall-clock time.
 //
 // ARCHITEKTUR-VERTRAG (Berater 2026-08-11):
-//   – 'blocked' entfernt Grün SOFORT (kein Delay)
+//   – 'blocked'/'heuristic_review' entfernen Grün SOFORT (kein Delay)
 //   – strong_attention wird nach 100ms bestätigt
 //   – Verschlechterung (match→attention) nach 300ms Bestätigung
 //   – Verbesserung (attention→match) nach 500ms Bestätigung
@@ -42,6 +42,7 @@ const STATE_KEYS: readonly StateKey[] = [
 
 const VALID_STATES: ReadonlySet<TeacherHeuristicState> = new Set([
   'blocked',
+  'heuristic_review',
   'heuristic_match',
   'heuristic_attention',
   'heuristic_strong_attention',
@@ -59,7 +60,8 @@ const MAX_CONTINUOUS_EVIDENCE_GAP_SECONDS = 0.2;
 // ─── SEVERITY ORDERING ──────────────────────────────────────────────────────
 
 const SEVERITY: Record<TeacherHeuristicState, number> = {
-  'blocked':                    -1,  // Special: always instant
+  'blocked':                    -2,  // Special: always instant
+  'heuristic_review':           -1,  // Yellow review, always instant
   'heuristic_match':             0,
   'heuristic_attention':         1,
   'heuristic_strong_attention':  2,
@@ -70,7 +72,9 @@ function isWorsening(from: TeacherHeuristicState, to: TeacherHeuristicState): bo
 }
 
 function isImproving(from: TeacherHeuristicState, to: TeacherHeuristicState): boolean {
-  return SEVERITY[to] < SEVERITY[from] && to !== 'blocked';
+  return SEVERITY[to] < SEVERITY[from]
+    && to !== 'blocked'
+    && to !== 'heuristic_review';
 }
 
 // ─── INTERNAL STATE ─────────────────────────────────────────────────────────
@@ -98,12 +102,12 @@ function confirmationHoldMs(
   displayed: TeacherHeuristicState,
   proposed: TeacherHeuristicState,
 ): number {
-  if (proposed === 'blocked') return 0;
+  if (proposed === 'blocked' || proposed === 'heuristic_review') return 0;
   if (proposed === 'heuristic_strong_attention') return STRONG_ATTENTION_CONFIRM_MS;
 
   // A new stream starts neutral. Green requires the longest positive-evidence
   // confirmation; yellow uses the ordinary worsening confirmation window.
-  if (displayed === 'blocked') {
+  if (displayed === 'blocked' || displayed === 'heuristic_review') {
     return proposed === 'heuristic_match' ? IMPROVE_HOLD_MS : WORSEN_HOLD_MS;
   }
 
@@ -125,7 +129,7 @@ export class OverlayStabilizer {
    * Stabilize a raw TeacherOverlayPacket.
    *
    * Rules:
-   * - blocked → SOFORT (safety: Grün muss sofort verschwinden)
+   * - blocked/review → SOFORT (safety: Grün muss sofort verschwinden)
    * - strong_attention → after 100 ms confirmation
    * - match → attention (Verschlechterung): nach WORSEN_HOLD_MS
    * - attention → match (Verbesserung): nach IMPROVE_HOLD_MS
@@ -208,8 +212,8 @@ export class OverlayStabilizer {
       }
 
       // ── INSTANT transitions ─────────────────────────────────────────
-      // blocked: SOFORT (safety – Grün muss sofort weg)
-      if (rawState === 'blocked') {
+      // blocked/review: SOFORT (safety – Grün muss sofort weg)
+      if (rawState === 'blocked' || rawState === 'heuristic_review') {
         region.displayedState = rawState;
         region.pendingState = null;
         result[key] = rawState;

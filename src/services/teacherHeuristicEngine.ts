@@ -21,7 +21,9 @@ import {
   VaganovaFullAnalysis,
   VaganovaMeasurement
 } from './vaganovaAngleCalculator';
-import { ReconstructedSkeleton } from './vaganova3DKinematics';
+import { KinematicPoint, ReconstructedSkeleton } from './vaganova3DKinematics';
+import { vaganovaArmAnalyzer, type ArmQualityStatus, type VaganovaArmPosition } from './vaganovaArmAnalyzer';
+import type { MotionClassificationResult } from './vaganovaMotionClassifier';
 import {
   TeacherHeuristicState,
   TeacherOverlayPacket,
@@ -29,8 +31,14 @@ import {
 } from '../types/teacherHeuristic';
 import { BUILD_POLICY, NEUTRAL_MEASUREMENT_CLASSES } from '../config/buildPolicy';
 
-// Debug throttle for torso alignment logging (TEMPORÄR)
-let _torsoLastLog = 0;
+export interface TeacherHeuristicContext {
+  motion: Pick<
+    MotionClassificationResult,
+    'detectedPerspective' | 'confidence' | 'isPlie' | 'isArabesque'
+  >;
+  /** Display-only projected torso-center proxy, never pressure/COP. */
+  cogX: number;
+}
 
 // ─── GATES ──────────────────────────────────────────────────────────────────
 
@@ -62,7 +70,9 @@ function isEligible(
  * Jede fehlende Teilmessung blockiert den zusammengesetzten Befund.
  */
 function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
-  if (states.some(s => s === 'blocked')) return 'blocked';
+  if (states.some(s => s === 'blocked' || s === 'heuristic_review')) {
+    return 'heuristic_review';
+  }
 
   // Pessimistisch: Der schlechteste nicht-blockierte Zustand gewinnt.
   // Begründung: Wenn EIN Bereich Aufmerksamkeit braucht, soll der
@@ -76,7 +86,7 @@ function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
 
 function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.spineTilt;
-  if (!isEligible(m)) return 'blocked';
+  if (!isEligible(m)) return 'heuristic_review';
   const deg = Math.abs(m.value);
   // Mit isotropischer vw/vh-Korrektur: Rauschboden ~1-2°.
   // Vaganova-Standard: Wirbelsäule lotrecht, Abweichung >4° ist sichtbar.
@@ -87,7 +97,7 @@ function computeSpine(va: VaganovaFullAnalysis): TeacherHeuristicState {
 
 function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.shoulderSymmetry;
-  if (!isEligible(m)) return 'blocked';
+  if (!isEligible(m)) return 'heuristic_review';
   const deg = Math.abs(m.value);
   // Schulter-Symmetrie: Nicole sieht Asymmetrie ab ~3°.
   // Épaulement kann 3-5° erzeugen, darüber ist es Haltungsfehler.
@@ -98,7 +108,7 @@ function computeShoulder(va: VaganovaFullAnalysis): TeacherHeuristicState {
 
 function computePelvis(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.pelvicTilt;
-  if (!isEligible(m)) return 'blocked';
+  if (!isEligible(m)) return 'heuristic_review';
   const deg = Math.abs(m.value);
   // Becken-Neigung: Vaganova verlangt neutrales Becken.
   // >5° sichtbare Neigung, >12° deutlicher Fehler.
@@ -116,40 +126,100 @@ function computeTorsoAlignment(va: VaganovaFullAnalysis): TeacherHeuristicState 
   const spine   = computeSpine(va);
   const shoulder = computeShoulder(va);
   const pelvis  = computePelvis(va);
-  const result = combineStates([spine, shoulder, pelvis]);
+  return combineStates([spine, shoulder, pelvis]);
+}
 
-  // 🔍 DEBUG: Echte Winkelwerte + Einzelergebnisse (TEMPORÄR, entfernen nach Diagnose)
-  const spineVal = isMeasurableVaganovaMeasurement(va.spineTilt) ? Math.abs(va.spineTilt.value).toFixed(1) : 'N/A';
-  const shoulderVal = isMeasurableVaganovaMeasurement(va.shoulderSymmetry) ? Math.abs(va.shoulderSymmetry.value).toFixed(1) : 'N/A';
-  const pelvisVal = isMeasurableVaganovaMeasurement(va.pelvicTilt) ? Math.abs(va.pelvicTilt.value).toFixed(1) : 'N/A';
-  
-  // Nur alle 2 Sekunden loggen um Konsole nicht zu fluten
-  const now = Date.now();
-  if (now - _torsoLastLog > 2000) {
-    _torsoLastLog = now;
-    console.log(
-      `🔍 TORSO: spine=${spineVal}° (${spine}) | shoulder=${shoulderVal}° (${shoulder}) | pelvis=${pelvisVal}° (${pelvis}) → COMBINED: ${result}`
-    );
+function pointIsUsable(point: KinematicPoint | null | undefined): point is KinematicPoint {
+  return Boolean(point)
+    && Number.isFinite(point!.x)
+    && Number.isFinite(point!.y)
+    && Number.isFinite(point!.vis)
+    && point!.vis >= 0.3
+    && point!.isPredicted !== true;
+}
+
+function statusToState(status: ArmQualityStatus): TeacherHeuristicState {
+  if (status === 'CORRECT') return 'heuristic_match';
+  if (status === 'WARNING') return 'heuristic_attention';
+  return 'heuristic_strong_attention';
+}
+
+function armAngleState(position: VaganovaArmPosition, angleDeg: number): TeacherHeuristicState {
+  if (!Number.isFinite(angleDeg)) return 'heuristic_review';
+  if (position === 'TRANSITION') return 'heuristic_review';
+  if (position === 'ALLONGE') {
+    if (angleDeg >= 160) return 'heuristic_match';
+    if (angleDeg >= 145) return 'heuristic_attention';
+    return 'heuristic_strong_attention';
+  }
+  if (angleDeg >= 120 && angleDeg <= 150) return 'heuristic_match';
+  if (angleDeg >= 100 && angleDeg <= 165) return 'heuristic_attention';
+  return 'heuristic_strong_attention';
+}
+
+/** Visible 2D arm-shape relation. This is pedagogy, not muscle diagnosis. */
+function computeArm(
+  sk: ReconstructedSkeleton,
+  side: 'L' | 'R',
+  context: TeacherHeuristicContext | null,
+): TeacherHeuristicState {
+  const points = side === 'L'
+    ? [sk.shoulderL, sk.elbowL, sk.wristL]
+    : [sk.shoulderR, sk.elbowR, sk.wristR];
+  if (!context || context.motion.confidence < 35 || !points.every(pointIsUsable)) {
+    return 'heuristic_review';
   }
 
-  return result;
+  const positions = vaganovaArmAnalyzer.classifyArmPosition(sk);
+  const quality = vaganovaArmAnalyzer.analyzeElbowQuality(sk);
+  const position = side === 'L' ? positions.left : positions.right;
+  const elbow = side === 'L' ? quality.left : quality.right;
+  const shapeState = armAngleState(position, elbow.angleDeg);
+
+  // Height is meaningful only for the open second-position relation. In third
+  // position an elbow above the shoulder is expected and must not become red.
+  return position === 'SECOND'
+    ? combineStates([shapeState, statusToState(elbow.heightStatus)])
+    : shapeState;
 }
 
-function computeArm(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
-  // armLineQuality is the actual elbow angle, not a deviation from zero. Its
-  // current candidate thresholds describe second position only, while this
-  // engine has no validated arm-position, camera-view or movement-phase gate.
-  // Keep both arms neutral until that context can authorize the upstream
-  // CORRECT/WARNING/ERROR status without reclassifying the angle here.
-  return 'blocked';
+function projectedKneeFootState(
+  sk: ReconstructedSkeleton,
+  side: 'L' | 'R',
+  context: TeacherHeuristicContext | null,
+): TeacherHeuristicState {
+  if (
+    !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque
+  ) return 'heuristic_review';
+
+  const hip = side === 'L' ? sk.pelvisL : sk.pelvisR;
+  const knee = side === 'L' ? sk.kneeL : sk.kneeR;
+  const ankle = side === 'L' ? sk.ankleL : sk.ankleR;
+  const foot = side === 'L' ? sk.footL : sk.footR;
+  if (
+    !pointIsUsable(hip)
+    || !pointIsUsable(knee)
+    || !pointIsUsable(ankle)
+    || !pointIsUsable(foot)
+  ) return 'heuristic_review';
+
+  const legLength = Math.max(1, Math.hypot(hip.x - ankle.x, hip.y - ankle.y));
+  const deviationRatio = Math.abs(knee.x - foot.x) / legLength;
+  if (deviationRatio <= 0.10) return 'heuristic_match';
+  if (deviationRatio <= 0.20) return 'heuristic_attention';
+  return 'heuristic_strong_attention';
 }
 
-function computeLeg(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeuristicState {
-  // The only current inputs are a research_observation (knee flexion) and an
-  // explicitly not_measurable knee-axis projection. Neither has scoring
-  // authority. A context-aware DecisionGate must
-  // authorize a future leg color; until then the teacher overlay stays neutral.
-  return 'blocked';
+/** Visible knee-to-foot projection; never labelled valgus or a joint diagnosis. */
+function computeLeg(
+  sk: ReconstructedSkeleton,
+  side: 'L' | 'R',
+  context: TeacherHeuristicContext | null,
+): TeacherHeuristicState {
+  return projectedKneeFootState(sk, side, context);
 }
 
 /**
@@ -158,30 +228,82 @@ function computeLeg(_va: VaganovaFullAnalysis, _side: 'L' | 'R'): TeacherHeurist
  * Vorerst: nur dann nicht-blocked wenn Pose-Konfidenz ausreichend.
  */
 function computeFoot(
-  _sk: ReconstructedSkeleton,
-  _side: 'L' | 'R'
+  sk: ReconstructedSkeleton,
+  side: 'L' | 'R',
+  context: TeacherHeuristicContext | null,
 ): TeacherHeuristicState {
-  // A 2D shin/foot cross-product changes meaning with camera view and mirror
-  // state. Until both are explicit evidence, it has no traffic-light authority.
-  return 'blocked';
+  if (
+    !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque
+  ) return 'heuristic_review';
+
+  const ankle = side === 'L' ? sk.ankleL : sk.ankleR;
+  const foot = side === 'L' ? sk.footL : sk.footR;
+  const hip = side === 'L' ? sk.pelvisL : sk.pelvisR;
+  if (
+    !pointIsUsable(ankle)
+    || !pointIsUsable(foot)
+    || !pointIsUsable(hip)
+    || !pointIsUsable(sk.pelvisCenter)
+  ) {
+    return 'heuristic_review';
+  }
+
+  // During a frontal plié the most useful visible relation is knee-over-foot.
+  if (context.motion.isPlie) return projectedKneeFootState(sk, side, context);
+
+  // Outside plié, only assess whether the visible foot continues away from the
+  // body centre. This is mirror-invariant and deliberately avoids turnout °.
+  const outwardProduct = (foot.x - ankle.x) * (ankle.x - sk.pelvisCenter.x);
+  const legLength = Math.max(1, Math.hypot(hip.x - ankle.x, hip.y - ankle.y));
+  const horizontalReach = Math.abs(foot.x - ankle.x) / legLength;
+  if (outwardProduct < 0) return 'heuristic_strong_attention';
+  if (horizontalReach < 0.035) return 'heuristic_attention';
+  return 'heuristic_match';
 }
 
 /**
  * projected_torso_center_proxy (früher CoG / Gewichtsverteilung).
- * Nur gültig wenn beide Knöchel sichtbar und Geometrie valide.
- * KEIN automatisches Grün — Abwesenheit eines Fehlers ≠ positiver Befund.
+ * Nur gültig wenn Rumpf, beide Knöchel und beide Füße sichtbar sind.
+ * Grün bedeutet ausschließlich: die projizierte Rumpfmitte liegt im mittleren
+ * Kandidatenband der sichtbaren Standfläche. Es ist kein Druck-/COP-Befund.
  */
 function computeCog(
-  _sk: ReconstructedSkeleton,
+  sk: ReconstructedSkeleton,
+  context: TeacherHeuristicContext | null,
 ): TeacherHeuristicState {
-  // Single-camera pose does not measure pressure or center of pressure. Keep
-  // this display proxy neutral until a dedicated evidence contract exists.
-  return 'blocked';
+  if (
+    !context
+    || context.motion.confidence < 35
+    || context.motion.detectedPerspective !== 'FRONTAL'
+    || context.motion.isArabesque
+    || !Number.isFinite(context.cogX)
+    || ![
+      sk.sternum,
+      sk.navel,
+      sk.pelvisCenter,
+      sk.ankleL,
+      sk.ankleR,
+      sk.footL,
+      sk.footR,
+    ].every(pointIsUsable)
+  ) return 'heuristic_review';
+
+  const supportMin = Math.min(sk.ankleL.x, sk.ankleR.x, sk.footL!.x, sk.footR!.x);
+  const supportMax = Math.max(sk.ankleL.x, sk.ankleR.x, sk.footL!.x, sk.footR!.x);
+  const supportWidth = supportMax - supportMin;
+  if (!Number.isFinite(supportWidth) || supportWidth <= 1) return 'heuristic_review';
+  const percent = ((context.cogX - supportMin) / supportWidth) * 100;
+  if (percent >= 35 && percent <= 65) return 'heuristic_match';
+  if (percent >= 15 && percent <= 85) return 'heuristic_attention';
+  return 'heuristic_strong_attention';
 }
 
 function computeHead(va: VaganovaFullAnalysis): TeacherHeuristicState {
   const m = va.headTilt;
-  if (!isEligible(m)) return 'blocked';
+  if (!isEligible(m)) return 'heuristic_review';
   const deg = Math.abs(m.value);
   if (deg <= 5)  return 'heuristic_match';
   if (deg <= 15) return 'heuristic_attention';
@@ -203,6 +325,7 @@ export class TeacherHeuristicEngine {
     sk: ReconstructedSkeleton | null,
     framePtsSeconds: number,
     streamEpoch: number,
+    context: TeacherHeuristicContext | null = null,
   ): TeacherOverlayPacket {
     if (!BUILD_POLICY.allowExperimentalTeacherTrafficLight || !va || !sk) {
       return createBlockedPacket(framePtsSeconds, streamEpoch);
@@ -213,13 +336,13 @@ export class TeacherHeuristicEngine {
       spine:     computeSpine(va),
       shoulder:  computeShoulder(va),
       pelvis:    computePelvis(va),
-      armL:      computeArm(va, 'L'),
-      armR:      computeArm(va, 'R'),
-      legL:      computeLeg(va, 'L'),
-      legR:      computeLeg(va, 'R'),
-      footL:     computeFoot(sk, 'L'),
-      footR:     computeFoot(sk, 'R'),
-      cog:       computeCog(sk),
+      armL:      computeArm(sk, 'L', context),
+      armR:      computeArm(sk, 'R', context),
+      legL:      computeLeg(sk, 'L', context),
+      legR:      computeLeg(sk, 'R', context),
+      footL:     computeFoot(sk, 'L', context),
+      footR:     computeFoot(sk, 'R', context),
+      cog:       computeCog(sk, context),
       head:      computeHead(va),
       policyVersion: BUILD_POLICY.policyVersion,
       streamEpoch,

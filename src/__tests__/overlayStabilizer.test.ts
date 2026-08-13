@@ -16,7 +16,7 @@ function makePacket(overrides: Partial<TeacherOverlayPacket> = {}): TeacherOverl
     footR: 'blocked',
     cog: 'blocked',
     head: 'blocked',
-    policyVersion: '0.2.0-teacher-ampel',
+    policyVersion: '0.3.0-pedagogical-full-coverage',
     streamEpoch: 1000,
     framePtsSeconds: 1,
     ...overrides,
@@ -148,6 +148,16 @@ describe('OverlayStabilizer media-time contract', () => {
       framePtsSeconds: 1.51,
     }), 1);
     expect(result.spine).toBe('blocked');
+  });
+
+  it('applies Nicole-review yellow immediately to an established green region', () => {
+    confirmSpineState(stabilizer, 'heuristic_match', 1, 500);
+
+    const result = stabilizer.stabilize(makePacket({
+      spine: 'heuristic_review',
+      framePtsSeconds: 1.51,
+    }), 1);
+    expect(result.spine).toBe('heuristic_review');
   });
 
   it('requires full green reconfirmation after an immediate blocked frame', () => {

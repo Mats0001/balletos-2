@@ -10,7 +10,8 @@
  *   → Vollständiger Ampelmodus für Nicoles Lehrerbetrieb freigegeben.
  *   → Ampel ist KI-gestützter pädagogischer Vorschlag, kein validiertes Urteil.
  *   → Nicole entscheidet über Annahme, Änderung und Kommunikation jedes Vorschlags.
- *   → Fehlende / nicht-messbare Evidenz bleibt neutral – niemals Grün.
+ *   → Fehlende / nicht-messbare Evidenz wird gelb-gestrichelt als
+ *     „Nicole prüft“ dargestellt – niemals automatisch Grün oder Rot.
  *
  * Gesperrt bleiben (unabhängig vom Ampelmodus):
  *   allowValidatedThresholdScoring / allowAutomaticSafetyClaims /
@@ -47,7 +48,7 @@ export const BUILD_POLICY = Object.freeze({
   allowTeacherReview: true,
 
   /** Policy-Version für Provenienz-Logging */
-  policyVersion: '0.2.0-teacher-ampel',
+  policyVersion: '0.3.0-pedagogical-full-coverage',
 
   // ── BACKWARD-COMPAT ALIASES (für bestehenden Code) ──────────────────────────────
   /** @deprecated Verwende allowAutomaticHomeworkGeneration */
@@ -95,7 +96,8 @@ export const TEACHER_AMPEL_COLORS = Object.freeze({
   CORRECT: '#30d158',              // Grün – heuristisch korrekte Ausführung
   WARNING: '#ffd60a',              // Gelb – Prüf-/Beobachtungsbedarf
   ERROR:   '#ff453a',              // Rot – deutliche heuristische Abweichung
-  NEUTRAL: 'rgba(255,255,255,0.22)', // Grau – fehlende/blockierte Evidenz (NIE Grün)
+  REVIEW:  '#ffd60a',              // Gelb gestrichelt – Evidenz/Kontext prüfbedürftig
+  NEUTRAL: '#ffd60a',              // Kompatibilität: keine graue Ampellücke
 } as const);
 
 /**

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { RealMediaPipePoseService } from '../services/realMediaPipePose';
+import { RealMediaPipePoseService, resolveMediaPipePoseAsset } from '../services/realMediaPipePose';
 
 function createServiceWithResult(result: unknown) {
   const service = new RealMediaPipePoseService();
@@ -36,6 +36,16 @@ function createServiceWithSendError() {
 }
 
 describe('RealMediaPipePoseService result contract', () => {
+  it('resolves every pose dependency from the same-origin packaged asset directory', () => {
+    expect(resolveMediaPipePoseAsset('pose_solution_simd_wasm_bin.wasm')).toBe(
+      '/mediapipe/wasm/pose_solution_simd_wasm_bin.wasm',
+    );
+    expect(resolveMediaPipePoseAsset('pose_landmark_full.tflite', '/balletos/')).toBe(
+      '/balletos/mediapipe/wasm/pose_landmark_full.tflite',
+    );
+    expect(() => resolveMediaPipePoseAsset('../remote.js')).toThrow(/Unsupported MediaPipe pose asset path/);
+  });
+
   it('emits explicit empty landmarks when MediaPipe finds no pose', async () => {
     const service = createServiceWithResult({ poseLandmarks: [] });
     const canvas = document.createElement('canvas');

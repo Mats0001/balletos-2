@@ -31,7 +31,8 @@ const EXPECTED = {
   heuristic_match: { color: '#30d158', dash: [] },
   heuristic_attention: { color: '#ffd60a', dash: [] },
   heuristic_strong_attention: { color: '#ff453a', dash: [] },
-  blocked: { color: 'rgba(255,255,255,0.18)', dash: [5, 4] },
+  heuristic_review: { color: '#ffd60a', dash: [7, 4] },
+  blocked: { color: '#ffd60a', dash: [5, 4] },
 } satisfies Record<TeacherHeuristicState, { color: string; dash: number[] }>;
 
 interface StrokeRecord {
@@ -42,6 +43,7 @@ interface StrokeRecord {
 
 function createRecordingCanvas(cssWidth = 1000) {
   const strokes: StrokeRecord[] = [];
+  const fills: string[] = [];
   let currentDash: number[] = [];
   const context = {
     canvas: { width: 1000, height: 1000, getBoundingClientRect: () => ({ width: cssWidth, height: cssWidth }) },
@@ -57,7 +59,9 @@ function createRecordingCanvas(cssWidth = 1000) {
     moveTo: () => undefined,
     lineTo: () => undefined,
     arc: () => undefined,
-    fill: () => undefined,
+    fill() {
+      fills.push(String(this.fillStyle));
+    },
     roundRect: () => undefined,
     fillText: () => undefined,
     measureText: (value: string) => ({ width: value.length * 8 }),
@@ -77,7 +81,7 @@ function createRecordingCanvas(cssWidth = 1000) {
     getContext: () => context,
   } as unknown as HTMLCanvasElement;
 
-  return { canvas, strokes };
+  return { canvas, strokes, fills };
 }
 
 const point = (x: number, y: number) => ({ x, y, vis: 1 });
@@ -148,7 +152,7 @@ function renderTeacherPacket(
   frameContext: { streamEpoch: number; framePtsSeconds: number; policyVersion: string } | undefined = {
     streamEpoch: 42,
     framePtsSeconds: 2.5,
-    policyVersion: '0.2.0-teacher-ampel',
+    policyVersion: '0.3.0-pedagogical-full-coverage',
   },
   selectedJointId: string = '',
   glowType?: 'GOOD' | 'CORRECTION',
@@ -250,6 +254,7 @@ describe('trusted skeleton color contract', () => {
     expect(resolveTeacherGlowType('heuristic_match')).toBe('GOOD');
     expect(resolveTeacherGlowType('heuristic_attention')).toBeUndefined();
     expect(resolveTeacherGlowType('heuristic_strong_attention')).toBe('CORRECTION');
+    expect(resolveTeacherGlowType('heuristic_review')).toBeUndefined();
     expect(resolveTeacherGlowType('blocked')).toBeUndefined();
     expect(resolveTeacherGlowType(undefined)).toBeUndefined();
     expect(resolveTeacherGlowType('CORRECT')).toBeUndefined();
@@ -259,8 +264,43 @@ describe('trusted skeleton color contract', () => {
     const strokes = renderTeacherPacket(0.95);
 
     expect(strokes.some(({ color }) => color === EXPECTED.heuristic_match.color)).toBe(true);
-    expect(strokes.some(({ color }) => color === EXPECTED.heuristic_attention.color)).toBe(false);
     expect(strokes.some(({ color }) => color === EXPECTED.heuristic_strong_attention.color)).toBe(false);
+  });
+
+  it('colors every visible joint from its teacher region instead of leaving gray joint gaps', () => {
+    const { canvas, fills } = createRecordingCanvas();
+    const packet = createBlockedPacket(2.5, 42);
+    for (const key of REGION_KEYS) packet[key] = 'heuristic_review';
+
+    renderSkeletonToCanvas(
+      canvas,
+      SKELETON,
+      { x: 500, y: 520 },
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {
+        showSkeleton: true,
+        showMotionTrails: false,
+        showCoG: true,
+        showAngleArcs: false,
+        selectedJointId: '',
+        isPlie: true,
+        vaganovaAnalysis: rawAnalysis(0.95),
+        overlayMode: 'lehrer-ampel',
+        overlayPacket: packet,
+        overlayFrameContext: {
+          streamEpoch: 42,
+          framePtsSeconds: 2.5,
+          policyVersion: packet.policyVersion,
+        },
+      },
+    );
+
+    expect(fills).toContain(EXPECTED.heuristic_review.color);
+    expect(fills).not.toContain('#e2e8f0');
   });
 
   it('keeps teacher traffic strokes stable when raw confidence changes', () => {
@@ -274,11 +314,10 @@ describe('trusted skeleton color contract', () => {
     const strokes = renderTeacherPacket(0.95, {
       streamEpoch: 99,
       framePtsSeconds: 2.5,
-      policyVersion: '0.2.0-teacher-ampel',
+      policyVersion: '0.3.0-pedagogical-full-coverage',
     });
 
     expect(strokes.some(({ color }) => color === EXPECTED.heuristic_match.color)).toBe(false);
-    expect(strokes.some(({ color }) => color === EXPECTED.heuristic_attention.color)).toBe(false);
     expect(strokes.some(({ color }) => color === EXPECTED.heuristic_strong_attention.color)).toBe(false);
     expect(strokes.some(({ color, dash }) => (
       color === EXPECTED.blocked.color && dash.join(',') === EXPECTED.blocked.dash.join(',')
@@ -296,7 +335,7 @@ describe('trusted skeleton color contract', () => {
     const strokes = renderTeacherPacket(0.95, {
       streamEpoch: 99,
       framePtsSeconds: 2.5,
-      policyVersion: '0.2.0-teacher-ampel',
+      policyVersion: '0.3.0-pedagogical-full-coverage',
     }, 'port_de_bras_arms', 'CORRECTION');
 
     expect(strokes.some(({ color }) => color === '#ff6b6b')).toBe(false);
@@ -342,7 +381,7 @@ describe('trusted skeleton color contract', () => {
         mediaTimeUs: 2_500_000,
         videoWidth: 960,
         videoHeight: 1280,
-        policyVersion: '0.2.0-teacher-ampel',
+        policyVersion: '0.3.0-pedagogical-full-coverage',
       },
     });
     expect(draft.kind).toBe('ready');
@@ -384,7 +423,7 @@ describe('trusted skeleton color contract', () => {
       generation: 7,
       videoWidth: 960,
       videoHeight: 1280,
-      policyVersion: '0.2.0-teacher-ampel',
+      policyVersion: '0.3.0-pedagogical-full-coverage',
     };
 
     const current = renderGuide(2_500_000);
@@ -414,7 +453,7 @@ describe('trusted skeleton color contract', () => {
         mediaTimeUs: 2_500_000,
         videoWidth: 1000,
         videoHeight: 1000,
-        policyVersion: '0.2.0-teacher-ampel',
+        policyVersion: '0.3.0-pedagogical-full-coverage',
         source: 'exact_frame_cache',
       },
     };
@@ -444,7 +483,7 @@ describe('trusted skeleton color contract', () => {
             mediaTimeUs: 2_500_000,
             videoWidth: 1000,
             videoHeight: 1000,
-            policyVersion: '0.2.0-teacher-ampel',
+            policyVersion: '0.3.0-pedagogical-full-coverage',
           },
           isPlie: true,
           vaganovaAnalysis: rawAnalysis(0.95),

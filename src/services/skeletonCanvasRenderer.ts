@@ -76,11 +76,12 @@ const isTeacherHeuristicState = (value: unknown): value is TeacherHeuristicState
   value === 'heuristic_match'
   || value === 'heuristic_attention'
   || value === 'heuristic_strong_attention'
+  || value === 'heuristic_review'
   || value === 'blocked';
 
 /**
  * The single presentation contract for traffic-light colors.
- * Missing or malformed packets fail closed to neutral/blocked.
+ * Missing or malformed packets fail closed to yellow dashed review styling.
  */
 export function resolveTeacherOverlayStyle(
   packet: TeacherOverlayPacket | undefined,
@@ -317,29 +318,6 @@ function drawGlowRing(
 }
 
 /**
- * Draws a dashed circle (ring) in viewbox coordinates.
- */
-function drawDashedCircle(
-  ctx: CanvasRenderingContext2D,
-  cx: number, cy: number,
-  r: number,
-  color: string,
-  width: number,
-  sx: number, sy: number
-) {
-  const avgScale = (sx + sy) / 2;
-  ctx.beginPath();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width * avgScale;
-  ctx.setLineDash([3 * avgScale, 2 * avgScale]);
-  ctx.globalAlpha = 0.8;
-  ctx.arc(cx * sx, cy * sy, r * avgScale, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.globalAlpha = 1.0;
-}
-
-/**
  * Draws text in viewbox coordinates.
  */
 function drawText(
@@ -483,7 +461,7 @@ export function renderSkeletonToCanvas(
   // dass es sich um nicht-validierte Rohdaten handelt.
   // 'anatomisch' und 'lehrbuch' enthalten KEINE Urteils-Farben.
   const mode = opts.overlayMode ?? 'anatomisch';
-  // Packet aus opts – fehlt es im Lehrer-Modus, alles blocked
+  // Packet aus opts – fehlt es im Lehrer-Modus, alles gelb gestrichelt/review
   const pkt = mode === 'lehrer-ampel'
     && isTeacherOverlayPacketCurrent(opts.overlayPacket, opts.overlayFrameContext)
     ? opts.overlayPacket
@@ -492,7 +470,7 @@ export function renderSkeletonToCanvas(
   /**
    * Holt Farbe aus TeacherOverlayPacket für einen Körperbereich.
    * Renderer berechnet KEINE Heuristik – nur Farb-Lookup.
-   * Fehlt das Packet → NEUTRAL.
+   * Fehlt das Packet → gelb gestrichelt (Nicole prüft).
    */
   const packetColor = (key: TeacherOverlayRegionKey): string => {
     if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
@@ -565,7 +543,7 @@ export function renderSkeletonToCanvas(
   if (opts.showCoG) {
     // FIX 2026-08-11: CoG war auto-grün im Lehrer-Modus (Issue 1.1)
     // Jetzt: Farbe kommt aus TeacherOverlayPacket.cog
-    // 'blocked' → grau (fehlende Evidenz ist KEIN positiver Befund)
+    // 'blocked' → gelb gestrichelt (fehlende Evidenz ist KEIN positiver Befund)
     const cogC = mode === 'lehrer-ampel'
       ? packetColor('cog')
       : COLOR_COG;
@@ -574,7 +552,7 @@ export function renderSkeletonToCanvas(
     drawCircle(ctx, cog.x, cog.y, 10,
       mode === 'lehrer-ampel' ? 'rgba(255,255,255,0.08)' : 'rgba(167,139,250,0.25)',
       sx, sy, cogC, 3);
-    drawCircle(ctx, cog.x, cog.y, 3, '#ffffff', sx, sy);
+    drawCircle(ctx, cog.x, cog.y, 3, mode === 'lehrer-ampel' ? cogC : '#ffffff', sx, sy);
   }
 
   // ─── WINKEL-BÖGEN (Turnout) ───
@@ -620,7 +598,18 @@ export function renderSkeletonToCanvas(
       mode === 'lehrer-ampel' ? packetDash('head') : []);
   }
   if (isSkeletonPointUsable(head) && isSkeletonPointUsable(neck)) {
-    drawLine(ctx, head.x, head.y, neck.x, neck.y, boneColor(COLOR_SPINE), 3.5, sx, sy);
+    drawLine(
+      ctx,
+      head.x,
+      head.y,
+      neck.x,
+      neck.y,
+      mode === 'lehrer-ampel' ? headC : boneColor(COLOR_SPINE),
+      3.5,
+      sx,
+      sy,
+      mode === 'lehrer-ampel' ? packetDash('head') : [],
+    );
   }
   ctx.globalAlpha = 1.0;
 
@@ -632,10 +621,10 @@ export function renderSkeletonToCanvas(
   if (isSkeletonPointUsable(neck) && isSkeletonPointUsable(sternum)) drawLine(ctx, neck.x, neck.y, sternum.x, sternum.y, spineC, 4, sx, sy, spineDash);
   if (isSkeletonPointUsable(sternum) && isSkeletonPointUsable(navel)) drawLine(ctx, sternum.x, sternum.y, navel.x, navel.y, spineC, 4, sx, sy, spineDash);
   if (isSkeletonPointUsable(navel) && isSkeletonPointUsable(pelvisCenter)) drawLine(ctx, navel.x, navel.y, pelvisCenter.x, pelvisCenter.y, spineC, 4, sx, sy, spineDash);
-  if (isSkeletonPointUsable(neck)) drawCircle(ctx, neck.x, neck.y, 5.5, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(sternum)) drawCircle(ctx, sternum.x, sternum.y, 5.5, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(navel)) drawCircle(ctx, navel.x, navel.y, 6.5, mode === 'lehrer-ampel' ? COLOR_JOINT : selColor, sx, sy);
-  if (isSkeletonPointUsable(pelvisCenter)) drawCircle(ctx, pelvisCenter.x, pelvisCenter.y, 7, COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(neck)) drawCircle(ctx, neck.x, neck.y, 5.5, mode === 'lehrer-ampel' ? spineC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(sternum)) drawCircle(ctx, sternum.x, sternum.y, 5.5, mode === 'lehrer-ampel' ? spineC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(navel)) drawCircle(ctx, navel.x, navel.y, 6.5, mode === 'lehrer-ampel' ? spineC : selColor, sx, sy);
+  if (isSkeletonPointUsable(pelvisCenter)) drawCircle(ctx, pelvisCenter.x, pelvisCenter.y, 7, mode === 'lehrer-ampel' ? packetColor('pelvis') : COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // ─── ARME (violett / status im Lehrer-Ampel-Modus) ───
@@ -656,8 +645,8 @@ export function renderSkeletonToCanvas(
   const shDash = mode === 'lehrer-ampel' ? packetDash('shoulder') : [];
   ctx.globalAlpha = stableAlpha(shConf);
   if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(shoulderR)) drawLine(ctx, shoulderL.x, shoulderL.y, shoulderR.x, shoulderR.y, shC, 3.5, sx, sy, shDash);
-  if (isSkeletonPointUsable(shoulderL)) drawCircle(ctx, shoulderL.x, shoulderL.y, 7, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(shoulderR)) drawCircle(ctx, shoulderR.x, shoulderR.y, 7, COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(shoulderL)) drawCircle(ctx, shoulderL.x, shoulderL.y, 7, mode === 'lehrer-ampel' ? shC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(shoulderR)) drawCircle(ctx, shoulderR.x, shoulderR.y, 7, mode === 'lehrer-ampel' ? shC : COLOR_JOINT, sx, sy);
   ctx.globalAlpha = 1.0;
 
   // Linker Arm
@@ -670,22 +659,56 @@ export function renderSkeletonToCanvas(
   if (isSkeletonPointUsable(elbowR) && isSkeletonPointUsable(wristR)) drawLine(ctx, elbowR.x, elbowR.y, wristR.x, wristR.y, armRColor, 4.5, sx, sy, armRDash);
   ctx.globalAlpha = 1.0;
 
-  // Ellenbogen-Ringe
+  // Ellenbogen-Ringe: im Lehrer-Modus folgt auch das Strichmuster exakt dem
+  // Regionszustand (solid = bewertet, dashed = Nicole prüft).
   const elbowC = boneColor(COLOR_ARM);
   ctx.globalAlpha = stableAlpha(armLConf ?? 0.8) * 0.85;
-  if (isSkeletonPointUsable(elbowL)) drawDashedCircle(ctx, elbowL.x, elbowL.y, 18, mode === 'lehrer-ampel' ? armLStatusC : elbowC, 2, sx, sy);
+  if (isSkeletonPointUsable(elbowL)) drawCircle(
+    ctx,
+    elbowL.x,
+    elbowL.y,
+    18,
+    'none',
+    sx,
+    sy,
+    mode === 'lehrer-ampel' ? armLStatusC : elbowC,
+    2,
+    mode === 'lehrer-ampel' ? armLDash : [3, 2],
+  );
   ctx.globalAlpha = stableAlpha(armRConf ?? 0.8) * 0.85;
-  if (isSkeletonPointUsable(elbowR)) drawDashedCircle(ctx, elbowR.x, elbowR.y, 18, mode === 'lehrer-ampel' ? armRStatusC : elbowC, 2, sx, sy);
+  if (isSkeletonPointUsable(elbowR)) drawCircle(
+    ctx,
+    elbowR.x,
+    elbowR.y,
+    18,
+    'none',
+    sx,
+    sy,
+    mode === 'lehrer-ampel' ? armRStatusC : elbowC,
+    2,
+    mode === 'lehrer-ampel' ? armRDash : [3, 2],
+  );
   ctx.globalAlpha = 1.0;
 
   // Gelenk-Dots
-  if (isSkeletonPointUsable(elbowL)) drawCircle(ctx, elbowL.x, elbowL.y, 5.5, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(elbowR)) drawCircle(ctx, elbowR.x, elbowR.y, 5.5, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(wristL)) drawCircle(ctx, wristL.x, wristL.y, 5.5, COLOR_JOINT, sx, sy);
-  if (isSkeletonPointUsable(wristR)) drawCircle(ctx, wristR.x, wristR.y, 5.5, COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(elbowL)) drawCircle(ctx, elbowL.x, elbowL.y, 5.5, mode === 'lehrer-ampel' ? armLStatusC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(elbowR)) drawCircle(ctx, elbowR.x, elbowR.y, 5.5, mode === 'lehrer-ampel' ? armRStatusC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(wristL)) drawCircle(ctx, wristL.x, wristL.y, 5.5, mode === 'lehrer-ampel' ? armLStatusC : COLOR_JOINT, sx, sy);
+  if (isSkeletonPointUsable(wristR)) drawCircle(ctx, wristR.x, wristR.y, 5.5, mode === 'lehrer-ampel' ? armRStatusC : COLOR_JOINT, sx, sy);
 
   // ─── ÉPAULEMENT: shoulder line only ───
-  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(shoulderR)) drawLine(ctx, shoulderL.x - 15, shoulderL.y, shoulderR.x + 15, shoulderR.y, COLOR_EPAULEMENT, 1.5, sx, sy, [6, 3]);
+  if (isSkeletonPointUsable(shoulderL) && isSkeletonPointUsable(shoulderR)) drawLine(
+    ctx,
+    shoulderL.x - 15,
+    shoulderL.y,
+    shoulderR.x + 15,
+    shoulderR.y,
+    mode === 'lehrer-ampel' ? shC : COLOR_EPAULEMENT,
+    1.5,
+    sx,
+    sy,
+    mode === 'lehrer-ampel' ? shDash : [6, 3],
+  );
 
   // ─── TORSO RAHMEN ───
   // FIX 2026-08-11: Torso-Seitenlinien reagieren jetzt auf TeacherOverlayPacket.torsoAlignment
@@ -739,24 +762,24 @@ export function renderSkeletonToCanvas(
 
   // ─── FUß-DOTS (aus TeacherOverlayPacket) ───
   // FIX 2026-08-11: Fuß-Dots kommen jetzt aus Packet, nicht mehr direkt aus FootAnalyzer (Issue 1.3)
-  // footL/footR = 'blocked' → kein Dot (fehlende Evidenz = kein Urteil)
+  // Foot dots remain visible for every usable foot; blocked/review is yellow dashed.
   const footLC = mode === 'lehrer-ampel' ? packetColor('footL') : boneColor(COLOR_LEG);
   const footRC = mode === 'lehrer-ampel' ? packetColor('footR') : boneColor(COLOR_LEG);
-  if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL) && mode === 'lehrer-ampel' && resolveTeacherOverlayStyle(pkt, 'footL').state !== 'blocked') {
+  if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL) && mode === 'lehrer-ampel') {
     drawCircle(ctx, ankleL.x, ankleL.y, 8, footLC, sx, sy, footLC, 2);
   }
-  if (isSkeletonPointUsable(ankleR) && isSkeletonPointUsable(footR) && mode === 'lehrer-ampel' && resolveTeacherOverlayStyle(pkt, 'footR').state !== 'blocked') {
+  if (isSkeletonPointUsable(ankleR) && isSkeletonPointUsable(footR) && mode === 'lehrer-ampel') {
     drawCircle(ctx, ankleR.x, ankleR.y, 8, footRC, sx, sy, footRC, 2);
   }
   if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL)) {
     drawLine(ctx, ankleL.x, ankleL.y, footL.x, footL.y, footLC, 3.5, sx, sy,
       mode === 'lehrer-ampel' ? packetDash('footL') : []);
-    drawCircle(ctx, footL.x, footL.y, 5, COLOR_JOINT, sx, sy);
+    drawCircle(ctx, footL.x, footL.y, 5, mode === 'lehrer-ampel' ? footLC : COLOR_JOINT, sx, sy);
   }
   if (isSkeletonPointUsable(ankleR) && isSkeletonPointUsable(footR)) {
     drawLine(ctx, ankleR.x, ankleR.y, footR.x, footR.y, footRC, 3.5, sx, sy,
       mode === 'lehrer-ampel' ? packetDash('footR') : []);
-    drawCircle(ctx, footR.x, footR.y, 5, COLOR_JOINT, sx, sy);
+    drawCircle(ctx, footR.x, footR.y, 5, mode === 'lehrer-ampel' ? footRC : COLOR_JOINT, sx, sy);
   }
 
   // ─── SCHWERPUNKT-DOT ───

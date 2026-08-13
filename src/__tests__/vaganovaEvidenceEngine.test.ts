@@ -129,4 +129,26 @@ describe('VaganovaEvidenceEngine knee-axis contract', () => {
     const flexionMetric = schema.metrics.find(metric => metric.metric_id === 'projected_knee_flexion_plie');
     expect(flexionMetric?.source?.doi).toBe('10.3390/sports12020054');
   });
+
+  it('documents every full-coverage teacher relation as an unvalidated 2D candidate', () => {
+    const metricIds = [
+      'arm_line_port_de_bras',
+      'projected_knee_foot_relation_teacher',
+      'projected_foot_outward_relation_teacher',
+      'projected_torso_center_support_relation_teacher',
+    ];
+
+    for (const metricId of metricIds) {
+      const metric = schema.metrics.find(candidate => candidate.metric_id === metricId);
+      expect(metric, metricId).toMatchObject({
+        measurement_class: 'vaganova_relation',
+        validation_status: 'pedagogical_candidate_unvalidated',
+        teacher_review_status: 'pending_nicole_per_observation',
+      });
+    }
+
+    const serialized = JSON.stringify(schema.metrics.filter(metric => metricIds.includes(metric.metric_id)));
+    expect(serialized).toMatch(/not a valgus measurement|not center of pressure|does not measure anatomical turnout/i);
+    expect(serialized).not.toMatch(/validated_system_threshold|muscle weakness|injury prognosis/i);
+  });
 });

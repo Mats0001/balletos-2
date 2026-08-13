@@ -1,18 +1,32 @@
 # PROJECT_DECISION: Lehrer-Ampel – Vollständiger Funktionsumfang
 
-**Datum:** 2026-08-10  
-**Entscheid durch:** Externer Berater (formelles Schreiben) + Nicole (Ballettpädagogin)  
-**Policy-Version:** `0.2.0-teacher-ampel` (BUILD_POLICY.policyVersion)  
+**Datum:** 2026-08-10
+**Entscheid durch:** Externer Berater (formelles Schreiben) + Nicole (Ballettpädagogin)
+**Policy-Version:** `0.3.0-pedagogical-full-coverage` (BUILD_POLICY.policyVersion)
 **Status:** BINDEND – Produktionsimplementierung
 
-> **Technischer P0-Nachtrag, 2026-08-12:** Die unten dokumentierte
+> **Vollabdeckungs-Nachtrag, 2026-08-13 – ersetzt die früheren
+> Darstellungsstopps für Arme, Beine, Füße und Schwerpunkt:** Die fehlerhaften
+> Knie-BAS- und 0°-Armresolver bleiben vollständig entfernt. An ihre Stelle
+> treten eigenständige, deterministische 2D-Lehrrelationen mit Perspektiv-,
+> Bewegungs-, Sichtbarkeits- und Geometriegates. Damit erhält jede erkannte,
+> sichtbare Körperregion eine Ampeldarstellung. Wenn ein Gate nicht erfüllt ist,
+> bleibt die Region nicht grau und wird nicht ausgelassen, sondern erscheint
+> gelb gestrichelt als „Nicole prüft“. Dieser Nachtrag autorisiert keine
+> Muskel-, Valgus-, Druck-, COP-, Ursachen-, Prognose- oder Verletzungsdiagnose.
+> Die folgenden P0-/BAS-Nachträge bleiben als Historie und als Verbot der alten
+> Resolver bindend; ihre damalige neutrale Darstellung ist durch diesen
+> Vollabdeckungsvertrag ersetzt.
+
+> **Historischer technischer P0-Nachtrag, 2026-08-12:** Die unten dokumentierte
 > Bein-Heuristik ist vorläufig ausgesetzt. Ein reproduzierter Quellwechsel zeigte,
 > dass die globale Baseline denselben Zielframe allein durch vorherige Frames Rot
 > statt Grün färben konnte. Zudem waren `research_observation` und die frühere
 > vorzeichenbehaftete, aber richtungssemantisch nicht validierte
 > `individual_baseline` ausdrücklich keine Urteilsmetriken. `legL` und `legR`
-> bleiben daher neutral, bis ein von Nicole geprüfter, quell-/schülergebundener
-> DecisionGate Perspektive, Bewegungsphase und Richtungssemantik autorisiert.
+> blieben deshalb in diesem damaligen Stand neutral. Der Nachtrag vom 2026-08-13
+> ersetzt nur diese Darstellung durch eine neue sichtbare Knie-Fuß-Relation;
+> die alten Metriken bleiben weiterhin ohne Farbberechtigung.
 > Aus denselben nicht urteilsfähigen Werten werden auch keine automatischen
 > Knie-Cues und keine Knie-Anteile in einem positiven Gesamtmoment erzeugt.
 > Ein automatischer positiver Gesamtmoment sowie positive Schulter-/Schwerpunkt-
@@ -21,21 +35,22 @@
 > Nicoles manuelle Marker, Demo-Beispiele und die neutrale Rohmesswertansicht
 > bleiben davon unberührt.
 >
-> **BAS-Nachtrag, 2026-08-12:** Die frühere Knieachsen-„Baseline“ aus den
+> **Historischer BAS-Nachtrag, 2026-08-12:** Die frühere Knieachsen-„Baseline“ aus den
 > ersten 30 Calculator-Aufrufen wurde entfernt. Sie war weder an Video, Person,
 > eindeutige Medienzeit noch Bewegungsphase gebunden und konnte denselben Frame
 > abhängig von zuvor geöffneten Videos unterschiedlich anzeigen. Der verbleibende
-> 2D-Projektionswert ist rein und reproduzierbar, wird aber in allen sichtbaren
-> und entscheidenden Pfaden als `not_measurable` behandelt: keine Zahl, kein
-> Δ, keine Richtung, keine Schwelle und keine Ampelfarbe. Eine spätere
+> 2D-Projektionswert ist rein und reproduzierbar, wird aber als
+> `not_measurable` behandelt: keine Zahl, kein Δ, keine Richtung und keine
+> Schwelle. Er ist ausdrücklich nicht die neue sichtbare Knie-Fuß-Relation. Eine spätere
 > Vergleichsfunktion benötigt einen von Nicole gewählten Referenzframe samt
 > Video-/Person-/Zeit-/Perspektiv-/Spiegelungs- und Modellprovenienz.
 > Die Arm-Heuristik ist ebenfalls vorläufig ausgesetzt: `armLineQuality` enthält
 > den tatsächlichen Ellbogenwinkel, wurde in der Ampel jedoch fälschlich als
 > Abweichung von 0° klassifiziert. Die hinterlegten Kandidatengrenzen gelten
-> zudem nur für die zweite Armposition. `armL` und `armR` bleiben neutral, bis
-> ein von Nicole geprüftes Gate Armposition, Perspektive und Bewegungsphase
-> explizit bestätigt und den vorhandenen Messstatus autorisiert.
+> zudem nur für die zweite Armposition. `armL` und `armR` blieben deshalb in
+> diesem damaligen Stand neutral. Der Nachtrag vom 2026-08-13 ersetzt den
+> fehlerhaften Resolver durch eine positionsabhängige sichtbare 2D-Armrelation;
+> der alte 0°-Abweichungsvertrag bleibt gesperrt.
 > Alle übrigen Teile dieser Entscheidung bleiben unverändert.
 
 > **P0-Textnachtrag, 2026-08-12:** Der alte automatische Cue-Textgenerator ist
@@ -54,8 +69,9 @@
 > BalletOS stellt Nicole im experimentellen Lehrer-Modus die vollständige automatische 
 > Ampelfunktion zur Verfügung. Die Ampel ist ein KI-gestützter fachlicher Vorschlag, 
 > kein validiertes Systemurteil. Nicole entscheidet über Annahme, Änderung und 
-> Kommunikation. Fehlende oder nicht messbare Evidenz bleibt neutral und kann niemals 
-> als positive Ausführung dargestellt werden.
+> Kommunikation. Jede sichtbare Region erhält eine Ampelfarbe. Fehlende,
+> kontextabhängige oder nicht messbare Evidenz erscheint gelb gestrichelt als
+> „Nicole prüft“ und kann niemals automatisch Grün oder Rot werden.
 
 ---
 
@@ -104,27 +120,37 @@ Freigegebene pädagogische Kommunikation
 
 ---
 
-## Neutrale Zustände (niemals automatisch Grün)
+## Review-Zustände (niemals automatisch Grün oder Rot)
 
 ```
 not_measurable, blocked, missing_landmark, invalid_geometry,
 wrong_camera, occluded, unassigned_person, insufficient_temporal_data
 ```
-→ Darstellung: `rgba(255,255,255,0.22)` Grau / gestrichelt
+→ Darstellung: `#ffd60a` Gelb / gestrichelt · Bedeutung: „Nicole prüft“
+
+Grau gehört nicht mehr zur Lehrer-Ampel. Gelb hat zwei sichtbar getrennte
+Formen: durchgezogen = konkrete beobachtete Relation braucht Aufmerksamkeit;
+gestrichelt = Evidenz oder Bewegungskontext reicht nur für Nicoles Prüfung.
 
 ---
 
-## Lehrer-Ampel Bein-Heuristik (historischer Entwurf – technisch ausgesetzt)
+## Lehrer-Ampel Unterkörpervertrag
 
 Der ursprüngliche Entwurf kombinierte Beobachtungswerte zur Knieflexion mit
 einer aufrufbasierten Knieachsen-Baseline und festen Farbschwellen. Die
 numerischen Schwellen sind zurückgezogen; weder die historische Baseline noch
 ihre Delta-Ziele gehören weiter zum Laufzeit- oder Messvertrag.
 
-Diese Heuristik ist **nicht validiert** und seit dem P0-Nachtrag vom 2026-08-12
-nicht farbberechtigt. Der historische Knie-Δ-Wert wird nicht mehr erzeugt oder
-angezeigt; der interne 2D-Projektionswert bleibt `not_measurable` und ist keine
-Richtungs-, Valgus- oder Baseline-Messung.
+Der historische Knie-Δ-Wert bleibt entfernt. Die neue Ampel verwendet keine
+Valgus-, Muskel- oder Baseline-Behauptung. Sie bewertet ausschließlich die
+sichtbare frontale Knie–Fuß-Projektion, normiert an der sichtbaren Beinlänge.
+Profil, Arabesque, geringe Sichtbarkeit oder fehlender Bewegungskontext führen
+gelb gestrichelt zu „Nicole prüft“.
+
+Arme werden positionsabhängig als sichtbare 2D-Armform beurteilt. Füße nutzen
+im Plié dieselbe Knie–Fuß-Projektion, außerhalb davon lediglich die sichtbare
+Fortsetzung vom Körperzentrum weg. Der Schwerpunkt ist ausdrücklich nur die
+projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 
 ---
 
@@ -134,7 +160,7 @@ Richtungs-, Valgus- oder Baseline-Messung.
 |-------|----------|
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
-| `src/services/teacherHeuristicEngine.ts` | `armL`/`armR` und `legL`/`legR` bis zu kontextgebundenen Gates → NEUTRAL |
+| `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Unsicherheit → gelb gestrichelt |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
@@ -145,11 +171,12 @@ Richtungs-, Valgus- oder Baseline-Messung.
 ## Abnahmekriterien (geprüft)
 
 - [x] Nur durch den aktuellen Evidenzvertrag autorisierte Regionen → Rot/Gelb/Grün im Lehrer-Ampelmodus
-- [x] Bein-Shadow-Metriken ohne Richtungs-/Kontextfreigabe → NEUTRAL
+- [x] Bein-Shadow-Metriken bleiben ohne Farbberechtigung; Farbe stammt aus neuer sichtbarer Knie–Fuß-Relation
 - [x] Bein-Shadow-Metriken erzeugen keine automatischen Knie-Cues oder positiven Kniezählungen
 - [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
-- [x] Arm-Kandidatengrenzen ohne Positions-/Perspektivfreigabe → NEUTRAL
-- [x] `not_measurable`/`blocked` → niemals Grün (NEUTRAL grau)
+- [x] Armfarben sind an sichtbare Position, Geometrie und Confidence gebunden
+- [x] `not_measurable`/`blocked` → niemals Grün/Rot (REVIEW gelb gestrichelt)
+- [x] Keine graue oder ausgelassene Region im Lehrer-Ampelmodus
 - [x] Lehrer-Ampelmodus als persönliche Einstellung pro Schülerin speicherbar
 - [x] Moduswechsel verändert keine Rohmesswerte
 - [x] KI-Vorschlag und Nicole-Entscheidung: getrennte Provenienz

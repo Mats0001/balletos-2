@@ -11,6 +11,8 @@ import { PoseLandmark } from './realMediaPipePose';
 import { TeacherHeuristicEngine } from './teacherHeuristicEngine';
 import { vaganova3DKinematics } from './vaganova3DKinematics';
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
+import { vaganovaKineticAI } from './vaganovaKineticAI';
+import { vaganovaMotionClassifier } from './vaganovaMotionClassifier';
 
 type StateKey = Exclude<
   keyof TeacherOverlayPacket,
@@ -21,11 +23,6 @@ const STATE_KEYS: readonly StateKey[] = [
   'torsoAlignment', 'spine', 'shoulder', 'pelvis',
   'armL', 'armR', 'legL', 'legR',
   'footL', 'footR', 'cog', 'head',
-] as const;
-
-/** Paused replay cannot yet reproduce these regions' full live provenance. */
-const PAUSED_NEUTRAL_ONLY_KEYS: readonly StateKey[] = [
-  'legL', 'legR', 'footL', 'footR', 'cog',
 ] as const;
 
 /** Longest color confirmation is 500ms; retain one additional cache step. */
@@ -136,7 +133,6 @@ function normalizePausedRawPacket(packet: TeacherOverlayPacket): TeacherOverlayP
   ) {
     normalized.torsoAlignment = 'blocked';
   }
-  for (const key of PAUSED_NEUTRAL_ONLY_KEYS) normalized[key] = 'blocked';
   return normalized;
 }
 
@@ -253,11 +249,14 @@ export function buildPausedTeacherOverlayEvidence(
       input.videoWidth,
       input.videoHeight,
     );
+    const motion = vaganovaMotionClassifier.classify(mutableLandmarks);
+    const cog = vaganovaKineticAI.computeCenterOfGravity(skeleton);
     return heuristicEngine.compute(
       analysis,
       skeleton,
       framePtsSeconds,
       input.streamEpoch,
+      { motion, cogX: cog.x },
     );
   };
 
