@@ -17,7 +17,8 @@ import { vaganova3DKinematics, type ReconstructedSkeleton } from './vaganova3DKi
 
 export interface NicolePhaseReferenceComparison {
   status: 'ready' | 'insufficient_evidence';
-  sourceScope: 'same_video';
+  sourceScope: 'same_video' | 'cross_video';
+  referenceVideoSourceId: string;
   phaseId: PliePhaseId;
   targetId: SkeletonTargetId;
   targetLabel: string;
@@ -62,6 +63,24 @@ function axisDeltaDeg(
   return Math.acos(Math.abs(dot)) * 180 / Math.PI;
 }
 
+function imageNormalizedDirection(
+  direction: Readonly<{ x: number; y: number }>,
+  videoWidth: number,
+  videoHeight: number,
+): Readonly<{ x: number; y: number }> | null {
+  if (
+    !Number.isFinite(direction.x) || !Number.isFinite(direction.y)
+    || !Number.isFinite(videoWidth) || videoWidth <= 0
+    || !Number.isFinite(videoHeight) || videoHeight <= 0
+  ) return null;
+  const x = direction.x / videoWidth;
+  const y = direction.y / videoHeight;
+  const length = Math.hypot(x, y);
+  return Number.isFinite(length) && length > 1e-12
+    ? Object.freeze({ x: x / length, y: y / length })
+    : null;
+}
+
 function currentBoneDirection(
   frame: FrameEntry,
   targetId: SkeletonTargetId,
@@ -92,7 +111,7 @@ function currentBoneDirection(
   const dy = points[1].y - points[0].y;
   const length = Math.hypot(dx, dy);
   if (!Number.isFinite(length) || length <= 1e-6) return null;
-  return Object.freeze({ x: dx / length, y: dy / length });
+  return imageNormalizedDirection({ x: dx / length, y: dy / length }, videoWidth, videoHeight);
 }
 
 function perspectivePlane(analysis: TeacherPhaseAnalysis): 'frontal' | 'profile' | null {
@@ -108,7 +127,7 @@ export function compareNicolePhaseReferences(
   const { analysis } = input;
   if (
     !analysis
-    || analysis.gate.status !== 'ready'
+    || analysis.gate.status === 'needs_correction'
     || !input.videoSourceId
     || !Number.isFinite(input.videoWidth) || input.videoWidth <= 0
     || !Number.isFinite(input.videoHeight) || input.videoHeight <= 0
@@ -119,13 +138,11 @@ export function compareNicolePhaseReferences(
   const comparisons: NicolePhaseReferenceComparison[] = [];
   const skeletonCache = new Map<FrameEntry, ReconstructedSkeleton | null>();
   for (const record of input.records) {
-    if (!nicoleReferenceRecordIsValid(record) || record.videoSourceId !== input.videoSourceId) continue;
+    if (!nicoleReferenceRecordIsValid(record)) continue;
     const version = record.versions.find(item => item.versionId === record.currentVersionId);
     const binding = version?.phaseBinding;
     if (
       !version || !binding
-      || version.videoWidth !== input.videoWidth
-      || version.videoHeight !== input.videoHeight
       || binding.exerciseId !== 'plie'
       || binding.policyVersion !== analysis.policyVersion
       || binding.levelLabel !== analysis.levelLabel
@@ -133,10 +150,27 @@ export function compareNicolePhaseReferences(
     ) continue;
     const phase = analysis.phases.find(item => item.id === binding.phaseId);
     const target = getSkeletonTarget(record.targetId);
+    const sameVideo = record.videoSourceId === input.videoSourceId;
+    const hasSourcePhaseWindow = Number.isFinite(binding.sourcePhaseStartMs)
+      && Number.isFinite(binding.sourcePhaseEndMs)
+      && Number.isFinite(binding.sourcePhaseRepresentativeTimeMs);
+    const sourceTimeMs = version.sourceMediaTimeUs / 1000;
+    const sourceTimeMatchesBoundPhase = hasSourcePhaseWindow
+      && sourceTimeMs >= binding.sourcePhaseStartMs!
+      && sourceTimeMs <= binding.sourcePhaseEndMs!;
+    const referenceDirection = imageNormalizedDirection(
+      version.direction,
+      version.videoWidth,
+      version.videoHeight,
+    );
     if (
       !phase || !target || target.kind !== 'bone'
-      || version.sourceMediaTimeUs / 1000 < phase.startMs
-      || version.sourceMediaTimeUs / 1000 > phase.endMs
+      || !referenceDirection
+      || (!sameVideo && !sourceTimeMatchesBoundPhase)
+      || (sameVideo && (
+        sourceTimeMs < phase.startMs
+        || sourceTimeMs > phase.endMs
+      ))
     ) continue;
 
     const phaseFrames = input.frames.filter(frame => (
@@ -150,13 +184,14 @@ export function compareNicolePhaseReferences(
         input.videoHeight,
         skeletonCache,
       );
-      return direction ? [axisDeltaDeg(version.direction, direction)] : [];
+      return direction ? [axisDeltaDeg(referenceDirection, direction)] : [];
     });
     const coverage = deltas.length / Math.max(1, phaseFrames.length);
     const enough = deltas.length >= 2 && coverage >= 0.5;
     comparisons.push(Object.freeze({
       status: enough ? 'ready' : 'insufficient_evidence',
-      sourceScope: 'same_video',
+      sourceScope: sameVideo ? 'same_video' : 'cross_video',
+      referenceVideoSourceId: record.videoSourceId,
       phaseId: phase.id,
       targetId: record.targetId,
       targetLabel: target.label,
@@ -167,7 +202,9 @@ export function compareNicolePhaseReferences(
       usableSampleCount: deltas.length,
       phaseSampleCount: phaseFrames.length,
       coverage,
-      evidenceStyle: deltas.length >= 3 && coverage >= 0.8 ? 'solid' : 'dashed',
+      evidenceStyle: analysis.gate.status === 'ready' && deltas.length >= 3 && coverage >= 0.8
+        ? 'solid'
+        : 'dashed',
       medianAxisDeltaDeg: enough ? median(deltas) : null,
       minAxisDeltaDeg: enough ? Math.min(...deltas) : null,
       maxAxisDeltaDeg: enough ? Math.max(...deltas) : null,
@@ -176,7 +213,9 @@ export function compareNicolePhaseReferences(
 
   const phaseOrder: readonly PliePhaseId[] = ['setup', 'descent', 'bottom', 'ascent', 'finish'];
   return Object.freeze(comparisons.sort((a, b) => (
-    phaseOrder.indexOf(a.phaseId) - phaseOrder.indexOf(b.phaseId)
+    (a.sourceScope === b.sourceScope ? 0 : a.sourceScope === 'same_video' ? -1 : 1)
+    || phaseOrder.indexOf(a.phaseId) - phaseOrder.indexOf(b.phaseId)
     || a.targetId.localeCompare(b.targetId)
+    || a.referenceVideoSourceId.localeCompare(b.referenceVideoSourceId)
   )));
 }

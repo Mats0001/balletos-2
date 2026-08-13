@@ -11,6 +11,13 @@ export interface NicoleReferencePhaseBinding {
   levelLabel: string;
   policyVersion: string;
   reviewState: 'nicole_approved';
+  /**
+   * Exact detected source-phase window. Optional only for legacy same-video
+   * lines; cross-video use requires all three values.
+   */
+  sourcePhaseStartMs?: number;
+  sourcePhaseEndMs?: number;
+  sourcePhaseRepresentativeTimeMs?: number;
 }
 
 export interface NicoleReferenceLineVersion {

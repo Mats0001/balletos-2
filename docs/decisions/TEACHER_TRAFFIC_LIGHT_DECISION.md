@@ -31,6 +31,16 @@
 > Schülerin werden erst dann als zusätzliche Signale ausgewiesen, wenn ihr
 > jeweiliger Adapter tatsächlich angeschlossen und provenance-geprüft ist.
 
+> **Cross-Video-Referenznachtrag, 2026-08-13:** Nicole-geprüfte 2D-Bone-Linien
+> bilden eine lokale, versionsgebundene Referenzbibliothek. Eine Linie aus einer
+> anderen Aufnahme darf ausschließlich verglichen werden, wenn Übung, Phase,
+> Perspektive, Stufe und Policy exakt übereinstimmen und der gespeicherte
+> Quellzeitpunkt innerhalb des digestgebundenen Quell-Phasenfensters liegt.
+> Unterschiedliche Videoauflösungen werden bildnormalisiert. Der Vergleich zeigt
+> Quelle, Version, Abdeckung und 2D-Achsenabstand; er ist weder „Ideal“ noch ein
+> automatischer Richtig-/Falsch- oder Ampel-Entscheider. Ältere Linien ohne
+> Quell-Phasenfenster bleiben aus Sicherheitsgründen auf ihr eigenes Video beschränkt.
+
 > **Vollabdeckungs-Nachtrag, 2026-08-13 – ersetzt die früheren
 > Darstellungsstopps für Arme, Beine, Füße und Schwerpunkt:** Die fehlerhaften
 > Knie-BAS- und 0°-Armresolver bleiben vollständig entfernt. An ihre Stelle

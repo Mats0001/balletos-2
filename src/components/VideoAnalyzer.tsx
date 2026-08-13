@@ -2267,6 +2267,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           levelLabel: phaseAnalysis.levelLabel,
           policyVersion: phaseAnalysis.policyVersion,
           reviewState: 'nicole_approved',
+          sourcePhaseStartMs: phase.startMs,
+          sourcePhaseEndMs: phase.endMs,
+          sourcePhaseRepresentativeTimeMs: phase.representativeTimeMs,
         })
         : undefined;
       const record = saveNicoleReferenceLine({
@@ -3355,7 +3358,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           return (
                             <div
                               key={`${comparison.recordId}:${comparison.versionId}`}
-                              title="Versionsgebundener 2D-Linienvergleich innerhalb derselben Aufnahme. Kein automatisches Richtig/Falsch."
+                              title="Versionsgebundener 2D-Linienvergleich aus Nicoles Referenzbibliothek. Kein automatisches Richtig/Falsch."
                               style={{
                                 marginTop: '6px', padding: '5px 6px', borderRadius: '7px',
                                 background: 'rgba(34,211,238,0.07)',
@@ -3371,7 +3374,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   ? `${comparison.medianAxisDeltaDeg!.toFixed(1)}° 2D-Achsenabstand · ${comparison.usableSampleCount}/${comparison.phaseSampleCount} Phasenframes`
                                   : `nicht ausreichend sichtbar · ${comparison.usableSampleCount}/${comparison.phaseSampleCount} Phasenframes`}
                               </div>
-                              <div style={{ opacity: 0.58 }}>gleiche Aufnahme · phasen- und versionsgebunden</div>
+                              <div style={{ opacity: 0.58 }}>
+                                {comparison.sourceScope === 'same_video'
+                                  ? 'gleiche Aufnahme'
+                                  : `andere Aufnahme · ${comparison.referenceVideoSourceId.split('/').pop() ?? comparison.referenceVideoSourceId}`}
+                                {' · '}phasen- und versionsgebunden · Nicole geprüft
+                              </div>
                             </div>
                           );
                         })}

@@ -67,13 +67,25 @@ export function nicoleReferencePhaseBindingIsValid(
 ): value is NicoleReferencePhaseBinding {
   if (!value || typeof value !== 'object') return false;
   const binding = value as NicoleReferencePhaseBinding;
+  const phaseWindowValues = [
+    binding.sourcePhaseStartMs,
+    binding.sourcePhaseEndMs,
+    binding.sourcePhaseRepresentativeTimeMs,
+  ];
+  const hasAnyPhaseWindow = phaseWindowValues.some(item => item !== undefined);
+  const phaseWindowIsValid = !hasAnyPhaseWindow || (
+    phaseWindowValues.every(item => typeof item === 'number' && Number.isFinite(item) && item >= 0)
+    && binding.sourcePhaseStartMs! <= binding.sourcePhaseRepresentativeTimeMs!
+    && binding.sourcePhaseRepresentativeTimeMs! <= binding.sourcePhaseEndMs!
+  );
   return binding.schemaVersion === 1
     && binding.exerciseId === 'plie'
     && PHASE_IDS.has(binding.phaseId)
     && (binding.perspectivePlane === 'frontal' || binding.perspectivePlane === 'profile')
     && typeof binding.levelLabel === 'string' && binding.levelLabel.trim().length > 0
     && typeof binding.policyVersion === 'string' && binding.policyVersion.length > 0
-    && binding.reviewState === 'nicole_approved';
+    && binding.reviewState === 'nicole_approved'
+    && phaseWindowIsValid;
 }
 
 function versionCore(version: Omit<NicoleReferenceLineVersion, 'versionDigest'>) {

@@ -51,7 +51,7 @@ function memoryStorage() {
   };
 }
 
-function fixture(phaseId: 'setup' | 'bottom' = 'bottom') {
+function fixture(phaseId: 'setup' | 'bottom' = 'bottom', includeSourceWindow = true) {
   const frames = fullCycleFrames();
   const analysis = analyzeTeacherPhases({
     frames,
@@ -61,6 +61,7 @@ function fixture(phaseId: 'setup' | 'bottom' = 'bottom') {
     levelLabel: 'MINIS',
   });
   const bottom = analysis.phases.find(phase => phase.id === 'bottom')!;
+  const boundPhase = analysis.phases.find(phase => phase.id === phaseId)!;
   const frame = frames.reduce((nearest, candidate) => (
     Math.abs(candidate.timeMs - bottom.representativeTimeMs) < Math.abs(nearest.timeMs - bottom.representativeTimeMs)
       ? candidate : nearest
@@ -99,6 +100,11 @@ function fixture(phaseId: 'setup' | 'bottom' = 'bottom') {
       levelLabel: 'MINIS',
       policyVersion: analysis.policyVersion,
       reviewState: 'nicole_approved',
+      ...(includeSourceWindow ? {
+        sourcePhaseStartMs: boundPhase.startMs,
+        sourcePhaseEndMs: boundPhase.endMs,
+        sourcePhaseRepresentativeTimeMs: boundPhase.representativeTimeMs,
+      } : {}),
     },
     createId: (() => { let index = 0; return () => `reference-${++index}`; })(),
     now: () => new Date('2026-08-13T10:00:00Z'),
@@ -107,7 +113,7 @@ function fixture(phaseId: 'setup' | 'bottom' = 'bottom') {
 }
 
 describe('Nicole phase reference comparison', () => {
-  it('compares only the current phase-bound version within the exact same video', () => {
+  it('compares the current phase-bound version within the exact same video', () => {
     const { analysis, frames, record } = fixture();
     const result = compareNicolePhaseReferences({
       analysis,
@@ -122,6 +128,7 @@ describe('Nicole phase reference comparison', () => {
     expect(result[0]).toMatchObject({
       status: 'ready',
       sourceScope: 'same_video',
+      referenceVideoSourceId: 'clip-nicole',
       phaseId: 'bottom',
       targetId: 'bone.shin_l',
       versionNumber: 1,
@@ -132,12 +139,18 @@ describe('Nicole phase reference comparison', () => {
     expect(result[0].usableSampleCount).toBe(result[0].phaseSampleCount);
   });
 
-  it('never imports a same-target line across video, policy, level or phase-binding gaps', () => {
+  it('uses a compatible Nicole-approved line across videos but rejects binding gaps', () => {
     const { analysis, frames, record } = fixture();
     const compare = (records: typeof record[]) => compareNicolePhaseReferences({
       analysis, frames, videoSourceId: 'clip-student', videoWidth: 960, videoHeight: 1280, records,
     });
-    expect(compare([record])).toEqual([]);
+    expect(compare([record])).toHaveLength(1);
+    expect(compare([record])[0]).toMatchObject({
+      sourceScope: 'cross_video',
+      referenceVideoSourceId: 'clip-nicole',
+      phaseId: 'bottom',
+      targetId: 'bone.shin_l',
+    });
 
     const misbound = fixture('setup');
     expect(compareNicolePhaseReferences({
@@ -157,6 +170,40 @@ describe('Nicole phase reference comparison', () => {
       analysis, frames, videoSourceId: 'clip-nicole', videoWidth: 960, videoHeight: 1280,
       records: [{ ...record, versions: [unbound] }],
     })).toEqual([]);
+
+    const legacyWithoutSourceWindow = fixture('bottom', false);
+    expect(compareNicolePhaseReferences({
+      analysis: legacyWithoutSourceWindow.analysis,
+      frames: legacyWithoutSourceWindow.frames,
+      videoSourceId: 'clip-student',
+      videoWidth: 960,
+      videoHeight: 1280,
+      records: [legacyWithoutSourceWindow.record],
+    })).toEqual([]);
+  });
+
+  it('normalizes a cross-video line across different source resolutions', () => {
+    const { record } = fixture();
+    const frames = fullCycleFrames();
+    const analysis = analyzeTeacherPhases({
+      frames,
+      videoWidth: 1920,
+      videoHeight: 2560,
+      exerciseLabel: 'Plié in der 1. Position',
+      levelLabel: 'MINIS',
+    });
+    const result = compareNicolePhaseReferences({
+      analysis,
+      frames,
+      videoSourceId: 'clip-student-hires',
+      videoWidth: 1920,
+      videoHeight: 2560,
+      records: [record],
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ sourceScope: 'cross_video', status: 'ready' });
+    expect(result[0].medianAxisDeltaDeg).toBeLessThan(20);
   });
 
   it('returns a dashed unavailable comparison when target evidence is missing in the phase', () => {
