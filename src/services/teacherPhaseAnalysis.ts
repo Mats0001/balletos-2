@@ -279,7 +279,7 @@ export function summarizePhaseRegionStates(
   const uncertainRatio = states.filter(heuristicHasUncertainEvidence).length
     / Math.max(1, states.length);
   // Jede Luecke, jede abweichende Farbstichprobe und jedes unsichere
-  // Eingangssignal wird sichtbar gestrichelt. Die Grundfarbe bleibt erhalten.
+  // Eingangssignal bekommt eine feine Punkttextur. Die Grundfarbe bleibt erhalten.
   const uncertain = sampleCount < 3
     || sampleCount !== states.length
     || agreement < 1

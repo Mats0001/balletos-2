@@ -72,7 +72,7 @@ function isEligible(
 /**
  * Kombiniert mehrere sichtbare Teilrelationen. Fehlende Teilmessungen erfinden
  * keine gelbe Grundfarbe: Die vorhandenen Relationen bestimmen die Farbe,
- * die Luecke wird ausschliesslich durch die gestrichelte Evidenz markiert.
+ * die Luecke wird ausschliesslich durch die feine Punkttextur markiert.
  */
 function combineStates(states: TeacherHeuristicState[]): TeacherHeuristicState {
   const baseStates = states.map(heuristicBaseState).filter((state): state is TeacherHeuristicBaseState => state !== null);

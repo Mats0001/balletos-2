@@ -31,11 +31,11 @@ const EXPECTED = {
   heuristic_match: { color: '#30d158', dash: [] },
   heuristic_attention: { color: '#ffd60a', dash: [] },
   heuristic_strong_attention: { color: '#ff453a', dash: [] },
-  heuristic_match_uncertain: { color: '#30d158', dash: [10, 7] },
-  heuristic_attention_uncertain: { color: '#ffd60a', dash: [10, 7] },
-  heuristic_strong_attention_uncertain: { color: '#ff453a', dash: [10, 7] },
-  heuristic_review: { color: '#ffd60a', dash: [10, 7] },
-  blocked: { color: '#ffd60a', dash: [7, 6] },
+  heuristic_match_uncertain: { color: '#30d158', dash: [0.75, 3.25] },
+  heuristic_attention_uncertain: { color: '#ffd60a', dash: [0.75, 3.25] },
+  heuristic_strong_attention_uncertain: { color: '#ff453a', dash: [0.75, 3.25] },
+  heuristic_review: { color: '#ffd60a', dash: [0.75, 3.25] },
+  blocked: { color: '#ffd60a', dash: [0.75, 3.25] },
 } satisfies Record<TeacherHeuristicState, { color: string; dash: number[] }>;
 
 interface StrokeRecord {
@@ -315,12 +315,13 @@ describe('trusted skeleton color contract', () => {
     expect(trafficStrokes(0.05)).toEqual(trafficStrokes(0.99));
   });
 
-  it('uses fine body strokes while keeping uncertain dashes visibly separated', () => {
+  it('uses fine body strokes and a subtle micro-dot uncertainty texture', () => {
     const strokes = renderTeacherPacket(0.95);
     const traffic = strokes.filter(({ color }) => color === EXPECTED.heuristic_match.color);
 
     expect(Math.max(...traffic.map(({ width }) => width))).toBeLessThanOrEqual(3);
-    expect(EXPECTED.heuristic_match_uncertain.dash[1]).toBeGreaterThan(5);
+    expect(EXPECTED.heuristic_match_uncertain.dash[0]).toBeLessThan(1);
+    expect(EXPECTED.heuristic_match_uncertain.dash[1]).toBeLessThanOrEqual(3.25);
   });
 
   it('renders a mismatched packet as neutral dashed geometry', () => {

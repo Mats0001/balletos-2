@@ -84,7 +84,7 @@ const isTeacherHeuristicState = (value: unknown): value is TeacherHeuristicState
 
 /**
  * The single presentation contract for traffic-light colors.
- * Missing or malformed packets fail closed to yellow dashed review styling.
+ * Missing or malformed packets fail closed to yellow micro-dotted review styling.
  */
 export function resolveTeacherOverlayStyle(
   packet: TeacherOverlayPacket | undefined,
@@ -464,7 +464,7 @@ export function renderSkeletonToCanvas(
   // dass es sich um nicht-validierte Rohdaten handelt.
   // 'anatomisch' und 'lehrbuch' enthalten KEINE Urteils-Farben.
   const mode = opts.overlayMode ?? 'anatomisch';
-  // Packet aus opts – fehlt es im Lehrer-Modus, alles gelb gestrichelt/review
+  // Packet aus opts – fehlt es im Lehrer-Modus, alles gelb fein gepunktet/review
   const pkt = mode === 'lehrer-ampel'
     && isTeacherOverlayPacketCurrent(opts.overlayPacket, opts.overlayFrameContext)
     ? opts.overlayPacket
@@ -473,7 +473,7 @@ export function renderSkeletonToCanvas(
   /**
    * Holt Farbe aus TeacherOverlayPacket für einen Körperbereich.
    * Renderer berechnet KEINE Heuristik – nur Farb-Lookup.
-   * Fehlt das Packet → gelb gestrichelt (Nicole prüft).
+   * Fehlt das Packet → gelb fein gepunktet (Nicole prüft).
    */
   const packetColor = (key: TeacherOverlayRegionKey): string => {
     if (mode !== 'lehrer-ampel') return mode === 'lehrbuch' ? '#e2e8f0' : COLOR_JOINT;
@@ -546,7 +546,7 @@ export function renderSkeletonToCanvas(
   if (opts.showCoG) {
     // FIX 2026-08-11: CoG war auto-grün im Lehrer-Modus (Issue 1.1)
     // Jetzt: Farbe kommt aus TeacherOverlayPacket.cog
-    // 'blocked' → gelb gestrichelt (fehlende Evidenz ist KEIN positiver Befund)
+    // 'blocked' → gelb fein gepunktet (fehlende Evidenz ist KEIN positiver Befund)
     const cogC = mode === 'lehrer-ampel'
       ? packetColor('cog')
       : COLOR_COG;
@@ -663,7 +663,7 @@ export function renderSkeletonToCanvas(
   ctx.globalAlpha = 1.0;
 
   // Ellenbogen-Ringe: im Lehrer-Modus folgt auch das Strichmuster exakt dem
-  // Regionszustand (solid = bewertet, dashed = Nicole prüft).
+  // Regionszustand (solid = stabil, micro-dotted = Nicole prueft).
   const elbowC = boneColor(COLOR_ARM);
   ctx.globalAlpha = stableAlpha(armLConf ?? 0.8) * 0.85;
   if (isSkeletonPointUsable(elbowL)) drawCircle(
@@ -765,7 +765,7 @@ export function renderSkeletonToCanvas(
 
   // ─── FUß-DOTS (aus TeacherOverlayPacket) ───
   // FIX 2026-08-11: Fuß-Dots kommen jetzt aus Packet, nicht mehr direkt aus FootAnalyzer (Issue 1.3)
-  // Foot dots remain visible for every usable foot; blocked/review is yellow dashed.
+  // Foot dots remain visible for every usable foot; blocked/review is yellow micro-dotted.
   const footLC = mode === 'lehrer-ampel' ? packetColor('footL') : boneColor(COLOR_LEG);
   const footRC = mode === 'lehrer-ampel' ? packetColor('footR') : boneColor(COLOR_LEG);
   if (isSkeletonPointUsable(ankleL) && isSkeletonPointUsable(footL) && mode === 'lehrer-ampel') {

@@ -3026,7 +3026,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     <span><b style={{ color: '#30d158' }}>━━ Grün</b> · nächste Phasenklasse: im Korridor</span>
                     <span><b style={{ color: '#ffd60a' }}>━━ Gelb</b> · nächste Phasenklasse: Grenzbereich</span>
                     <span><b style={{ color: '#ff453a' }}>━━ Rot</b> · nächste Phasenklasse: außerhalb</span>
-                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>┄┄</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ┄┄</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ┄┄</b> · gleiche Farbe, Evidenz unsicher</span>
+                    <span><b style={{ color: '#30d158', letterSpacing: '1px' }}>····</b><b style={{ color: '#ffd60a', letterSpacing: '1px' }}> ····</b><b style={{ color: '#ff453a', letterSpacing: '1px' }}> ····</b> · gleiche Farbe, Evidenz unsicher</span>
                   </div>
                 </button>
                 {/* Mode 2: Anatomisch */}
@@ -3322,7 +3322,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   minWidth: 0, height: '28px', padding: '2px', cursor: 'pointer',
                                   background: active ? `${color}2d` : 'rgba(255,255,255,0.035)',
                                   color: active ? '#fff' : 'rgba(255,255,255,0.72)',
-                                  border: `${active ? 2 : 1}px ${dashed ? 'dashed' : 'solid'} ${color}`,
+                                  border: `1px ${dashed ? 'dotted' : 'solid'} ${color}`,
                                   borderRadius: '7px', fontSize: '8px', fontWeight: 850,
                                 }}
                               >
@@ -3357,7 +3357,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           );
                         })}
                         <div style={{ fontSize: '7.5px', opacity: 0.68, marginTop: '6px', lineHeight: 1.35 }}>
-                          Farbe = dominante/nächste Phasenklasse · gestrichelt = Evidenz unsicher. Erst nach vollständigem Scan.
+                          Farbe = dominante/nächste Phasenklasse · fein gepunktet = Evidenz unsicher. Erst nach vollständigem Scan.
                         </div>
                       </>
                     )}

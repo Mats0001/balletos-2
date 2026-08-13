@@ -24,7 +24,7 @@
  *   heuristic_match            → Grün
  *   heuristic_attention        → Gelb/Orange
  *   heuristic_strong_attention → Rot
- *   *_uncertain                → gleiche Grundfarbe, aber gestrichelt
+ *   *_uncertain                → gleiche Grundfarbe, aber fein gepunktet
  *   blocked                    → keine Bewertung; Aufnahme-Gate entscheidet
  */
 export type TeacherHeuristicBaseState =
@@ -37,7 +37,7 @@ export type TeacherHeuristicState =
   | 'heuristic_match_uncertain'
   | 'heuristic_attention_uncertain'
   | 'heuristic_strong_attention_uncertain'
-  | 'heuristic_review'             // Legacy-Kompatibilität: gelb gestrichelt
+  | 'heuristic_review'             // Legacy-Kompatibilität: gelb fein gepunktet
   | 'blocked';                     // Keine auswertbare Aufnahme, kein Farburteil
 
 export type TeacherRegionKey =
@@ -130,25 +130,27 @@ export const HEURISTIC_COLORS: Record<TeacherHeuristicState, string> = Object.fr
   heuristic_match:            '#30d158',              // Grün
   heuristic_attention:        '#ffd60a',              // Gelb
   heuristic_strong_attention: '#ff453a',              // Rot
-  heuristic_match_uncertain:            '#30d158',    // Grün gestrichelt
-  heuristic_attention_uncertain:        '#ffd60a',    // Gelb gestrichelt
-  heuristic_strong_attention_uncertain: '#ff453a',    // Rot gestrichelt
-  heuristic_review:           '#ffd60a',              // Gelb gestrichelt – Nicole prüft
-  blocked:                    '#ffd60a',              // Gelb gestrichelt – fehlende Evidenz
+  heuristic_match_uncertain:            '#30d158',    // Grün fein gepunktet
+  heuristic_attention_uncertain:        '#ffd60a',    // Gelb fein gepunktet
+  heuristic_strong_attention_uncertain: '#ff453a',    // Rot fein gepunktet
+  heuristic_review:           '#ffd60a',              // Gelb fein gepunktet – Nicole prüft
+  blocked:                    '#ffd60a',              // Gelb fein gepunktet – fehlende Evidenz
 });
 
 /**
- * Strich-Muster für Review-Zustände (gestrichelt = Nicole prüft).
+ * Mikropunkt-Muster fuer Review-Zustaende. Mit runden Linienenden wirkt das
+ * aus normalem Abstand beinahe geschlossen und wird erst beim Hinsehen als
+ * Evidenzhinweis erkennbar.
  */
 export const HEURISTIC_DASH: Record<TeacherHeuristicState, number[]> = Object.freeze({
   heuristic_match:            [],
   heuristic_attention:        [],
   heuristic_strong_attention: [],
-  heuristic_match_uncertain:            [10, 7],
-  heuristic_attention_uncertain:        [10, 7],
-  heuristic_strong_attention_uncertain: [10, 7],
-  heuristic_review:           [10, 7],
-  blocked:                    [7, 6],
+  heuristic_match_uncertain:            [0.75, 3.25],
+  heuristic_attention_uncertain:        [0.75, 3.25],
+  heuristic_strong_attention_uncertain: [0.75, 3.25],
+  heuristic_review:           [0.75, 3.25],
+  blocked:                    [0.75, 3.25],
 });
 
 // ─── HELPER ─────────────────────────────────────────────────────────────────

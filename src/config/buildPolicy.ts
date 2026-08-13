@@ -11,7 +11,7 @@
  *   → Ampel ist KI-gestützter pädagogischer Vorschlag, kein validiertes Urteil.
  *   → Nicole entscheidet über Annahme, Änderung und Kommunikation jedes Vorschlags.
  *   → Grundfarbe und Evidenzsicherheit sind getrennt: Grün/Gelb/Rot beschreibt
- *     das aggregierte Phasenurteil; gestrichelt markiert unsichere Evidenz.
+ *     das aggregierte Phasenurteil; fein gepunktet markiert unsichere Evidenz.
  *   → Harte Aufnahmefehler stoppen die Ampel mit „Aufnahme korrigieren“.
  *
  * Gesperrt bleiben (unabhängig vom Ampelmodus):

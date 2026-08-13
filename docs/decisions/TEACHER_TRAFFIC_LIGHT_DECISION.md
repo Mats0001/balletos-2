@@ -16,7 +16,7 @@
 > Ampelklasse aller auswertbaren Frames der Phase; ein echter Gleichstand wird
 > als Grenzbereich Gelb aufgelöst. Abweichende Frameklassen, Evidenzlücken oder
 > unsichere Eingangssignale färben nicht pauschal Gelb, sondern machen die
-> ermittelte Grundfarbe sichtbar gestrichelt. Durchgezogen bedeutet, dass alle
+> ermittelte Grundfarbe fein gepunktet. Durchgezogen bedeutet, dass alle
 > auswertbaren Frames dieselbe Grundklasse tragen. Die Ampel
 > wird aus der abgeschlossenen Nachanalyse bezogen, nicht aus einem zufälligen
 > Live-Einzelbild.
@@ -35,7 +35,7 @@
 > auswertbare Körperregion eine Ampeldarstellung. Der neuere Phasen-Nachtrag
 > trennt dabei harte Aufnahmefehler von regionaler Evidenzunsicherheit: harte
 > Fehler stoppen die Bewertung, weiche Unsicherheit erhält die vorläufige
-> Grundfarbe mit gestrichelter Linie. Dieser Nachtrag autorisiert keine
+> Grundfarbe mit fein gepunkteter Linie. Dieser Nachtrag autorisiert keine
 > Muskel-, Valgus-, Druck-, COP-, Ursachen-, Prognose- oder Verletzungsdiagnose.
 > Die folgenden P0-/BAS-Nachträge bleiben als Historie und als Verbot der alten
 > Resolver bindend; ihre damalige neutrale Darstellung ist durch diesen
@@ -156,9 +156,9 @@ Handlungsanweisung.
 Nach bestandenem Gate gilt orthogonal:
 
 - Farbe: Grün / Gelb / Rot = dominante/nächstliegende Phasenklasse; Gleichstand = Gelb.
-- Linie: durchgezogen = stabile Evidenz; gestrichelt = unsichere Evidenz.
+- Linie: durchgezogen = stabile Evidenz; fein gepunktet = unsichere Evidenz.
 
-Damit kann auch ein vorläufig grünes oder rotes Phasenurteil gestrichelt sein,
+Damit kann auch ein vorläufig grünes oder rotes Phasenurteil fein gepunktet sein,
 ohne Gelb fälschlich als „halb richtig“ und zugleich „unsicher“ zu überladen.
 
 ---
@@ -191,7 +191,7 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 | `src/config/buildPolicy.ts` | `allowExperimentalTeacherTrafficLight: true` + NEUTRAL_MEASUREMENT_CLASSES + TEACHER_AMPEL_COLORS |
 | `src/services/skeletonCanvasRenderer.ts` | Stellt ausschließlich das aktuelle `TeacherOverlayPacket` dar; keine eigene Heuristik |
 | `src/services/teacherHeuristicEngine.ts` | Vollständige kontextgebundene Arm-/Bein-/Fuß-/Rumpfzentrum-Heuristik; Farbe und Evidenzunsicherheit sind getrennt |
-| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und dominante/nächstliegende Grün-/Gelb-/Rot-Aggregation; Streuung oder Unsicherheit → dieselbe Farbe gestrichelt |
+| `src/services/teacherPhaseAnalysis.ts` | Aufnahme-Gate, fünf Plié-Phasen und dominante/nächstliegende Grün-/Gelb-/Rot-Aggregation; Streuung oder Unsicherheit → dieselbe Farbe fein gepunktet |
 | `src/components/VideoAnalyzer.tsx` | FlaskConical Icon; localStorage pro Schülerin; Provenance-UI im Cue Manager |
 | `src/services/vaganovaPreAnalyzer.ts` | Keine Auto-Knieurteile/ungeprüften positiven Aggregate; scan-lokaler Calculator; Pflicht-Provenienz |
 | `src/services/vaganovaFrameCache.ts` | Laufende Scans werden bei Video-Wechsel verworfen und nie unter der alten Quelle publiziert |
@@ -206,7 +206,7 @@ projizierte Rumpfmitte über der sichtbaren Standfläche, kein Druckzentrum/COP.
 - [x] Bein-Shadow-Metriken erzeugen keine automatischen Knie-Cues oder positiven Kniezählungen
 - [x] Automatische KI-Cues starten als nicht veröffentlichter Vorschlag; Nicoles Review wird persistiert
 - [x] Armfarben sind an sichtbare Position, Geometrie und Confidence gebunden
-- [x] Soft unsichere Evidenz → fachliches Grundurteil Grün/Gelb/Rot bleibt erhalten und wird gestrichelt
+- [x] Soft unsichere Evidenz → fachliches Grundurteil Grün/Gelb/Rot bleibt erhalten und wird fein gepunktet
 - [x] Gemischte Frameklassen → dominante/nächstliegende Grundfarbe bleibt erhalten; kein pauschaler Gelb-Sammelzustand
 - [x] Hart gescheitertes Aufnahme-Gate → keine Ampel, sondern konkrete Aufforderung „Aufnahme korrigieren“
 - [x] Keine graue oder ausgelassene Region im Lehrer-Ampelmodus
