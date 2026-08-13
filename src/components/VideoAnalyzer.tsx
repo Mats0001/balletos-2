@@ -253,10 +253,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [selectedDevVideoUrl, setSelectedDevVideoUrl] = useState<string>(videoList[0].url);
   const selectedDevVideoUrlRef = useRef(selectedDevVideoUrl);
   useEffect(() => { selectedDevVideoUrlRef.current = selectedDevVideoUrl; }, [selectedDevVideoUrl]);
-  const selectedVideoTopic = videoList.find(video => video.url === selectedDevVideoUrl)?.topic ?? '';
-  const effectiveExerciseLabel = /tendu/i.test(`${exerciseName} ${selectedVideoTopic}`)
-    ? 'Battement Tendu'
-    : exerciseName;
+  // The visible exercise selector is the assessment authority. Video topics
+  // may choose a helpful default on source switch, but may never silently
+  // override Nicole's explicit selection.
+  const effectiveExerciseLabel = exerciseName;
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
@@ -2736,6 +2736,34 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               </button>
             </div>
           )}
+
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: '5px', color: 'rgba(255,255,255,0.58)',
+            fontSize: '8px', fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>
+            Übung
+            <select
+              aria-label="Übung für die Video-Analyse"
+              value={/tendu/i.test(exerciseName) ? 'tendu' : 'plie'}
+              onChange={(event) => {
+                const next = event.target.value === 'tendu'
+                  ? 'Battement Tendu'
+                  : 'Plié in der 1. Position';
+                onExerciseChange?.(next);
+                clearSkeletonSelection('analysis_stale');
+                if (event.target.value !== 'tendu') setSplitScreenMode(false);
+              }}
+              style={{
+                background: 'rgba(25,20,35,0.9)', color: '#fff',
+                border: '1px solid rgba(103,232,249,0.38)', borderRadius: '9px',
+                padding: '5px 8px', fontSize: '10px', fontWeight: 750,
+                fontFamily: 'Montserrat', outline: 'none', cursor: 'pointer', maxWidth: '150px',
+              }}
+            >
+              <option value="plie" style={{ background: '#1c1c1e' }}>Plié</option>
+              <option value="tendu" style={{ background: '#1c1c1e' }}>Battement Tendu</option>
+            </select>
+          </label>
 
           {/* Upload – Icon-Pill */}
           <button
