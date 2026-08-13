@@ -34,7 +34,6 @@ const carrier: CanonicalMotionClip = Object.freeze({
     Object.freeze({ timeUs: 8_333, joints: Object.freeze({ ...joints, pelvisCenter: point(0.01, 0.95) }) }),
   ]),
 });
-
 const phases = ['departure', 'extension', 'full_extension', 'return', 'closure'] as const;
 const dryad: DryadTenduClip = Object.freeze({
   schemaVersion: 1,
@@ -83,4 +82,3 @@ describe('Tendu technical pilot', () => {
     })).toThrow(/too few mapped joints/);
   });
 });
-

@@ -43,4 +43,3 @@ describe('Dryad Tendu importer', () => {
     })).toThrow();
   });
 });
-

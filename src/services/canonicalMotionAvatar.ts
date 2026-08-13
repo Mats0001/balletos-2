@@ -17,7 +17,6 @@ function isUsableJoint(point: CanonicalJointSample | undefined): point is Canoni
     && point!.confidence >= 0
     && point!.confidence <= 1;
 }
-
 function predictedPoint(x: number, y: number): KinematicPoint {
   return Object.freeze({ x, y, z: 0, vis: 0, isPredicted: true });
 }
@@ -77,4 +76,3 @@ export function projectCanonicalFrameToSkeleton(input: {
   const result = Object.fromEntries(REQUIRED_POINTS.map(id => [id, mapPoint(id)])) as unknown as ReconstructedSkeleton;
   return Object.freeze({ ...result, footL: result.footL, footR: result.footR });
 }
-
