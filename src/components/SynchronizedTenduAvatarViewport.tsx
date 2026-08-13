@@ -113,7 +113,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
 
   const resolution = resolveTenduPilotFrame(analysis, isPlaying ? clockMs : currentTimeMs);
   const mappedPhase = resolution.kind === 'mapped' ? resolution.phase : null;
-  const feedback = buildTenduTeachingFeedback(mappedPhase);
+  const feedback = buildTenduTeachingFeedback(mappedPhase, { levelLabel: analysis?.levelLabel, direction: analysis?.direction ?? undefined });
   const sourceLabels = useMemo(() => tenduPilotSourceLabels(), []);
   const technicalFootPath = useMemo(() => TENDU_PILOT_REFERENCE.clip.frames.flatMap(frame => {
     const point = projectCanonicalFrameToSkeleton({ frame, width: 360, height: 360, paddingRatio: 0.08 }).footR;
@@ -243,7 +243,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
           })}
         </div>
         {feedback ? (
-          <div className="tendu-rich-feedback" data-testid="tendu-rich-feedback" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: 4 }}>
+          <div className="tendu-rich-feedback" data-testid="tendu-rich-feedback" data-content-id={feedback.contentId} title={`Feedback-Bibliothek ${feedback.libraryVersion} · Nicole prüft`} style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: 4 }}>
             {([['Was', feedback.what], ['Warum', feedback.why], ['Ziel', feedback.goal], ['Üben', feedback.practice], ['Metapher', feedback.metaphor]] as const).map(([label, value]) => (
               <div key={label} title={value} style={{ minWidth: 0, overflow: 'hidden', padding: '4px 5px', borderRadius: 5, background: 'rgba(255,255,255,.045)' }}>
                 <div style={{ color: '#67e8f9', fontSize: 8, fontWeight: 900, textTransform: 'uppercase' }}>{label}</div>

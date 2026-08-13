@@ -76,7 +76,7 @@ export interface MotionRegistryEntry {
   directions: readonly MotionDirection[];
   dataStatus: 'runtime_pose' | 'technical_cohort_imported';
   phaseEngineStatus: 'assessment_ready' | 'technical_events_only';
-  feedbackStatus: 'general_safe_draft' | 'structure_pending';
+  feedbackStatus: 'general_safe_draft' | 'safe_scaffold_ready';
   sourceIds: readonly string[];
   provenance: Readonly<{
     pedagogicalStatus: 'technical_only' | 'runtime_observation';
@@ -87,4 +87,3 @@ export interface MotionRegistryEntry {
 }
 
 export type DryadMotionProvenance = MotionDatasetProvenance;
-
