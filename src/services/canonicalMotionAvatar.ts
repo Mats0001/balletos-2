@@ -8,6 +8,13 @@ const REQUIRED_POINTS: readonly SkeletonPointId[] = Object.freeze([
   'pelvisL', 'pelvisR', 'kneeL', 'kneeR', 'ankleL', 'ankleR', 'footL', 'footR',
 ]);
 
+export type CanonicalProjectionBounds = Readonly<{
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}>;
+
 function isUsableJoint(point: CanonicalJointSample | undefined): point is CanonicalJointSample {
   return Boolean(point)
     && Number.isFinite(point?.x)
@@ -21,6 +28,27 @@ function predictedPoint(x: number, y: number): KinematicPoint {
   return Object.freeze({ x, y, z: 0, vis: 0, isPredicted: true });
 }
 
+/** One fixed source box prevents an avatar from pumping between frames. */
+export function canonicalMotionProjectionBounds(frames: readonly CanonicalMotionFrame[]): CanonicalProjectionBounds {
+  const points = frames.flatMap(frame => REQUIRED_POINTS.flatMap(id => {
+    const point = frame.joints[id];
+    return isUsableJoint(point) ? [point] : [];
+  }));
+  if (points.length < 5) throw new Error('Canonical avatar sequence has too few usable joints.');
+  const bounds = {
+    minX: Math.min(...points.map(point => point.x)),
+    maxX: Math.max(...points.map(point => point.x)),
+    minY: Math.min(...points.map(point => point.y)),
+    maxY: Math.max(...points.map(point => point.y)),
+  };
+  if (![bounds.minX, bounds.maxX, bounds.minY, bounds.maxY].every(Number.isFinite)
+    || bounds.maxX - bounds.minX <= 1e-6
+    || bounds.maxY - bounds.minY <= 1e-6) {
+    throw new Error('Canonical avatar sequence geometry is degenerate.');
+  }
+  return Object.freeze(bounds);
+}
+
 /**
  * Projects a metric canonical motion frame into the existing 2D display
  * skeleton. This is an avatar/visualization transform, never a scoring path.
@@ -31,6 +59,8 @@ export function projectCanonicalFrameToSkeleton(input: {
   height: number;
   paddingRatio?: number;
   mirrorX?: boolean;
+  /** Optional sequence-wide box for stable single-clock animation. */
+  sourceBounds?: CanonicalProjectionBounds;
 }): ReconstructedSkeleton {
   const { frame, width, height } = input;
   if (![width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
@@ -41,10 +71,10 @@ export function projectCanonicalFrameToSkeleton(input: {
     .filter(isUsableJoint);
   if (available.length < 5) throw new Error('Canonical avatar frame has too few usable joints.');
 
-  const minX = Math.min(...available.map(point => point.x));
-  const maxX = Math.max(...available.map(point => point.x));
-  const minY = Math.min(...available.map(point => point.y));
-  const maxY = Math.max(...available.map(point => point.y));
+  const minX = input.sourceBounds?.minX ?? Math.min(...available.map(point => point.x));
+  const maxX = input.sourceBounds?.maxX ?? Math.max(...available.map(point => point.x));
+  const minY = input.sourceBounds?.minY ?? Math.min(...available.map(point => point.y));
+  const maxY = input.sourceBounds?.maxY ?? Math.max(...available.map(point => point.y));
   const sourceWidth = maxX - minX;
   const sourceHeight = maxY - minY;
   if (![sourceWidth, sourceHeight].every(Number.isFinite) || sourceWidth <= 1e-6 || sourceHeight <= 1e-6) {

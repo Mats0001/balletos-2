@@ -3,7 +3,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SynchronizedTenduAvatarViewport } from '../components/SynchronizedTenduAvatarViewport';
+import { SynchronizedMotionAvatarViewport, SynchronizedTenduAvatarViewport } from '../components/SynchronizedTenduAvatarViewport';
 import type { TeacherPhaseAnalysis, TeacherPhaseResult } from '../services/teacherPhaseAnalysis';
 import { TEACHER_REGION_KEYS } from '../types/teacherHeuristic';
 import type { ReconstructedSkeleton } from '../services/vaganova3DKinematics';
@@ -51,6 +51,26 @@ describe('single-clock Tendu avatar viewport', () => {
     expect(screen.getByTestId('tendu-rich-feedback').textContent).toContain('Was');
     expect(screen.getByText(/nicht Nicole-geprüft/i)).toBeTruthy();
     expect(screen.getByText(/100 Versuchen/i)).toBeTruthy();
+  });
+
+  it('renders Passé from the same technical motion avatar without calling it a Nicole reference', () => {
+    const passePhase: TeacherPhaseResult = { ...phase, id: 'placement', label: 'Passé-Position' };
+    const passeAnalysis: TeacherPhaseAnalysis = {
+      ...analysis,
+      exerciseId: 'passe',
+      exerciseLabel: 'Passé',
+      phaseAuthority: 'technical_phase_pilot',
+      phases: [passePhase],
+    };
+    render(<SynchronizedMotionAvatarViewport analysis={passeAnalysis} isPlaying={false} currentTimeMs={200} getCurrentTimeMs={() => 200} />);
+
+    expect(screen.getByTestId('tendu-single-clock-avatar').getAttribute('data-motion-id')).toBe('passe');
+    expect(screen.getByText(/TECHNISCHER PASSÉ-PILOT/i)).toBeTruthy();
+    expect(screen.getByText(/Dryad-Kohorte aus 100 Versuchen/i)).toBeTruthy();
+    expect(screen.getByText(/nicht Nicole-geprüft/i)).toBeTruthy();
+    expect(screen.getByText('Anheben')).toBeTruthy();
+    expect(screen.getByText('Position')).toBeTruthy();
+    expect(screen.getByTestId('tendu-rich-feedback').getAttribute('data-content-id')).toContain(':passe:placement:');
   });
 
   it('shows recording correction instead of a guessed technical comparison', () => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw, Hand } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
@@ -61,7 +61,7 @@ import {
   type TeacherPhaseAnalysis,
 } from '../services/teacherPhaseAnalysis';
 import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../types/teacherHeuristic';
-import { SynchronizedTenduAvatarViewport, type AvatarLoopRange } from './SynchronizedTenduAvatarViewport';
+import type { AvatarLoopRange } from './SynchronizedTenduAvatarViewport';
 import { canCreateNicoleReferenceFromSource } from '../services/referenceSourcePolicy';
 import {
   buildAttemptProgressCurve,
@@ -73,6 +73,11 @@ import {
 import { MOTION_REGISTRY, resolveMotionRegistryEntry } from '../services/motionRegistry';
 import { MOTION_REFERENCE_LIBRARY } from '../services/motionReferenceLibrary';
 import { MotionReferenceLibraryPanel } from './MotionReferenceLibraryPanel';
+
+const SynchronizedMotionAvatarViewport = lazy(async () => {
+  const module = await import('./SynchronizedTenduAvatarViewport');
+  return { default: module.SynchronizedMotionAvatarViewport };
+});
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
@@ -262,6 +267,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   // may choose a helpful default on source switch, but may never silently
   // override Nicole's explicit selection.
   const effectiveExerciseLabel = exerciseName;
+  const effectiveExerciseId = resolveMotionRegistryEntry(exerciseName)?.id ?? 'plie';
+  const motionAvatarAvailable = effectiveExerciseId !== 'plie';
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
@@ -2789,7 +2796,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 if (!next || next.phaseEngineStatus === 'technical_events_only') return;
                 onExerciseChange?.(next.label);
                 clearSkeletonSelection('analysis_stale');
-                if (next.id !== 'tendu') setSplitScreenMode(false);
+                if (next.id === 'plie') setSplitScreenMode(false);
               }}
               style={{
                 background: 'rgba(25,20,35,0.9)', color: '#fff',
@@ -3063,17 +3070,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           </button>
 
           <button
-            onClick={() => setSplitScreenMode(!splitScreenMode)}
-            title="Technischen Single-Clock-Linienavatar ein-/ausblenden"
+            disabled={!motionAvatarAvailable}
+            onClick={() => motionAvatarAvailable && setSplitScreenMode(!splitScreenMode)}
+            title={motionAvatarAvailable
+              ? `Technischen Single-Clock-Linienavatar für ${resolveMotionRegistryEntry(exerciseName)?.shortLabel ?? 'diese Übung'} ein-/ausblenden`
+              : 'Technischer Linienavatar für Tendu, Passé, Jeté und Changement'}
             style={{
               background: splitScreenMode ? 'rgba(192,132,252,0.18)' : 'transparent',
-              color: splitScreenMode ? '#c084fc' : 'rgba(255,255,255,0.45)',
+              color: !motionAvatarAvailable ? 'rgba(255,255,255,0.2)' : splitScreenMode ? '#c084fc' : 'rgba(255,255,255,0.45)',
               border: 'none',
               padding: '5px 11px',
               borderRadius: '9px',
               fontSize: '10px',
               fontWeight: 700,
-              cursor: 'pointer',
+              cursor: motionAvatarAvailable ? 'pointer' : 'not-allowed',
               transition: 'all 0.15s ease'
             }}
           >
@@ -3808,18 +3818,20 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
             {/* VIEWPORT 2: technical reference avatar on the primary clock. */}
             {splitScreenMode && (
-              <SynchronizedTenduAvatarViewport
-                analysis={teacherPhaseAnalysis}
-                isPlaying={isPlaying}
-                currentTimeMs={currentPlayTime * 1000}
-                getCurrentTimeMs={getPrimaryVideoTimeMs}
-                liveSkeleton={sk}
-                videoWidth={vwSk}
-                videoHeight={vhSk}
-                previousAttempt={previousComparableAttempt}
-                progressCurve={attemptProgressCurve}
-                onLoopRangeChange={handleAvatarLoopRangeChange}
-              />
+              <Suspense fallback={<div role="status" style={{ display: 'grid', placeItems: 'center', minWidth: 0, color: '#cbd5e1', background: '#050508', fontSize: 11 }}>Technischer Linienavatar wird geladen …</div>}>
+                <SynchronizedMotionAvatarViewport
+                  analysis={teacherPhaseAnalysis}
+                  isPlaying={isPlaying}
+                  currentTimeMs={currentPlayTime * 1000}
+                  getCurrentTimeMs={getPrimaryVideoTimeMs}
+                  liveSkeleton={sk}
+                  videoWidth={vwSk}
+                  videoHeight={vhSk}
+                  previousAttempt={previousComparableAttempt}
+                  progressCurve={attemptProgressCurve}
+                  onLoopRangeChange={handleAvatarLoopRangeChange}
+                />
+              </Suspense>
             )}
 
           </div>

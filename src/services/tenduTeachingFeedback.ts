@@ -4,6 +4,7 @@ import {
   TEACHER_REGION_KEYS,
   type TeacherRegionKey,
 } from '../types/teacherHeuristic';
+import type { BalletMotionId } from '../types/motionRegistry';
 import type { TeacherPhaseResult } from './teacherPhaseAnalysis';
 import { buildTeacherFeedbackDraft, feedbackAgeBandFromLevel } from './teacherFeedbackLibrary';
 
@@ -22,6 +23,8 @@ export interface TenduTeachingFeedback {
   limitation: string;
 }
 
+export type MotionTeachingFeedback = TenduTeachingFeedback;
+
 function severity(state: ReturnType<typeof heuristicBaseState>): number {
   return state === 'heuristic_strong_attention' ? 2 : state === 'heuristic_attention' ? 1 : 0;
 }
@@ -30,7 +33,15 @@ export function buildTenduTeachingFeedback(
   phase: TeacherPhaseResult | null,
   context: Readonly<{ levelLabel?: string; direction?: 'devant' | 'a_la_seconde' | 'derriere' | 'undetermined' }> = {},
 ): TenduTeachingFeedback | null {
-  if (!phase || !['departure', 'extension', 'full_extension', 'return', 'closure'].includes(phase.id)) return null;
+  return buildMotionTeachingFeedback('tendu', phase, context);
+}
+
+export function buildMotionTeachingFeedback(
+  exerciseId: BalletMotionId,
+  phase: TeacherPhaseResult | null,
+  context: Readonly<{ levelLabel?: string; direction?: 'devant' | 'a_la_seconde' | 'derriere' | 'undetermined' }> = {},
+): MotionTeachingFeedback | null {
+  if (!phase) return null;
   const candidates = TEACHER_REGION_KEYS.flatMap(region => {
     const state = phase.regions[region]?.state;
     const base = heuristicBaseState(state);
@@ -41,7 +52,7 @@ export function buildTenduTeachingFeedback(
   if (!focus || !base) return null;
   const evidenceStrength = heuristicEvidenceStrength(focus.state);
   const draft = buildTeacherFeedbackDraft({
-    exerciseId: 'tendu',
+    exerciseId,
     phaseId: phase.id,
     region: focus.region,
     ageBand: feedbackAgeBandFromLevel(context.levelLabel ?? 'PRO'),

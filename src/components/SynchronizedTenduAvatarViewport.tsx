@@ -1,14 +1,13 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { heuristicBaseState, heuristicColor, heuristicEvidenceStrength } from '../types/teacherHeuristic';
-import { TENDU_PHASE_ORDER } from '../types/canonicalMotion';
 import type { SkeletonPointId } from '../types/skeletonTarget';
 import {
-  resolveTenduPilotFrame,
-  TENDU_PHASE_LABELS,
-  TENDU_PILOT_REFERENCE,
-  tenduPilotSourceLabels,
-} from '../services/tenduPilotReference';
-import { buildTenduTeachingFeedback } from '../services/tenduTeachingFeedback';
+  isMotionAvatarExercise,
+  motionAvatarReference,
+  motionAvatarPhaseOrder,
+  resolveTechnicalMotionAvatarFrame,
+} from '../services/technicalMotionAvatar';
+import { buildMotionTeachingFeedback } from '../services/tenduTeachingFeedback';
 import type { TeacherPhaseAnalysis } from '../services/teacherPhaseAnalysis';
 import { projectCanonicalFrameToSkeleton } from '../services/canonicalMotionAvatar';
 import {
@@ -45,14 +44,17 @@ const BONES: readonly [SkeletonPointId, SkeletonPointId][] = Object.freeze([
 ]);
 
 const BLOCKED_COPY = Object.freeze({
-  analysis_missing: 'Tendu-Analyse wird vorbereitet …',
+  analysis_missing: 'Bewegungsanalyse wird vorbereitet …',
   recording_gate: 'Aufnahme korrigieren: Erst danach wird der technische Vergleich eingeblendet.',
-  not_tendu: 'Für den technischen Linienavatar bitte Tendu auswählen.',
-  outside_phase: 'Noch kein vollständiges Tendu-Phasenfenster erkannt.',
+  unsupported_exercise: 'Der technische Linienavatar ist für Tendu, Passé, Jeté und Changement verfügbar.',
+  outside_phase: 'Noch kein vollständiges Phasenfenster dieser Bewegung erkannt.',
+  reference_missing: 'Die technische Bewegungsquelle ist für dieses Phasenfenster nicht verfügbar.',
 });
 
-const SHORT_PHASE_LABELS = Object.freeze({
+const SHORT_PHASE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   departure: 'Start', extension: 'Abstr.', full_extension: 'Streck', return: 'Rückweg', closure: 'Schluss',
+  preparation: 'Start', lift: 'Anheben', placement: 'Position', lower: 'Absenken', finish: 'Schluss',
+  brush: 'Abstr.', release: 'Lösen', takeoff: 'Absprung', flight: 'Flug', landing: 'Landung',
 });
 
 function pointIsUsable(point: KinematicPoint | null | undefined): point is KinematicPoint {
@@ -78,7 +80,7 @@ const SkeletonLines: React.FC<Readonly<{
   </g>
 ) : null;
 
-export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAvatarViewport({
+export const SynchronizedMotionAvatarViewport = memo(function SynchronizedMotionAvatarViewport({
   analysis,
   isPlaying,
   currentTimeMs,
@@ -111,16 +113,26 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
   }, [getCurrentTimeMs, isPlaying]);
   useEffect(() => () => onLoopRangeChange?.(null), [onLoopRangeChange]);
 
-  const resolution = resolveTenduPilotFrame(analysis, isPlaying ? clockMs : currentTimeMs);
+  const resolution = resolveTechnicalMotionAvatarFrame(analysis, isPlaying ? clockMs : currentTimeMs);
   const mappedPhase = resolution.kind === 'mapped' ? resolution.phase : null;
-  const feedback = buildTenduTeachingFeedback(mappedPhase, { levelLabel: analysis?.levelLabel, direction: analysis?.direction ?? undefined });
-  const sourceLabels = useMemo(() => tenduPilotSourceLabels(), []);
-  const technicalFootPath = useMemo(() => TENDU_PILOT_REFERENCE.clip.frames.flatMap(frame => {
-    const point = projectCanonicalFrameToSkeleton({ frame, width: 360, height: 360, paddingRatio: 0.08 }).footR;
-    return pointIsUsable(point) ? [{ x: point.x, y: point.y }] : [];
-  }), []);
+  const feedback = buildMotionTeachingFeedback(analysis?.exerciseId ?? 'tendu', mappedPhase, { levelLabel: analysis?.levelLabel, direction: analysis?.direction ?? undefined });
+  const reference = resolution.kind === 'mapped'
+    ? resolution.reference
+    : isMotionAvatarExercise(analysis?.exerciseId)
+      ? motionAvatarReference(analysis.exerciseId)
+      : null;
+  const sourceLabels = reference?.sourceLabels ?? [];
+  const phaseOrder = reference ? motionAvatarPhaseOrder(reference.exerciseId) : [];
+  const technicalFootPaths = useMemo(() => reference?.workingSides.map(side => ({
+    side,
+    points: reference.frames.flatMap(({ frame }) => {
+      const skeleton = projectCanonicalFrameToSkeleton({ frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: reference.projectionBounds });
+      const point = side === 'left' ? skeleton.footL : skeleton.footR;
+      return pointIsUsable(point) ? [{ x: point.x, y: point.y }] : [];
+    }),
+  })) ?? [], [reference]);
   const avatarSkeleton = resolution.kind === 'mapped'
-    ? projectCanonicalFrameToSkeleton({ frame: resolution.frame, width: 360, height: 360, paddingRatio: 0.08 })
+    ? projectCanonicalFrameToSkeleton({ frame: resolution.frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: resolution.reference.projectionBounds })
     : null;
   const projectedLiveSkeleton = useMemo(() => liveSkeleton
     ? projectVideoSkeletonToAvatar({ skeleton: liveSkeleton, videoWidth, videoHeight, width: 360, height: 360, padding: 10 })
@@ -132,8 +144,8 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
   const alignedTechnicalSkeleton = avatarSkeleton && overlayTransform
     ? transformAvatarSkeleton(avatarSkeleton, overlayTransform)
     : null;
-  const alignedFootPath = overlayTransform
-    ? technicalFootPath.map(point => transformAvatarPoint(point, overlayTransform))
+  const alignedFootPaths = overlayTransform
+    ? technicalFootPaths.map(path => ({ ...path, points: path.points.map(point => transformAvatarPoint(point, overlayTransform)) }))
     : [];
   const phaseBase = mappedPhase ? heuristicBaseState(mappedPhase.displayState) : null;
   const phaseColor = phaseBase && mappedPhase ? heuristicColor(mappedPhase.displayState) : '#94a3b8';
@@ -156,7 +168,8 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
     <section
       data-testid="tendu-single-clock-avatar"
       data-avatar-state={resolution.kind}
-      aria-label="Phasensynchroner technischer Tendu-Linienavatar"
+      data-motion-id={analysis?.exerciseId ?? 'unknown'}
+      aria-label="Phasensynchroner technischer Bewegungs-Linienavatar"
       style={{
         position: 'relative', width: '100%', height: '100%', minHeight: 0, overflowX: 'hidden', overflowY: 'auto',
         borderLeft: '2px solid rgba(34,211,238,0.3)',
@@ -166,8 +179,8 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
     >
       <header style={{ padding: '12px 14px 7px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ color: '#67e8f9', fontSize: 10, fontWeight: 900, letterSpacing: '.06em' }}>SINGLE-CLOCK · TECHNISCHER TENDU-PILOT</div>
-          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>Dryad-Median aus 100 Versuchen + BalletOS-eigener neutraler Linienkörper · nicht Nicole-geprüft</div>
+          <div style={{ color: '#67e8f9', fontSize: 10, fontWeight: 900, letterSpacing: '.06em' }}>SINGLE-CLOCK · TECHNISCHER {analysis?.exerciseLabel?.toLocaleUpperCase('de-DE') ?? 'BEWEGUNGS'}-PILOT</div>
+          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>{reference ? `Dryad-Kohorte aus ${reference.sourceSampleCount} Versuchen` : 'Technische Bewegungsquelle'} · BalletOS-eigener neutraler Linienkörper · nicht Nicole-geprüft</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 7 }}>
             {([
               ['avatar', 'Avatar'], ['overlay', 'Overlay'], ['before_after', 'Vorher/Nachher'],
@@ -205,7 +218,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
               <>
                 <SkeletonLines skeleton={projectedLiveSkeleton} stroke="#f8fafc" width={2} opacity={0.9} testId="tendu-live-overlay-skeleton" />
                 <SkeletonLines skeleton={alignedTechnicalSkeleton} stroke="#22d3ee" width={1.6} opacity={0.86} dash="4 4" testId="tendu-reference-overlay-skeleton" />
-                <polyline points={alignedFootPath.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={phaseColor} strokeWidth="1.25" strokeLinecap="round" strokeDasharray={isDotted ? '1 6' : undefined} vectorEffect="non-scaling-stroke" opacity=".9" />
+                {alignedFootPaths.map(path => <polyline key={path.side} points={path.points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={phaseColor} strokeWidth="1.25" strokeLinecap="round" strokeDasharray={isDotted ? '1 6' : undefined} vectorEffect="non-scaling-stroke" opacity=".9" />)}
                 <g fontSize="8" fontWeight="800"><text x="12" y="18" fill="#f8fafc">Live</text><text x="12" y="30" fill="#22d3ee">Technik · keine Sollreferenz</text></g>
               </>
             ) : (
@@ -214,7 +227,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
                 <g fill="#071217" stroke={phaseColor} strokeWidth="1.8" vectorEffect="non-scaling-stroke">
                   {avatarSkeleton ? Object.entries(avatarSkeleton).map(([key, point]) => pointIsUsable(point) ? <circle key={key} cx={point.x} cy={point.y} r="3" /> : null) : null}
                 </g>
-                <polyline points={technicalFootPath.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={phaseColor} strokeWidth="1.25" strokeLinecap="round" strokeDasharray={isDotted ? '1 6' : undefined} vectorEffect="non-scaling-stroke" opacity=".9" />
+                {technicalFootPaths.map(path => <polyline key={path.side} points={path.points.map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke={phaseColor} strokeWidth="1.25" strokeLinecap="round" strokeDasharray={isDotted ? '1 6' : undefined} vectorEffect="non-scaling-stroke" opacity=".9" />)}
               </>
             )}
           </svg>
@@ -237,9 +250,10 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
 
       <footer style={{ padding: '5px 8px 7px', borderTop: '1px solid rgba(148,163,184,.15)', background: 'rgba(2,6,23,.7)', overflow: 'hidden' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: 3, marginBottom: 5 }}>
-          {TENDU_PHASE_ORDER.map(id => {
+          {phaseOrder.map(id => {
             const active = resolution.kind === 'mapped' && resolution.phase.id === id;
-            return <div key={id} title={TENDU_PHASE_LABELS[id]} style={{ minWidth: 0, overflow: 'hidden', borderRadius: 5, padding: '3px 2px', textAlign: 'center', fontSize: 7.5, fontWeight: active ? 900 : 600, background: active ? 'rgba(34,211,238,.18)' : 'rgba(255,255,255,.04)', color: active ? '#67e8f9' : 'rgba(255,255,255,.48)', border: active ? '1px solid rgba(34,211,238,.45)' : '1px solid transparent' }}>{SHORT_PHASE_LABELS[id]}</div>;
+            const label = analysis?.phases.find(phase => phase.id === id)?.label ?? SHORT_PHASE_LABELS[id] ?? id;
+            return <div key={id} title={label} style={{ minWidth: 0, overflow: 'hidden', borderRadius: 5, padding: '3px 2px', textAlign: 'center', fontSize: 7.5, fontWeight: active ? 900 : 600, background: active ? 'rgba(34,211,238,.18)' : 'rgba(255,255,255,.04)', color: active ? '#67e8f9' : 'rgba(255,255,255,.48)', border: active ? '1px solid rgba(34,211,238,.45)' : '1px solid transparent' }}>{SHORT_PHASE_LABELS[id] ?? label}</div>;
           })}
         </div>
         {feedback ? (
@@ -252,9 +266,12 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
             ))}
           </div>
         ) : (
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,.48)' }}>{sourceLabels.join(' · ') || TENDU_PILOT_REFERENCE.clip.label}</div>
+          <div style={{ fontSize: 9, color: 'rgba(255,255,255,.48)' }}>{sourceLabels.join(' · ') || 'Technische Quelle · keine Sollreferenz'}</div>
         )}
       </footer>
     </section>
   );
 });
+
+/** Compatibility export for existing callers and tests. */
+export const SynchronizedTenduAvatarViewport = SynchronizedMotionAvatarViewport;
