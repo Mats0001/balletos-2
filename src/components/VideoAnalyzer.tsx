@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, Camera, SplitSquareVertical, Layers, Sliders, Play, Pause, Send, Sparkles, Upload, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize2, Minimize2, Box, ListVideo, ChevronRight, Plus, Edit2, Trash2, Save, X, RotateCcw, Volume2, Compass, Eye, Activity as PulseIcon, Disc, BookOpen, Zap, Pen, ArrowRight, Type, Eraser, ImageDown, FlaskConical, Undo2, Redo2, RefreshCw, Hand } from 'lucide-react';
 import { AnnotationCanvas, AnnotationCanvasHandle, DrawingTool } from './AnnotationCanvas';
@@ -73,6 +73,17 @@ import {
 import { MOTION_REGISTRY, resolveMotionRegistryEntry } from '../services/motionRegistry';
 import { MOTION_REFERENCE_LIBRARY } from '../services/motionReferenceLibrary';
 import { MotionReferenceLibraryPanel } from './MotionReferenceLibraryPanel';
+import {
+  analysisContextFingerprint,
+  assessmentCapabilitiesForCurrentContext,
+  assessmentValueForCurrentContext,
+  bindAssessmentIfCurrent,
+  createAnalysisContextEpoch,
+  createAnalysisContextV1,
+  sameAnalysisContextEpoch,
+  type AnalysisContextEpochV1,
+  type BoundAssessmentV1,
+} from '../services/analysisContextGuard';
 
 const SynchronizedMotionAvatarViewport = lazy(async () => {
   const module = await import('./SynchronizedTenduAvatarViewport');
@@ -267,23 +278,110 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   // may choose a helpful default on source switch, but may never silently
   // override Nicole's explicit selection.
   const effectiveExerciseLabel = exerciseName;
-  const effectiveExerciseId = resolveMotionRegistryEntry(exerciseName)?.id ?? 'plie';
-  const motionAvatarAvailable = effectiveExerciseId !== 'plie';
+  const effectiveExerciseEntry = resolveMotionRegistryEntry(exerciseName);
+  const effectiveExerciseId = effectiveExerciseEntry?.id ?? 'plie';
+  const analysisContextIdentity = useMemo(() => effectiveExerciseEntry
+    ? createAnalysisContextV1({
+      sourceId: selectedDevVideoUrl,
+      studentSelection: selectedStudent,
+      exerciseId: effectiveExerciseEntry.id,
+      levelSelection: levelLabel,
+    })
+    : null,
+  [effectiveExerciseEntry, levelLabel, selectedDevVideoUrl, selectedStudent]);
+  const analysisContextIdentityFingerprint = analysisContextIdentity
+    ? analysisContextFingerprint(analysisContextIdentity)
+    : null;
+  const [analysisContextGeneration, setAnalysisContextGeneration] = useState(0);
+  const analysisContextGenerationRef = useRef(0);
+  const observedAnalysisContextFingerprintRef = useRef<string | null>(analysisContextIdentityFingerprint);
+  const currentAnalysisContextEpoch = useMemo(() => (
+    analysisContextIdentity
+      && observedAnalysisContextFingerprintRef.current === analysisContextIdentityFingerprint
+      ? createAnalysisContextEpoch(analysisContextIdentity, analysisContextGeneration)
+      : null
+  ), [analysisContextGeneration, analysisContextIdentity, analysisContextIdentityFingerprint]);
+  const currentAnalysisContextEpochRef = useRef<AnalysisContextEpochV1 | null>(currentAnalysisContextEpoch);
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
   const [detectedWorldLandmarks, setDetectedWorldLandmarks] = useState<PoseLandmark[] | null>(null);
   const [isEngineReady, setIsEngineReady] = useState<boolean>(false);
   const [analysisReport, setAnalysisReport] = useState<AutoAnalysisReport | null>(null);
-  const [teacherPhaseAnalysis, setTeacherPhaseAnalysis] = useState<TeacherPhaseAnalysis | null>(null);
+  const [boundTeacherPhaseAssessment, setBoundTeacherPhaseAssessment] = useState<BoundAssessmentV1<TeacherPhaseAnalysis> | null>(null);
   const [attemptHistoryRevision, setAttemptHistoryRevision] = useState(0);
   const [nicolePhaseComparisons, setNicolePhaseComparisons] = useState<readonly NicolePhaseReferenceComparison[]>([]);
   const [nicoleReferenceStorageRevision, setNicoleReferenceStorageRevision] = useState(0);
   const teacherPhaseAnalysisRef = useRef<TeacherPhaseAnalysis | null>(null);
-  const updateTeacherPhaseAnalysis = useCallback((analysis: TeacherPhaseAnalysis | null) => {
-    teacherPhaseAnalysisRef.current = analysis;
-    setTeacherPhaseAnalysis(analysis);
+  const teacherPhaseAnalysis = assessmentValueForCurrentContext(
+    boundTeacherPhaseAssessment,
+    currentAnalysisContextEpoch,
+  );
+  const assessmentCapabilities = assessmentCapabilitiesForCurrentContext(
+    boundTeacherPhaseAssessment,
+    currentAnalysisContextEpoch,
+  );
+  const clearTeacherPhaseAssessment = useCallback((keepCurrentReport = false) => {
+    teacherPhaseAnalysisRef.current = null;
+    setBoundTeacherPhaseAssessment(null);
+    setNicolePhaseComparisons([]);
+    if (!keepCurrentReport) setAnalysisReport(null);
+    setSplitScreenMode(false);
   }, []);
+  const publishTeacherPhaseAssessment = useCallback((
+    analysis: TeacherPhaseAnalysis,
+    startedFor: AnalysisContextEpochV1 | null,
+  ): boolean => {
+    const bound = bindAssessmentIfCurrent(startedFor, currentAnalysisContextEpochRef.current, analysis);
+    if (!bound) return false;
+    teacherPhaseAnalysisRef.current = analysis;
+    setBoundTeacherPhaseAssessment(bound);
+    return true;
+  }, []);
+  const assessmentRequestSequenceRef = useRef(0);
+  const [assessmentRequest, setAssessmentRequest] = useState<Readonly<{
+    requestId: number;
+    context: AnalysisContextEpochV1;
+  }> | null>(null);
+  const requestTeacherPhaseAssessment = useCallback((requestedContext?: AnalysisContextEpochV1 | null): boolean => {
+    const context = requestedContext ?? currentAnalysisContextEpochRef.current;
+    if (!sameAnalysisContextEpoch(context, currentAnalysisContextEpochRef.current) || !context) return false;
+    clearTeacherPhaseAssessment(true);
+    setAssessmentRequest(Object.freeze({
+      requestId: ++assessmentRequestSequenceRef.current,
+      context,
+    }));
+    return true;
+  }, [clearTeacherPhaseAssessment]);
+
+  // A context change invalidates the old assessment permanently. Returning to
+  // the same visible selection creates a new epoch; the old artifact cannot
+  // silently become current again.
+  useLayoutEffect(() => {
+    if (observedAnalysisContextFingerprintRef.current !== analysisContextIdentityFingerprint) {
+      const nextGeneration = analysisContextGenerationRef.current + 1;
+      analysisContextGenerationRef.current = nextGeneration;
+      observedAnalysisContextFingerprintRef.current = analysisContextIdentityFingerprint;
+      const nextEpoch = analysisContextIdentity
+        ? createAnalysisContextEpoch(analysisContextIdentity, nextGeneration)
+        : null;
+      currentAnalysisContextEpochRef.current = nextEpoch;
+      setAnalysisContextGeneration(nextGeneration);
+      setAssessmentRequest(null);
+      clearTeacherPhaseAssessment();
+      return;
+    }
+    currentAnalysisContextEpochRef.current = currentAnalysisContextEpoch;
+    teacherPhaseAnalysisRef.current = teacherPhaseAnalysis;
+  }, [
+    analysisContextIdentity,
+    analysisContextIdentityFingerprint,
+    clearTeacherPhaseAssessment,
+    currentAnalysisContextEpoch,
+    teacherPhaseAnalysis,
+  ]);
+
+  const motionAvatarAvailable = effectiveExerciseId !== 'plie' && assessmentCapabilities.canUseAvatar;
 
   // AI & TEACHER EDITABLE CUE-POINTS STATE
   const [cuePoints, setCuePoints] = useState<VaganovaCuePoint[]>(
@@ -298,6 +396,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const preIndexRunRef = useRef(0);
   const staticFrameRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const staticFrameRetryCountRef = useRef<number>(0);
+
+  useEffect(() => () => {
+    preIndexRunRef.current += 1;
+    currentAnalysisContextEpochRef.current = null;
+    teacherPhaseAnalysisRef.current = null;
+  }, []);
 
   // EDIT MODAL / INLINE FORM STATE
   const [editingCueId, setEditingCueId] = useState<string | null>(null);
@@ -573,6 +677,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const triggerPreIndexingScan = async () => {
     if (!videoRef.current) return;
     const scanVideoUrl = selectedDevVideoUrl;
+    const assessmentContextAtScanStart = currentAnalysisContextEpochRef.current;
     const scanRun = ++preIndexRunRef.current;
     const scanIsCurrent = () => (
       preIndexRunRef.current === scanRun
@@ -580,8 +685,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     );
 
     setIsPreIndexing(true);
-    setAnalysisReport(null);
-    updateTeacherPhaseAnalysis(null);
+    clearTeacherPhaseAssessment();
     setLoadedFromCache(false);
     setIndexingProgress(0);
     setIndexingStatusStr('Suche im Cache...');
@@ -629,10 +733,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     );
     vaganovaPreAnalyzer.saveCuePoints(scanVideoUrl, merged);
     setCuePoints(merged);
-    setAnalysisReport(report);
+    const assessmentContextStillCurrent = sameAnalysisContextEpoch(
+      assessmentContextAtScanStart,
+      currentAnalysisContextEpochRef.current,
+    );
+    setAnalysisReport(assessmentContextStillCurrent ? report : null);
+    // Raw pose extraction is source-scoped and reusable. The phase assessment
+    // is published separately and only if the context that started this scan
+    // is still the current context epoch.
+    requestTeacherPhaseAssessment(assessmentContextAtScanStart);
 
     // ── Analyse-Toast zeigen ──────────────────────────────────────────
-    if (report) {
+    if (report && assessmentContextStillCurrent) {
       const s = report.strengths.length;
       const c = report.corrections.length;
       const totalCues = autoCuePoints.length;
@@ -668,6 +780,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
         setCuePoints(merged);
         setAnalysisReport(report);
+        requestTeacherPhaseAssessment(currentAnalysisContextEpochRef.current);
       } else {
         // Automatisch starten – Nicole muss nichts tun
         triggerPreIndexingScan();
@@ -684,29 +797,66 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   }, [selectedDevVideoUrl]);
 
   useEffect(() => {
-    if (isPreIndexing || !vaganovaFrameCache.hasCache(selectedDevVideoUrl)) {
-      setNicolePhaseComparisons([]);
-      return;
-    }
-    const cacheDimensions = vaganovaFrameCache.getVideoDimensions(selectedDevVideoUrl);
-    const frames = vaganovaFrameCache.getFrames(selectedDevVideoUrl);
+    if (!assessmentRequest || isPreIndexing) return;
+    if (!sameAnalysisContextEpoch(assessmentRequest.context, currentAnalysisContextEpochRef.current)) return;
+    const sourceId = assessmentRequest.context.context.sourceId;
+    if (!vaganovaFrameCache.hasCache(sourceId)) return;
+    const registryEntry = MOTION_REGISTRY.find(entry => entry.id === assessmentRequest.context.context.exerciseId);
+    if (!registryEntry) return;
+    const cacheDimensions = vaganovaFrameCache.getVideoDimensions(sourceId);
+    const frames = vaganovaFrameCache.getFrames(sourceId);
     const analysis = analyzeTeacherPhases({
       frames,
       videoWidth: cacheDimensions.vw,
       videoHeight: cacheDimensions.vh,
-      exerciseLabel: effectiveExerciseLabel,
-      levelLabel,
+      exerciseLabel: registryEntry.label,
+      levelLabel: levelLabel,
     });
-    updateTeacherPhaseAnalysis(analysis);
+    if (analysis.exerciseId !== assessmentRequest.context.context.exerciseId) return;
+    if (publishTeacherPhaseAssessment(analysis, assessmentRequest.context)) {
+      setAssessmentRequest(current => current?.requestId === assessmentRequest.requestId ? null : current);
+    }
+  }, [assessmentRequest, isPreIndexing, levelLabel, publishTeacherPhaseAssessment]);
+
+  useEffect(() => {
+    if (!assessmentCapabilities.canCompareReferences || !teacherPhaseAnalysis || !currentAnalysisContextEpoch) {
+      setNicolePhaseComparisons([]);
+      return;
+    }
+    const sourceId = currentAnalysisContextEpoch.context.sourceId;
+    const cacheDimensions = vaganovaFrameCache.getVideoDimensions(sourceId);
+    const frames = vaganovaFrameCache.getFrames(sourceId);
     setNicolePhaseComparisons(compareNicolePhaseReferences({
-      analysis,
+      analysis: teacherPhaseAnalysis,
       frames,
-      videoSourceId: selectedDevVideoUrl,
+      videoSourceId: sourceId,
       videoWidth: cacheDimensions.vw,
       videoHeight: cacheDimensions.vh,
       records: loadNicoleReferenceLines(localStorage),
     }));
-  }, [effectiveExerciseLabel, isPreIndexing, levelLabel, nicoleReferenceStorageRevision, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
+  }, [assessmentCapabilities.canCompareReferences, currentAnalysisContextEpoch, nicoleReferenceStorageRevision, teacherPhaseAnalysis]);
+
+  const handleAnalysisRequest = () => {
+    if (isPreIndexing) return;
+    const context = currentAnalysisContextEpochRef.current;
+    if (!context) {
+      showAnalyseToast('Analyse benötigt eine gültige Schülerin, Übung und Stufe.');
+      return;
+    }
+    const currentAssessment = assessmentValueForCurrentContext(
+      boundTeacherPhaseAssessment,
+      context,
+    );
+    if (!currentAssessment && vaganovaFrameCache.hasCache(context.context.sourceId)) {
+      // Context-only refresh: reuse raw pose frames and skip MediaPipe entirely.
+      requestTeacherPhaseAssessment(context);
+      return;
+    }
+    // Explicit refresh of an already-current assessment retains the existing
+    // Force-Rescan behavior.
+    vaganovaFrameCache.clear(selectedDevVideoUrl);
+    triggerPreIndexingScan();
+  };
 
   // 🚀 60 FPS CANVAS-BASED RENDER LOOP
   // Landmarks are stored in refs (no React re-render per frame).
@@ -1547,8 +1697,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       setVideoList(videoStore.getAllVideos());
       preIndexRunRef.current += 1;
       setIsPreIndexing(false);
-      setAnalysisReport(null);
-      updateTeacherPhaseAnalysis(null);
+      clearTeacherPhaseAssessment();
       clearSkeletonSelection();
       selectedDevVideoUrlRef.current = newVid.url;
       setSelectedDevVideoUrl(newVid.url);
@@ -1574,8 +1723,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     setIsEngineReady(false);
     preIndexRunRef.current += 1;
     setIsPreIndexing(false);
-    setAnalysisReport(null);
-    updateTeacherPhaseAnalysis(null);
+    clearTeacherPhaseAssessment();
     clearSkeletonSelection();
     selectedDevVideoUrlRef.current = url;
     setSelectedDevVideoUrl(url);
@@ -2469,9 +2617,16 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     ))
     : false;
   const handleSaveStudentAttempt = () => {
-    if (!teacherPhaseAnalysis) return;
+    const guardedAnalysis = assessmentValueForCurrentContext(
+      boundTeacherPhaseAssessment,
+      currentAnalysisContextEpochRef.current,
+    );
+    if (!assessmentCapabilities.canSaveAttempt || !guardedAnalysis) {
+      showAnalyseToast('Versuch erst nach einer Analyse für den aktuellen Kontext speichern.');
+      return;
+    }
     const snapshot = createStudentAttemptSnapshot({
-      analysis: teacherPhaseAnalysis,
+      analysis: guardedAnalysis,
       studentLabel: selectedStudent,
       sourceId: selectedDevVideoUrl,
     });
@@ -2501,10 +2656,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     : null;
 
   // 🔔 Notify parent (App.tsx) with latest analysis for RightInspectorPanel
-  useEffect(() => {
-    onVaganovaAnalysis?.(vaganovaAnalysis);
+  useLayoutEffect(() => {
+    onVaganovaAnalysis?.(assessmentCapabilities.canUseFeedback ? vaganovaAnalysis : null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detectedLandmarks]);
+  }, [assessmentCapabilities.canUseFeedback, detectedLandmarks]);
+
+  useEffect(() => () => {
+    onVaganovaAnalysis?.(null);
+  }, [onVaganovaAnalysis]);
 
   // 💪 VAGANOVA ARM POSITION & ÉPAULEMENT ANALYSIS
   const armPositions = vaganovaArmAnalyzer.classifyArmPosition(sk);
@@ -2794,6 +2953,8 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               onChange={(event) => {
                 const next = MOTION_REGISTRY.find(entry => entry.id === event.target.value);
                 if (!next || next.phaseEngineStatus === 'technical_events_only') return;
+                clearTeacherPhaseAssessment();
+                setAssessmentRequest(null);
                 onExerciseChange?.(next.label);
                 clearSkeletonSelection('analysis_stale');
                 if (next.id === 'plie') setSplitScreenMode(false);
@@ -2842,13 +3003,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
           {/* Re-Scan Button – gleicher Style wie Upload, nur grün */}
           <button
-            onClick={() => {
-              if (isPreIndexing) return;
-              // Force-Rescan: In-Memory-Cache löschen damit der Scan sichtbar neu läuft
-              vaganovaFrameCache.clear(selectedDevVideoUrl);
-              triggerPreIndexingScan();
-            }}
-            title="Analyse neu starten (Force-Rescan)"
+            onClick={handleAnalysisRequest}
+            title={teacherPhaseAnalysis
+              ? 'Analyse neu starten (Force-Rescan)'
+              : 'Auswertung für die aktuelle Schülerin, Übung und Stufe starten'}
             disabled={isPreIndexing}
             style={{
               background: isPreIndexing ? 'rgba(48,209,88,0.06)' : 'rgba(48,209,88,0.12)',
@@ -3071,7 +3229,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
           <button
             disabled={!motionAvatarAvailable}
-            onClick={() => motionAvatarAvailable && setSplitScreenMode(!splitScreenMode)}
+            onClick={() => {
+              if (!motionAvatarAvailable
+                || !assessmentValueForCurrentContext(boundTeacherPhaseAssessment, currentAnalysisContextEpochRef.current)) return;
+              setSplitScreenMode(!splitScreenMode);
+            }}
             title={motionAvatarAvailable
               ? `Technischen Single-Clock-Linienavatar für ${resolveMotionRegistryEntry(exerciseName)?.shortLabel ?? 'diese Übung'} ein-/ausblenden`
               : 'Technischer Linienavatar für Tendu, Passé, Jeté und Changement'}
@@ -3817,7 +3979,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
             })()}
 
             {/* VIEWPORT 2: technical reference avatar on the primary clock. */}
-            {splitScreenMode && (
+            {splitScreenMode && assessmentCapabilities.canUseAvatar && teacherPhaseAnalysis && (
               <Suspense fallback={<div role="status" style={{ display: 'grid', placeItems: 'center', minWidth: 0, color: '#cbd5e1', background: '#050508', fontSize: 11 }}>Technischer Linienavatar wird geladen …</div>}>
                 <SynchronizedMotionAvatarViewport
                   analysis={teacherPhaseAnalysis}
@@ -4183,7 +4345,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           </div>{/* end ANNOTATION ROW flex */}
 
           {/* JETZT WICHTIG – direkt unter Video, keine separate Zeile nötig */}
-          <JetztWichtigInspector data={inspectorData} />
+          {assessmentCapabilities.canUseFeedback ? <JetztWichtigInspector data={inspectorData} /> : null}
 
           {/* BOTTOM TIMELINE & CONTROLS DOCK */}
           <div style={{ padding: '10px 18px', background: 'rgba(10, 8, 14, 0.95)', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -4406,7 +4568,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           </div>
 
           {/* ── GESAMT-ZUSAMMENFASSUNG AKKORDION ────────────────────── */}
-          {analysisReport && (() => {
+          {assessmentCapabilities.canUseFeedback && analysisReport && (() => {
             const nStrong = analysisReport.strengths.length;
             const nCorr   = analysisReport.corrections.length;
 
