@@ -5,6 +5,7 @@ import type { TeacherPhaseAnalysis, TeacherPhaseResult } from '../services/teach
 import { canCreateNicoleReferenceFromSource, isBundledNicoleTestClip } from '../services/referenceSourcePolicy';
 import { MOTION_REFERENCE_LIBRARY } from '../services/motionReferenceLibrary';
 import { TEACHER_REGION_KEYS, type TeacherRegionKey } from '../types/teacherHeuristic';
+import { DRYAD_TENDU_COHORT_ASSET, TENDU_PILOT_ASSET_MANIFEST } from '../data/tenduPilotAssets.generated';
 
 function regions(state = 'heuristic_attention_uncertain' as const) {
   return Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, {
@@ -13,12 +14,12 @@ function regions(state = 'heuristic_attention_uncertain' as const) {
 }
 
 const phase: TeacherPhaseResult = Object.freeze({
-  id: 'extension', label: 'Abstreichen', startMs: 100, endMs: 300,
+  id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300,
   representativeTimeMs: 200, regions: regions(), displayState: 'heuristic_attention_uncertain',
 });
 const analysis: TeacherPhaseAnalysis = Object.freeze({
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',
-  workingSide: 'right', framesAnalyzed: 80, policyVersion: 'test', phases: Object.freeze([phase]),
+  workingSide: 'right', cycleCount: 1, framesAnalyzed: 80, policyVersion: 'test', phases: Object.freeze([phase]),
   gate: Object.freeze({ status: 'ready', checks: Object.freeze([]), correctiveActions: Object.freeze([]), detectedPerspective: 'FRONTAL' }),
 });
 
@@ -42,6 +43,21 @@ describe('Tendu vertical slice contracts', () => {
     expect(MOTION_REFERENCE_LIBRARY.find(item => item.id === 'balletmoves-ii')).toMatchObject({
       productStatus: 'license_required', pedagogicalStatus: 'technical_only',
     });
+  });
+
+  it('uses the reproducible 100-trial Dryad aggregate without shipping UCY joint coordinates', () => {
+    expect(DRYAD_TENDU_COHORT_ASSET.clip).toMatchObject({
+      cohortSize: 100,
+      participantCount: 10,
+      sourceTrialCount: 100,
+    });
+    expect(DRYAD_TENDU_COHORT_ASSET.clip.frames).toHaveLength(55);
+    expect(TENDU_PILOT_ASSET_MANIFEST.ucy).toMatchObject({
+      inspectedFrameCount: 99,
+      exportedForm: 'aggregate stability report only; no derived joint coordinates',
+      productStatus: 'internal_research_only_do_not_ship',
+    });
+    expect(TENDU_PILOT_ASSET_MANIFEST.ucy.stability.stable).toBe(true);
   });
 
   it('produces all five pending-Nicole teaching sections without medical claims', () => {

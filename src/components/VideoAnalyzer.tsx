@@ -2387,8 +2387,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     teacherPhaseAnalysis,
     currentPlayTime * 1000,
   );
+  const activeTeacherCycleIndex = activeTeacherPhase?.cycleIndex ?? 0;
+  const visibleTeacherPhases = teacherPhaseAnalysis?.phases.filter(
+    phase => phase.cycleIndex === activeTeacherCycleIndex,
+  ) ?? [];
   const activeNicolePhaseComparisons = activeTeacherPhase
-    ? nicolePhaseComparisons.filter(comparison => comparison.phaseId === activeTeacherPhase.id)
+    ? nicolePhaseComparisons.filter(comparison => (
+      comparison.phaseId === activeTeacherPhase.id
+      && comparison.cycleIndex === activeTeacherPhase.cycleIndex
+    ))
     : [];
   vaganovaKineticAI.updateTrails(sk, currentVidTime);
   const cog = vaganovaKineticAI.computeCenterOfGravity(sk);
@@ -3339,6 +3346,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           </div>
                           <div style={{ fontSize: '8px', opacity: 0.7, textAlign: 'right' }}>
                             {activeTeacherPhase?.label ?? 'Phase wählen'}
+                            {teacherPhaseAnalysis.cycleCount > 1 ? (
+                              <div style={{ marginTop: '2px', color: '#67e8f9', fontWeight: 800 }}>
+                                Zyklus {activeTeacherCycleIndex + 1}/{teacherPhaseAnalysis.cycleCount}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                         {teacherPhaseAnalysis.gate.status === 'usable_with_caution' && (
@@ -3347,11 +3359,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           </div>
                         )}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '4px', marginTop: '7px' }}>
-                          {teacherPhaseAnalysis.phases.map(phase => {
+                          {visibleTeacherPhases.map(phase => {
                             const color = heuristicColor(phase.displayState);
                             const evidenceStrength = heuristicEvidenceStrength(phase.displayState);
                             const dotted = heuristicDash(phase.displayState).length > 0;
-                            const active = activeTeacherPhase?.id === phase.id;
+                            const active = activeTeacherPhase?.id === phase.id
+                              && activeTeacherPhase.cycleIndex === phase.cycleIndex;
                             const evidenceLabel = evidenceStrength === 'stable'
                               ? 'Evidenz stabil'
                               : evidenceStrength === 'uncertain'
@@ -3359,7 +3372,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                 : 'Evidenz schwach · Urteil vorläufig';
                             return (
                               <button
-                                key={phase.id}
+                                key={`${phase.cycleIndex}:${phase.id}`}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   handleInspectTeacherPhase(phase.representativeTimeMs);
@@ -3396,7 +3409,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                           const ready = comparison.status === 'ready' && comparison.medianAxisDeltaDeg !== null;
                           return (
                             <div
-                              key={`${comparison.recordId}:${comparison.versionId}`}
+                              key={`${comparison.recordId}:${comparison.versionId}:${comparison.cycleIndex}`}
                               title="Versionsgebundener 2D-Linienvergleich aus Nicoles Referenzbibliothek. Kein automatisches Richtig/Falsch."
                               style={{
                                 marginTop: '6px', padding: '5px 6px', borderRadius: '7px',

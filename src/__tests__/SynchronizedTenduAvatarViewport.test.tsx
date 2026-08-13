@@ -10,7 +10,7 @@ import { TEACHER_REGION_KEYS } from '../types/teacherHeuristic';
 afterEach(cleanup);
 
 const phase: TeacherPhaseResult = {
-  id: 'extension', label: 'Abstreichen', startMs: 100, endMs: 300, representativeTimeMs: 200,
+  id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300, representativeTimeMs: 200,
   displayState: 'heuristic_attention_uncertain',
   regions: Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, {
     state: 'heuristic_attention_uncertain', corridorResult: 'overlap', sampleCount: 4, agreement: .75, uncertainRatio: .25,
@@ -19,6 +19,7 @@ const phase: TeacherPhaseResult = {
 
 const analysis: TeacherPhaseAnalysis = {
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS', workingSide: 'right',
+  cycleCount: 1,
   gate: { status: 'ready', checks: [], correctiveActions: [], detectedPerspective: 'FRONTAL' },
   phases: [phase], framesAnalyzed: 40, policyVersion: 'test',
 };
@@ -36,6 +37,7 @@ describe('single-clock Tendu avatar viewport', () => {
     expect(screen.getByText('Schluss')).toBeTruthy();
     expect(screen.getByTestId('tendu-rich-feedback').textContent).toContain('Was');
     expect(screen.getByText(/nicht Nicole-geprüft/i)).toBeTruthy();
+    expect(screen.getByText(/100 Versuchen/i)).toBeTruthy();
   });
 
   it('shows recording correction instead of a guessed technical comparison', () => {

@@ -97,7 +97,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
       <header style={{ padding: '12px 14px 7px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ color: '#67e8f9', fontSize: 10, fontWeight: 900, letterSpacing: '.06em' }}>SINGLE-CLOCK · TECHNISCHER TENDU-PILOT</div>
-          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>Dryad Fußbahn + UCY Vollkörperträger · nicht Nicole-geprüft</div>
+          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>Dryad-Median aus 100 Versuchen + neutraler BalletOS-Linienkörper · nicht Nicole-geprüft</div>
         </div>
         <div className="tendu-avatar-clock" style={{ border: '1px solid rgba(148,163,184,.35)', borderRadius: 7, padding: '4px 7px', fontSize: 9, color: '#cbd5e1', whiteSpace: 'nowrap' }}>
           {isPlaying ? 'LIVE' : 'PAUSE'} · {(clockMs / 1000).toFixed(3)} s
@@ -134,6 +134,7 @@ export const SynchronizedTenduAvatarViewport = memo(function SynchronizedTenduAv
         )}
         {resolution.kind === 'mapped' ? (
           <div style={{ position: 'absolute', top: 4, right: 14, padding: '5px 8px', borderRadius: 8, border: `1px ${isDotted ? 'dotted' : 'solid'} ${phaseColor}`, background: 'rgba(2,6,23,.82)', color: phaseColor, fontSize: 10, fontWeight: 800 }}>
+            {analysis && analysis.cycleCount > 1 ? `Zyklus ${resolution.phase.cycleIndex + 1}/${analysis.cycleCount} · ` : ''}
             {resolution.phase.label} · {Math.round(resolution.phaseProgress * 100)} %
           </div>
         ) : null}

@@ -66,6 +66,7 @@ export interface TeacherPhaseRegionSummary {
 
 export interface TeacherPhaseResult {
   id: TeacherPhaseId;
+  cycleIndex: number;
   label: string;
   startMs: number;
   endMs: number;
@@ -80,6 +81,7 @@ export interface TeacherPhaseAnalysis {
   exerciseLabel: string;
   levelLabel: string;
   workingSide: 'left' | 'right' | null;
+  cycleCount: number;
   gate: RecordingGateResult;
   phases: readonly TeacherPhaseResult[];
   framesAnalyzed: number;
@@ -96,6 +98,7 @@ export interface TeacherPhaseAnalysisInput {
 
 interface PhaseBoundary {
   id: TeacherPhaseId;
+  cycleIndex: number;
   label: string;
   startIndex: number;
   endIndex: number;
@@ -248,11 +251,11 @@ function detectPliePhases(samples: readonly PoseSample[]): PhaseBoundary[] | nul
 
   if (descentStart < 2 || bottomStart - descentStart < 2 || ascentEnd - bottomEnd < 2 || ascentEnd >= angles.length - 1) return null;
   return [
-    { id: 'setup', label: 'Ausgangsposition', startIndex: 0, endIndex: descentStart - 1, representativeIndex: Math.floor(descentStart / 2) },
-    { id: 'descent', label: 'Abwärtsbewegung', startIndex: descentStart, endIndex: bottomStart - 1, representativeIndex: Math.floor((descentStart + bottomStart - 1) / 2) },
-    { id: 'bottom', label: 'Tiefster Plié-Punkt', startIndex: bottomStart, endIndex: bottomEnd, representativeIndex: bottomIndex },
-    { id: 'ascent', label: 'Aufwärtsbewegung', startIndex: bottomEnd + 1, endIndex: ascentEnd, representativeIndex: Math.floor((bottomEnd + 1 + ascentEnd) / 2) },
-    { id: 'finish', label: 'Abschluss', startIndex: ascentEnd + 1, endIndex: angles.length - 1, representativeIndex: Math.floor((ascentEnd + 1 + angles.length - 1) / 2) },
+    { id: 'setup', cycleIndex: 0, label: 'Ausgangsposition', startIndex: 0, endIndex: descentStart - 1, representativeIndex: Math.floor(descentStart / 2) },
+    { id: 'descent', cycleIndex: 0, label: 'Abwärtsbewegung', startIndex: descentStart, endIndex: bottomStart - 1, representativeIndex: Math.floor((descentStart + bottomStart - 1) / 2) },
+    { id: 'bottom', cycleIndex: 0, label: 'Tiefster Plié-Punkt', startIndex: bottomStart, endIndex: bottomEnd, representativeIndex: bottomIndex },
+    { id: 'ascent', cycleIndex: 0, label: 'Aufwärtsbewegung', startIndex: bottomEnd + 1, endIndex: ascentEnd, representativeIndex: Math.floor((bottomEnd + 1 + ascentEnd) / 2) },
+    { id: 'finish', cycleIndex: 0, label: 'Abschluss', startIndex: ascentEnd + 1, endIndex: angles.length - 1, representativeIndex: Math.floor((ascentEnd + 1 + angles.length - 1) / 2) },
   ];
 }
 
@@ -279,6 +282,7 @@ function tenduFootPath(
 function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
   boundaries: readonly PhaseBoundary[];
   workingSide: 'left' | 'right';
+  cycleCount: number;
 }> | null {
   if (samples.length < 20) return null;
   const left = tenduFootPath(samples, 'left');
@@ -302,41 +306,77 @@ function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
   const range = Math.max(...path);
   if (!Number.isFinite(range) || range < 0.035) return null;
 
-  let peakIndex = 0;
-  for (let index = 1; index < path.length; index++) {
-    if (path[index] > path[peakIndex]) peakIndex = index;
+  // Split the path into real excursions separated by a returned working foot.
+  // A short two-frame gap is bridged to tolerate landmark jitter near the
+  // low threshold, while a real closed-position interval starts a new cycle.
+  const lowThreshold = Math.max(0.012, range * 0.08);
+  const excursionRanges: { start: number; end: number }[] = [];
+  let cursor = 0;
+  while (cursor < path.length) {
+    while (cursor < path.length && path[cursor] <= lowThreshold) cursor++;
+    if (cursor >= path.length) break;
+    const start = cursor;
+    let lastAbove = cursor;
+    let belowRun = 0;
+    while (cursor < path.length) {
+      if (path[cursor] > lowThreshold) {
+        lastAbove = cursor;
+        belowRun = 0;
+      } else {
+        belowRun++;
+        if (belowRun >= 3) break;
+      }
+      cursor++;
+    }
+    excursionRanges.push({ start, end: lastAbove });
   }
-  if (peakIndex < edgeCount || peakIndex >= path.length - edgeCount) return null;
 
-  const progress = path.map(value => value / range);
-  let extensionStart = -1;
-  for (let index = 0; index < peakIndex; index++) {
-    if (progress[index] >= 0.12) { extensionStart = index; break; }
-  }
-  if (extensionStart < 2) return null;
-  let fullStart = peakIndex;
-  while (fullStart > extensionStart && progress[fullStart - 1] >= 0.82) fullStart--;
-  let fullEnd = peakIndex;
-  while (fullEnd < progress.length - 1 && progress[fullEnd + 1] >= 0.82) fullEnd++;
-  let returnEnd = -1;
-  for (let index = fullEnd + 1; index < progress.length; index++) {
-    if (progress[index] <= 0.18) { returnEnd = index; break; }
-  }
-  if (
-    fullStart - extensionStart < 2
-    || returnEnd - fullEnd < 2
-    || returnEnd < 0
-    || returnEnd >= progress.length - 2
-  ) return null;
+  const cores = excursionRanges.flatMap(({ start, end }) => {
+    let peakIndex = start;
+    for (let index = start + 1; index <= end; index++) {
+      if (path[index] > path[peakIndex]) peakIndex = index;
+    }
+    const peak = path[peakIndex];
+    if (!Number.isFinite(peak) || peak < 0.035) return [];
+    let extensionStart = start;
+    while (extensionStart < peakIndex && path[extensionStart] < peak * 0.12) extensionStart++;
+    let fullStart = peakIndex;
+    while (fullStart > extensionStart && path[fullStart - 1] >= peak * 0.82) fullStart--;
+    let fullEnd = peakIndex;
+    while (fullEnd < end && path[fullEnd + 1] >= peak * 0.82) fullEnd++;
+    let returnEnd = fullEnd + 1;
+    while (returnEnd < path.length && path[returnEnd] > peak * 0.18) returnEnd++;
+    if (
+      extensionStart < 2
+      || fullStart - extensionStart < 2
+      || returnEnd - fullEnd < 2
+      || returnEnd >= path.length - 1
+    ) return [];
+    return [{ extensionStart, fullStart, fullEnd, returnEnd, peakIndex }];
+  });
+  if (cores.length === 0) return null;
 
-  const boundaries: readonly PhaseBoundary[] = Object.freeze([
-    { id: 'departure', label: 'Ausgang', startIndex: 0, endIndex: extensionStart - 1, representativeIndex: Math.floor(extensionStart / 2) },
-    { id: 'extension', label: 'Abstreichen', startIndex: extensionStart, endIndex: fullStart - 1, representativeIndex: Math.floor((extensionStart + fullStart - 1) / 2) },
-    { id: 'full_extension', label: 'Volle Streckung', startIndex: fullStart, endIndex: fullEnd, representativeIndex: peakIndex },
-    { id: 'return', label: 'Rückweg', startIndex: fullEnd + 1, endIndex: returnEnd, representativeIndex: Math.floor((fullEnd + 1 + returnEnd) / 2) },
-    { id: 'closure', label: 'Schluss', startIndex: returnEnd + 1, endIndex: progress.length - 1, representativeIndex: Math.floor((returnEnd + 1 + progress.length - 1) / 2) },
-  ]);
-  return Object.freeze({ boundaries, workingSide });
+  const boundaries: PhaseBoundary[] = [];
+  cores.forEach((core, cycleIndex) => {
+    const previous = cores[cycleIndex - 1];
+    const next = cores[cycleIndex + 1];
+    const cycleStart = previous
+      ? Math.floor((previous.returnEnd + core.extensionStart) / 2) + 1
+      : 0;
+    const cycleEnd = next
+      ? Math.floor((core.returnEnd + next.extensionStart) / 2)
+      : path.length - 1;
+    if (core.extensionStart <= cycleStart || cycleEnd <= core.returnEnd) return;
+    boundaries.push(
+      { id: 'departure', cycleIndex, label: 'Ausgang', startIndex: cycleStart, endIndex: core.extensionStart - 1, representativeIndex: Math.floor((cycleStart + core.extensionStart - 1) / 2) },
+      { id: 'extension', cycleIndex, label: 'Abstreichen', startIndex: core.extensionStart, endIndex: core.fullStart - 1, representativeIndex: Math.floor((core.extensionStart + core.fullStart - 1) / 2) },
+      { id: 'full_extension', cycleIndex, label: 'Volle Streckung', startIndex: core.fullStart, endIndex: core.fullEnd, representativeIndex: core.peakIndex },
+      { id: 'return', cycleIndex, label: 'Rückweg', startIndex: core.fullEnd + 1, endIndex: core.returnEnd, representativeIndex: Math.floor((core.fullEnd + 1 + core.returnEnd) / 2) },
+      { id: 'closure', cycleIndex, label: 'Schluss', startIndex: core.returnEnd + 1, endIndex: cycleEnd, representativeIndex: Math.floor((core.returnEnd + 1 + cycleEnd) / 2) },
+    );
+  });
+  const cycleCount = boundaries.filter(boundary => boundary.id === 'departure').length;
+  return cycleCount > 0 ? Object.freeze({ boundaries: Object.freeze(boundaries), workingSide, cycleCount }) : null;
 }
 
 export function summarizePhaseRegionStates(
@@ -525,6 +565,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     ? tenduDetection?.boundaries ?? null
     : detectPliePhases(samples);
   const workingSide = exerciseId === 'tendu' ? tenduDetection?.workingSide ?? null : null;
+  const cycleCount = exerciseId === 'tendu' ? tenduDetection?.cycleCount ?? 0 : boundaries ? 1 : 0;
   const exerciseDisplayName = exerciseId === 'tendu' ? 'Tendu' : 'Plié';
   const completeCycleId: RecordingGateCheck['id'] = exerciseId === 'tendu'
     ? 'complete_tendu_cycle'
@@ -546,7 +587,19 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     gateCheck('feet_joints', 'Füße und relevante Gelenke sichtbar', feetRatio >= 0.72, false, `${Math.round(feetRatio * 100)} % vollständig`),
     gateCheck('sharpness', 'Ausreichende Bildschärfe', quality.length >= totalFrames * 0.7 && sharpness >= 0.08, quality.length >= totalFrames * 0.2 && sharpness < 0.02, `Schärfeindex ${sharpness.toFixed(2)}`),
     gateCheck('camera_stability', 'Kamera stabil', quality.length >= totalFrames * 0.7 && cameraMotion <= 0.12, quality.length >= totalFrames * 0.2 && cameraMotion > 0.35, `Hintergrundbewegung ${cameraMotion.toFixed(2)}`),
-    gateCheck(completeCycleId, completeCycleLabel, boundaries !== null, boundaries === null, boundaries ? '5 Phasen erkannt' : missingCycleDetail),
+    gateCheck(
+      completeCycleId,
+      completeCycleLabel,
+      boundaries !== null,
+      boundaries === null,
+      boundaries
+        ? exerciseId === 'tendu'
+          ? cycleCount === 1
+            ? '1 vollständiger Tendu-Zyklus mit 5 Phasen erkannt'
+            : `${cycleCount} vollständige Tendu-Zyklen mit je 5 Phasen erkannt`
+          : '5 Phasen erkannt'
+        : missingCycleDetail,
+    ),
   ];
   const correctiveActions = checks.filter(check => !check.passed).map(check => check.label);
   const analysisBlocked = checks.some(check => check.blocksAnalysis);
@@ -575,6 +628,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
       ) as Record<TeacherRegionKey, TeacherPhaseRegionSummary>;
       return {
         id: boundary.id,
+        cycleIndex: boundary.cycleIndex,
         label: boundary.label,
         startMs: phaseSamples[0].frame.timeMs,
         endMs: phaseSamples[phaseSamples.length - 1].frame.timeMs,
@@ -591,6 +645,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     exerciseLabel: input.exerciseLabel,
     levelLabel: input.levelLabel,
     workingSide,
+    cycleCount,
     gate,
     phases,
     framesAnalyzed: samples.length,

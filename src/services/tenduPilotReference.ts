@@ -4,43 +4,12 @@ import type {
   CanonicalMotionClip,
   CanonicalMotionFrame,
   CanonicalMotionPhaseId,
-  DryadTenduClip,
 } from '../types/canonicalMotion';
 import { TENDU_PHASE_LABELS, TENDU_PHASE_ORDER } from '../types/canonicalMotion';
 import type { TeacherPhaseAnalysis, TeacherPhaseResult } from './teacherPhaseAnalysis';
 import { getMotionReferenceLibraryEntry } from './motionReferenceLibrary';
 import { buildTenduTechnicalPrototype } from './tenduTechnicalPilot';
-
-type CompactFrame = readonly [number, CanonicalMotionPhaseId, number, number, number, number];
-
-/** Actual Dryad P1/T1 foot signal, downsampled from 190 frames at 250 Hz. */
-const COMPACT_DRYAD_FRAMES: readonly CompactFrame[] = Object.freeze([
-  [0, 'departure', 152.013, 442.443, 151.583, 449.479],
-  [32000, 'departure', 154.306, 443.131, 152.460, 449.365],
-  [64000, 'departure', 159.135, 445.086, 154.936, 449.235],
-  [96000, 'extension', 167.116, 448.947, 160.436, 449.543],
-  [128000, 'extension', 178.316, 451.914, 170.044, 448.232],
-  [160000, 'extension', 191.728, 454.571, 183.234, 446.901],
-  [192000, 'extension', 204.122, 456.840, 195.790, 445.602],
-  [224000, 'extension', 215.071, 458.023, 207.661, 444.759],
-  [256000, 'full_extension', 223.473, 458.623, 216.995, 444.250],
-  [288000, 'full_extension', 228.490, 458.881, 222.712, 443.957],
-  [320000, 'full_extension', 229.814, 458.936, 224.648, 443.838],
-  [352000, 'full_extension', 227.999, 458.862, 223.348, 443.875],
-  [384000, 'full_extension', 223.860, 458.668, 219.041, 444.033],
-  [416000, 'return', 217.758, 458.239, 211.961, 444.368],
-  [448000, 'return', 209.881, 457.484, 202.920, 444.920],
-  [480000, 'return', 200.604, 456.359, 192.693, 445.661],
-  [512000, 'return', 190.606, 454.873, 182.092, 446.542],
-  [544000, 'return', 180.806, 453.103, 172.334, 447.568],
-  [576000, 'return', 172.145, 451.188, 164.657, 448.781],
-  [608000, 'return', 165.247, 449.020, 159.548, 449.717],
-  [640000, 'closure', 160.131, 446.210, 156.526, 449.442],
-  [672000, 'closure', 156.381, 444.152, 154.623, 449.151],
-  [704000, 'closure', 153.711, 442.941, 153.222, 449.092],
-  [736000, 'closure', 152.109, 442.386, 152.266, 449.240],
-  [756000, 'closure', 151.613, 442.263, 151.918, 449.356],
-]);
+import { DRYAD_TENDU_COHORT_ASSET, TENDU_PILOT_ASSET_MANIFEST } from '../data/tenduPilotAssets.generated';
 
 const sample = (x: number, y: number, z = 0): CanonicalJointSample => Object.freeze({
   x, y, z, confidence: 1,
@@ -54,19 +23,19 @@ const CARRIER_JOINTS: Readonly<Record<CanonicalJointId, CanonicalJointSample>> =
   footL: sample(-.20, .04, .12), footR: sample(.20, .04, .12),
 });
 
-const UCY_CARRIER: CanonicalMotionClip = Object.freeze({
+const NEUTRAL_BALLETOS_CARRIER: CanonicalMotionClip = Object.freeze({
   schemaVersion: 1,
-  clipId: 'ucy-believer-stable-carrier-v1',
-  exerciseId: 'unclassified_full_body_motion',
-  label: 'UCY full-body carrier · internal pilot',
-  frameRateHz: 120,
+  clipId: 'balletos-neutral-line-carrier-v1',
+  exerciseId: 'neutral_line_avatar_carrier',
+  label: 'BalletOS neutraler Linienkörper',
+  frameRateHz: 60,
   coordinateSystem: 'balletos_metric_right_up_forward',
   provenance: Object.freeze({
-    datasetId: 'ucy:ballet-believer',
-    sourceUrl: 'https://dancedb.cs.ucy.ac.cy/main/performances',
-    sourceKind: 'bvh_skeleton',
-    rightsStatus: 'internal_research_only',
-    licenseLabel: 'UCY internal pilot only',
+    datasetId: 'balletos:neutral-line-carrier:v1',
+    sourceUrl: 'internal://balletos/neutral-line-carrier',
+    sourceKind: 'authored_animation',
+    rightsStatus: 'product_technical_signal_allowed',
+    licenseLabel: 'BalletOS-eigener neutraler Linienkörper',
     pedagogicalStatus: 'technical_only',
     nicoleReviewStatus: 'not_reviewed',
   }),
@@ -76,47 +45,9 @@ const UCY_CARRIER: CanonicalMotionClip = Object.freeze({
   ]),
 });
 
-const first = COMPACT_DRYAD_FRAMES[0];
-const dryadFrames: readonly CanonicalMotionFrame[] = Object.freeze(COMPACT_DRYAD_FRAMES.map(([
-  timeUs, phaseId, ankleX, ankleY, footX, footY,
-]) => Object.freeze({
-  timeUs,
-  phaseId,
-  joints: Object.freeze({
-    head: sample(0, 1.8),
-    ankleL: sample(-.14, .08),
-    footL: sample(-.20, .04, .12),
-    ankleR: sample(.14 + (ankleX - first[2]) / 300, .08 - (ankleY - first[3]) / 300),
-    footR: sample(.20 + (footX - first[4]) / 300, .04 - (footY - first[5]) / 300, .12),
-  }),
-})));
-
-const DRYAD_TENDU: DryadTenduClip = Object.freeze({
-  schemaVersion: 1,
-  clipId: 'dryad-tendu-p1-t1',
-  exerciseId: 'tendu',
-  label: 'Dryad Tendu · P1/T1',
-  frameRateHz: 250,
-  coordinateSystem: 'balletos_metric_right_up_forward',
-  workingSide: 'right',
-  participantId: 1,
-  trial: 1,
-  provenance: Object.freeze({
-    datasetId: 'dryad:tendu-2025:p1:t1',
-    sourceUrl: 'https://doi.org/10.5061/dryad.dncjsxm8v',
-    sourceKind: 'optical_marker',
-    rightsStatus: 'product_technical_signal_allowed',
-    licenseLabel: 'CC0-1.0',
-    pedagogicalStatus: 'technical_only',
-    nicoleReviewStatus: 'not_reviewed',
-  }),
-  events: Object.freeze([]),
-  frames: dryadFrames,
-});
-
 export const TENDU_PILOT_REFERENCE = buildTenduTechnicalPrototype({
-  dryad: DRYAD_TENDU,
-  fullBodyCarrier: UCY_CARRIER,
+  dryad: DRYAD_TENDU_COHORT_ASSET.clip,
+  fullBodyCarrier: NEUTRAL_BALLETOS_CARRIER,
 });
 
 export type TenduPilotFrameResolution = Readonly<{
@@ -153,9 +84,9 @@ export function resolveTenduPilotFrame(
 }
 
 export function tenduPilotSourceLabels(): readonly string[] {
-  return Object.freeze(['dryad-tendu-2025', 'ucy-ballet-bvh'].flatMap(id => {
+  return Object.freeze(['dryad-tendu-2025'].flatMap(id => {
     const entry = getMotionReferenceLibraryEntry(id);
-    return entry ? [`${entry.label} · ${entry.rightsLabel}`] : [];
+    return entry ? [`${entry.label} · ${TENDU_PILOT_ASSET_MANIFEST.dryad.trialCount} Versuche · ${entry.rightsLabel}`] : [];
   }));
 }
 

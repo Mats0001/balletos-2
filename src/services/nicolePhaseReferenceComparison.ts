@@ -21,6 +21,7 @@ export interface NicolePhaseReferenceComparison {
   sourceScope: 'same_video' | 'cross_video';
   referenceVideoSourceId: string;
   phaseId: TeacherPhaseId;
+  cycleIndex: number;
   targetId: SkeletonTargetId;
   targetLabel: string;
   recordId: string;
@@ -194,6 +195,7 @@ export function compareNicolePhaseReferences(
       sourceScope: sameVideo ? 'same_video' : 'cross_video',
       referenceVideoSourceId: record.videoSourceId,
       phaseId: phase.id,
+      cycleIndex: phase.cycleIndex,
       targetId: record.targetId,
       targetLabel: target.label,
       recordId: record.recordId,

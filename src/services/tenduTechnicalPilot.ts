@@ -4,7 +4,7 @@ import {
   type CanonicalJointSample,
   type CanonicalMotionClip,
   type CanonicalMotionFrame,
-  type DryadTenduClip,
+  type DryadTenduSignalClip,
   type SpatialStabilityReport,
   type TenduTechnicalPrototype,
 } from '../types/canonicalMotion';
@@ -106,7 +106,7 @@ function translated(
  * result is explicitly not a pedagogical reference or correctness target.
  */
 export function buildTenduTechnicalPrototype(input: {
-  dryad: DryadTenduClip;
+  dryad: DryadTenduSignalClip;
   fullBodyCarrier: CanonicalMotionClip;
 }): TenduTechnicalPrototype {
   const carrier = chooseCarrierFrame(input.fullBodyCarrier);
@@ -143,6 +143,10 @@ export function buildTenduTechnicalPrototype(input: {
   const phaseCoverage = new Set(frames.map(frame => frame.phaseId).filter(Boolean)).size / 5;
   const footOrigin = frames[0].joints[workingFootId]!;
   const footExcursion = Math.max(...frames.map(frame => distance(footOrigin, frame.joints[workingFootId]!)));
+  const rightsStatus = input.dryad.provenance.rightsStatus === 'product_technical_signal_allowed'
+    && input.fullBodyCarrier.provenance.rightsStatus === 'product_technical_signal_allowed'
+    ? 'product_technical_signal_allowed'
+    : 'internal_research_only';
 
   return Object.freeze({
     clip: Object.freeze({
@@ -156,7 +160,7 @@ export function buildTenduTechnicalPrototype(input: {
         datasetId: `composite:${input.dryad.provenance.datasetId}+${input.fullBodyCarrier.provenance.datasetId}`,
         sourceUrl: input.dryad.provenance.sourceUrl,
         sourceKind: 'composite_technical',
-        rightsStatus: 'internal_research_only',
+        rightsStatus,
         licenseLabel: `${input.dryad.provenance.licenseLabel} + ${input.fullBodyCarrier.provenance.licenseLabel}`,
         pedagogicalStatus: 'technical_only',
         nicoleReviewStatus: 'not_reviewed',

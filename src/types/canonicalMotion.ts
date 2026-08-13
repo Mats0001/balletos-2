@@ -34,7 +34,7 @@ export type MotionRightsStatus =
 export interface MotionDatasetProvenance {
   datasetId: string;
   sourceUrl: string;
-  sourceKind: 'optical_marker' | 'bvh_skeleton' | 'composite_technical';
+  sourceKind: 'optical_marker' | 'bvh_skeleton' | 'composite_technical' | 'authored_animation';
   rightsStatus: MotionRightsStatus;
   licenseLabel: string;
   pedagogicalStatus: 'technical_only';
@@ -75,12 +75,35 @@ export interface TenduPhaseEvent {
   timeUs: number;
 }
 
-export interface DryadTenduClip extends CanonicalMotionClip {
+export interface DryadTenduSignalClip extends CanonicalMotionClip {
   exerciseId: 'tendu';
   workingSide: 'left' | 'right';
+}
+
+export interface DryadTenduClip extends DryadTenduSignalClip {
   participantId: number;
   trial: number;
   events: readonly TenduPhaseEvent[];
+}
+
+export interface DryadTenduCohortClip extends DryadTenduSignalClip {
+  cohortSize: number;
+  participantCount: number;
+  sourceTrialCount: number;
+}
+
+export interface DryadTenduPhaseDispersion {
+  phaseId: CanonicalMotionPhaseId;
+  medianRadialSpread: number;
+  p90RadialSpread: number;
+  sourceSampleCount: number;
+}
+
+export interface DryadTenduCohortAsset {
+  schemaVersion: 1;
+  generatedFromDigest: string;
+  clip: DryadTenduCohortClip;
+  phaseDispersion: readonly DryadTenduPhaseDispersion[];
 }
 
 export interface SpatialStabilityReport {

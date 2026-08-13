@@ -70,6 +70,14 @@ function fullTenduCycleFrames(): FrameEntry[] {
   });
 }
 
+function repeatedTenduCycleFrames(): FrameEntry[] {
+  return [...fullTenduCycleFrames(), ...fullTenduCycleFrames()].map((frame, index) => ({
+    ...frame,
+    timeMs: index * 33.333,
+    imageQuality: { sharpnessScore: 0.42, backgroundMotionScore: index === 0 ? null : 0.02 },
+  }));
+}
+
 describe('teacher phase-based post analysis', () => {
   it('gates a complete recording and produces all five ordered Plié phases', () => {
     const result = analyzeTeacherPhases({
@@ -97,6 +105,7 @@ describe('teacher phase-based post analysis', () => {
 
     expect(result.exerciseId).toBe('tendu');
     expect(result.workingSide).toBe('right');
+    expect(result.cycleCount).toBe(1);
     expect(result.gate.status).toBe('ready');
     expect(result.phases.map(phase => phase.id)).toEqual([
       'departure', 'extension', 'full_extension', 'return', 'closure',
@@ -105,6 +114,33 @@ describe('teacher phase-based post analysis', () => {
       id: 'complete_tendu_cycle',
       passed: true,
     }));
+  });
+
+  it('separates repeated Tendus into complete independently inspectable cycles', () => {
+    const result = analyzeTeacherPhases({
+      frames: repeatedTenduCycleFrames(),
+      videoWidth: 960,
+      videoHeight: 1280,
+      exerciseLabel: 'Battement Tendu',
+      levelLabel: 'MINIS',
+    });
+
+    expect(result.gate.status).toBe('ready');
+    expect(result.cycleCount).toBe(2);
+    expect(result.phases).toHaveLength(10);
+    expect(result.gate.checks.find(check => check.id === 'complete_tendu_cycle')?.detail).toBe(
+      '2 vollständige Tendu-Zyklen mit je 5 Phasen erkannt',
+    );
+    expect(result.phases.filter(phase => phase.cycleIndex === 0).map(phase => phase.id)).toEqual([
+      'departure', 'extension', 'full_extension', 'return', 'closure',
+    ]);
+    expect(result.phases.filter(phase => phase.cycleIndex === 1).map(phase => phase.id)).toEqual([
+      'departure', 'extension', 'full_extension', 'return', 'closure',
+    ]);
+    const secondPeak = result.phases.find(phase => phase.cycleIndex === 1 && phase.id === 'full_extension')!;
+    expect(findTeacherPhaseAtTime(result, secondPeak.representativeTimeMs)).toMatchObject({
+      id: 'full_extension', cycleIndex: 1,
+    });
   });
 
   it('keeps colour and evidence confidence orthogonal in every phase region', () => {
