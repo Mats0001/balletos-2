@@ -48,6 +48,28 @@ function fullCycleFrames(): FrameEntry[] {
   }));
 }
 
+function fullTenduCycleFrames(): FrameEntry[] {
+  const excursion = [
+    ...Array(8).fill(0),
+    ...Array.from({ length: 10 }, (_, index) => (index + 1) / 10),
+    ...Array(5).fill(1),
+    ...Array.from({ length: 10 }, (_, index) => 1 - (index + 1) / 10),
+    ...Array(8).fill(0),
+  ];
+  return excursion.map((progress, index) => {
+    const landmarks = poseForKneeAngle(170);
+    landmarks[28] = { ...landmarks[28], x: landmarks[28].x + progress * 0.18 };
+    landmarks[30] = { ...landmarks[30], x: landmarks[30].x + progress * 0.2 };
+    landmarks[32] = { ...landmarks[32], x: landmarks[32].x + progress * 0.24 };
+    return {
+      timeMs: index * 33.333,
+      resultKind: 'pose' as const,
+      landmarks,
+      imageQuality: { sharpnessScore: 0.42, backgroundMotionScore: index === 0 ? null : 0.02 },
+    };
+  });
+}
+
 describe('teacher phase-based post analysis', () => {
   it('gates a complete recording and produces all five ordered Plié phases', () => {
     const result = analyzeTeacherPhases({
@@ -62,6 +84,27 @@ describe('teacher phase-based post analysis', () => {
     expect(result.phases.map(phase => phase.id)).toEqual(['setup', 'descent', 'bottom', 'ascent', 'finish']);
     expect(result.phases.every(phase => phase.startMs <= phase.endMs)).toBe(true);
     expect(findTeacherPhaseAtTime(result, result.phases[2].representativeTimeMs)?.id).toBe('bottom');
+  });
+
+  it('detects a complete Tendu as five foot-path phases on one working side', () => {
+    const result = analyzeTeacherPhases({
+      frames: fullTenduCycleFrames(),
+      videoWidth: 960,
+      videoHeight: 1280,
+      exerciseLabel: 'Battement Tendu',
+      levelLabel: 'MINIS',
+    });
+
+    expect(result.exerciseId).toBe('tendu');
+    expect(result.workingSide).toBe('right');
+    expect(result.gate.status).toBe('ready');
+    expect(result.phases.map(phase => phase.id)).toEqual([
+      'departure', 'extension', 'full_extension', 'return', 'closure',
+    ]);
+    expect(result.gate.checks).toContainEqual(expect.objectContaining({
+      id: 'complete_tendu_cycle',
+      passed: true,
+    }));
   });
 
   it('keeps colour and evidence confidence orthogonal in every phase region', () => {

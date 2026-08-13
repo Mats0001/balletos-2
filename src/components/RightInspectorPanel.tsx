@@ -255,6 +255,7 @@ export const RightInspectorPanel: React.FC<Props> = ({
             <VaganovaLiveMetrics
               vaganovaAnalysis={vaganovaAnalysis ?? null}
               isPlie={isPlie}
+              exerciseName={exerciseName}
               effectiveAgeGroup={activeGroup}
             />
           </div>

@@ -6,7 +6,8 @@ export interface StoredVideoItem {
   isCustomUpload?: boolean;
 }
 
-// 🩰 EXCLUSIVELY NICOLE SCHÖNEWOLF ORIGINAL STUDIO VIDEOS (TRANSCODED TO H.264 MP4 FOR UNIVERSAL BROWSER PLAYBACK)
+// Spontaneous studio analysis fixtures with known execution errors.
+// They are never Nicole references or pedagogical gold standards.
 export const defaultDevStudioVideos: StoredVideoItem[] = [
   { id: 'v1', title: '🩰 Nicole Studio Saal Clip 1 (IMG_2272.mp4)', url: '/videos/nicole_saal_1.mp4', topic: 'Saal Plié & Haltung' },
   { id: 'v2', title: '🩰 Nicole Studio Saal Clip 2 (IMG_2273.mp4)', url: '/videos/nicole_saal_2.mp4', topic: 'Port de Bras Ausführung' },

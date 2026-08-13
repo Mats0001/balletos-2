@@ -22,6 +22,7 @@ import type {
   SkeletonTargetDefinition,
   SkeletonTargetId,
 } from '../types/skeletonTarget';
+import { canCreateNicoleReferenceFromSource } from './referenceSourcePolicy';
 
 const STORAGE_KEY = 'balletos_nicole_reference_lines_v1';
 const QUARANTINE_KEY = `${STORAGE_KEY}_quarantine`;
@@ -60,7 +61,8 @@ const isFinitePositive = (value: unknown): value is number => (
   typeof value === 'number' && Number.isFinite(value) && value > 0
 );
 
-const PHASE_IDS = new Set(['setup', 'descent', 'bottom', 'ascent', 'finish']);
+const PLIE_PHASE_IDS = new Set(['setup', 'descent', 'bottom', 'ascent', 'finish']);
+const TENDU_PHASE_IDS = new Set(['departure', 'extension', 'full_extension', 'return', 'closure']);
 
 export function nicoleReferencePhaseBindingIsValid(
   value: unknown,
@@ -79,8 +81,10 @@ export function nicoleReferencePhaseBindingIsValid(
     && binding.sourcePhaseRepresentativeTimeMs! <= binding.sourcePhaseEndMs!
   );
   return binding.schemaVersion === 1
-    && binding.exerciseId === 'plie'
-    && PHASE_IDS.has(binding.phaseId)
+    && (
+      (binding.exerciseId === 'plie' && PLIE_PHASE_IDS.has(binding.phaseId))
+      || (binding.exerciseId === 'tendu' && TENDU_PHASE_IDS.has(binding.phaseId))
+    )
     && (binding.perspectivePlane === 'frontal' || binding.perspectivePlane === 'profile')
     && typeof binding.levelLabel === 'string' && binding.levelLabel.trim().length > 0
     && typeof binding.policyVersion === 'string' && binding.policyVersion.length > 0
@@ -269,6 +273,7 @@ export function saveNicoleReferenceLine(input: SaveNicoleReferenceLineInput): Ni
     || target.kind !== 'bone'
     || typeof input.videoSourceId !== 'string'
     || input.videoSourceId.length === 0
+    || !canCreateNicoleReferenceFromSource(input.videoSourceId)
     || selectedTarget.kind !== 'bone'
     || selectedTarget.targetId !== target.id
     || selectedTarget.frameStatus !== 'exact_cache_frame'
@@ -315,6 +320,7 @@ export function getNicoleReferenceLine(
   videoSourceId: string,
   targetId: SkeletonTargetId,
 ): NicoleReferenceLineRecord | null {
+  if (!canCreateNicoleReferenceFromSource(videoSourceId)) return null;
   return loadNicoleReferenceLines(storage).find(record => (
     record.videoSourceId === videoSourceId && record.targetId === targetId
   )) ?? null;
@@ -323,7 +329,11 @@ export function getNicoleReferenceLine(
 export function projectNicoleReferenceGuide(
   record: NicoleReferenceLineRecord | null,
 ): NicoleReferenceLineGuide | null {
-  if (!record || !nicoleReferenceRecordIsValid(record)) return null;
+  if (
+    !record
+    || !nicoleReferenceRecordIsValid(record)
+    || !canCreateNicoleReferenceFromSource(record.videoSourceId)
+  ) return null;
   const version = record.versions.find(item => item.versionId === record.currentVersionId);
   if (!version) return null;
   const core = cloneFreeze({

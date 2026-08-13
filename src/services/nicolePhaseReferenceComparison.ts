@@ -10,16 +10,17 @@ import {
 import type { NicoleReferenceLineRecord } from '../types/nicoleReferenceLine';
 import type { SkeletonTargetId } from '../types/skeletonTarget';
 import type {
-  PliePhaseId,
   TeacherPhaseAnalysis,
+  TeacherPhaseId,
 } from './teacherPhaseAnalysis';
 import { vaganova3DKinematics, type ReconstructedSkeleton } from './vaganova3DKinematics';
+import { canCreateNicoleReferenceFromSource } from './referenceSourcePolicy';
 
 export interface NicolePhaseReferenceComparison {
   status: 'ready' | 'insufficient_evidence';
   sourceScope: 'same_video' | 'cross_video';
   referenceVideoSourceId: string;
-  phaseId: PliePhaseId;
+  phaseId: TeacherPhaseId;
   targetId: SkeletonTargetId;
   targetLabel: string;
   recordId: string;
@@ -138,12 +139,12 @@ export function compareNicolePhaseReferences(
   const comparisons: NicolePhaseReferenceComparison[] = [];
   const skeletonCache = new Map<FrameEntry, ReconstructedSkeleton | null>();
   for (const record of input.records) {
-    if (!nicoleReferenceRecordIsValid(record)) continue;
+    if (!nicoleReferenceRecordIsValid(record) || !canCreateNicoleReferenceFromSource(record.videoSourceId)) continue;
     const version = record.versions.find(item => item.versionId === record.currentVersionId);
     const binding = version?.phaseBinding;
     if (
       !version || !binding
-      || binding.exerciseId !== 'plie'
+      || binding.exerciseId !== analysis.exerciseId
       || binding.policyVersion !== analysis.policyVersion
       || binding.levelLabel !== analysis.levelLabel
       || binding.perspectivePlane !== plane
@@ -211,7 +212,9 @@ export function compareNicolePhaseReferences(
     }));
   }
 
-  const phaseOrder: readonly PliePhaseId[] = ['setup', 'descent', 'bottom', 'ascent', 'finish'];
+  const phaseOrder: readonly TeacherPhaseId[] = analysis.exerciseId === 'tendu'
+    ? ['departure', 'extension', 'full_extension', 'return', 'closure']
+    : ['setup', 'descent', 'bottom', 'ascent', 'finish'];
   return Object.freeze(comparisons.sort((a, b) => (
     (a.sourceScope === b.sourceScope ? 0 : a.sourceScope === 'same_video' ? -1 : 1)
     || phaseOrder.indexOf(a.phaseId) - phaseOrder.indexOf(b.phaseId)

@@ -96,6 +96,21 @@ describe('Nicole reference line contract', () => {
     expect(loadNicoleReferenceLines(storage)).toEqual([]);
   });
 
+  it('never promotes bundled spontaneous Nicole clips to reference sources', () => {
+    const storage = memoryStorage();
+    const sourceId = '/videos/nicole_saal_6.mp4';
+    expect(() => saveNicoleReferenceLine({
+      storage,
+      videoSourceId: sourceId,
+      selectedTarget: { ...selected, sourceId },
+      posePacket: { ...posePacket, sourceId },
+      frame: { ...frame, sourceId },
+      createId: () => 'blocked-id',
+      now: () => new Date('2026-08-13T12:00:00Z'),
+    })).toThrow();
+    expect(loadNicoleReferenceLines(storage)).toEqual([]);
+  });
+
   it('never treats a storage read failure as an empty history during save', () => {
     let writes = 0;
     const storage = {

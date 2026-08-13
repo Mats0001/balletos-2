@@ -199,6 +199,20 @@ html, body, #root {
   }
 }
 
+@media (max-width: 1100px) {
+  .tendu-avatar-subtitle,
+  .tendu-avatar-clock {
+    display: none;
+  }
+
+  .tendu-rich-feedback {
+    grid-template-columns: minmax(0, 1fr) !important;
+    max-height: 96px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 
 /* ─── Custom Tooltip System ─────────────────────────────────────────────────
    Uses [title] attribute via ::after pseudo-element (bubble only, no arrow).

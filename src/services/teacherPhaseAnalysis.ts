@@ -16,8 +16,11 @@ import { vaganova3DKinematics } from './vaganova3DKinematics';
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaKineticAI } from './vaganovaKineticAI';
 import { vaganovaMotionClassifier } from './vaganovaMotionClassifier';
+import type { CanonicalMotionPhaseId } from '../types/canonicalMotion';
 
 export type PliePhaseId = 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
+export type TenduPhaseId = CanonicalMotionPhaseId;
+export type TeacherPhaseId = PliePhaseId | TenduPhaseId;
 
 export interface FrameImageQuality {
   /** Normalized Laplacian edge energy, 0..1. */
@@ -37,7 +40,8 @@ export interface RecordingGateCheck {
     | 'feet_joints'
     | 'sharpness'
     | 'camera_stability'
-    | 'complete_plie_cycle';
+    | 'complete_plie_cycle'
+    | 'complete_tendu_cycle';
   label: string;
   passed: boolean;
   /** True only when this failure leaves no defensible phase analysis. */
@@ -61,7 +65,7 @@ export interface TeacherPhaseRegionSummary {
 }
 
 export interface TeacherPhaseResult {
-  id: PliePhaseId;
+  id: TeacherPhaseId;
   label: string;
   startMs: number;
   endMs: number;
@@ -72,8 +76,10 @@ export interface TeacherPhaseResult {
 
 export interface TeacherPhaseAnalysis {
   schemaVersion: 1;
+  exerciseId: 'plie' | 'tendu';
   exerciseLabel: string;
   levelLabel: string;
+  workingSide: 'left' | 'right' | null;
   gate: RecordingGateResult;
   phases: readonly TeacherPhaseResult[];
   framesAnalyzed: number;
@@ -89,7 +95,7 @@ export interface TeacherPhaseAnalysisInput {
 }
 
 interface PhaseBoundary {
-  id: PliePhaseId;
+  id: TeacherPhaseId;
   label: string;
   startIndex: number;
   endIndex: number;
@@ -250,6 +256,89 @@ function detectPliePhases(samples: readonly PoseSample[]): PhaseBoundary[] | nul
   ];
 }
 
+function tenduFootPath(
+  samples: readonly PoseSample[],
+  side: 'left' | 'right',
+): readonly { x: number; y: number }[] | null {
+  const footIndex = side === 'left' ? 31 : 32;
+  const paths = samples.map(sample => {
+    const foot = sample.landmarks[footIndex];
+    if (!landmarkUsable(foot, 0.45) || !Number.isFinite(sample.bbox.height) || sample.bbox.height <= 0.1) {
+      return null;
+    }
+    return {
+      x: (foot.x - sample.torsoCenter.x) / sample.bbox.height,
+      y: (foot.y - sample.torsoCenter.y) / sample.bbox.height,
+    };
+  });
+  return paths.every((point): point is { x: number; y: number } => point !== null)
+    ? paths
+    : null;
+}
+
+function detectTenduPhases(samples: readonly PoseSample[]): Readonly<{
+  boundaries: readonly PhaseBoundary[];
+  workingSide: 'left' | 'right';
+}> | null {
+  if (samples.length < 20) return null;
+  const left = tenduFootPath(samples, 'left');
+  const right = tenduFootPath(samples, 'right');
+  if (!left || !right) return null;
+  const edgeCount = Math.max(3, Math.floor(samples.length * 0.12));
+  const startPoint = (path: readonly { x: number; y: number }[]) => ({
+    x: median(path.slice(0, edgeCount).map(point => point.x)),
+    y: median(path.slice(0, edgeCount).map(point => point.y)),
+  });
+  const distances = (path: readonly { x: number; y: number }[]) => {
+    const origin = startPoint(path);
+    return smooth(path.map(point => Math.hypot(point.x - origin.x, point.y - origin.y)));
+  };
+  const leftDistance = distances(left);
+  const rightDistance = distances(right);
+  const leftRange = Math.max(...leftDistance);
+  const rightRange = Math.max(...rightDistance);
+  const workingSide = rightRange >= leftRange ? 'right' : 'left';
+  const path = workingSide === 'right' ? rightDistance : leftDistance;
+  const range = Math.max(...path);
+  if (!Number.isFinite(range) || range < 0.035) return null;
+
+  let peakIndex = 0;
+  for (let index = 1; index < path.length; index++) {
+    if (path[index] > path[peakIndex]) peakIndex = index;
+  }
+  if (peakIndex < edgeCount || peakIndex >= path.length - edgeCount) return null;
+
+  const progress = path.map(value => value / range);
+  let extensionStart = -1;
+  for (let index = 0; index < peakIndex; index++) {
+    if (progress[index] >= 0.12) { extensionStart = index; break; }
+  }
+  if (extensionStart < 2) return null;
+  let fullStart = peakIndex;
+  while (fullStart > extensionStart && progress[fullStart - 1] >= 0.82) fullStart--;
+  let fullEnd = peakIndex;
+  while (fullEnd < progress.length - 1 && progress[fullEnd + 1] >= 0.82) fullEnd++;
+  let returnEnd = -1;
+  for (let index = fullEnd + 1; index < progress.length; index++) {
+    if (progress[index] <= 0.18) { returnEnd = index; break; }
+  }
+  if (
+    fullStart - extensionStart < 2
+    || returnEnd - fullEnd < 2
+    || returnEnd < 0
+    || returnEnd >= progress.length - 2
+  ) return null;
+
+  const boundaries: readonly PhaseBoundary[] = Object.freeze([
+    { id: 'departure', label: 'Ausgang', startIndex: 0, endIndex: extensionStart - 1, representativeIndex: Math.floor(extensionStart / 2) },
+    { id: 'extension', label: 'Abstreichen', startIndex: extensionStart, endIndex: fullStart - 1, representativeIndex: Math.floor((extensionStart + fullStart - 1) / 2) },
+    { id: 'full_extension', label: 'Volle Streckung', startIndex: fullStart, endIndex: fullEnd, representativeIndex: peakIndex },
+    { id: 'return', label: 'Rückweg', startIndex: fullEnd + 1, endIndex: returnEnd, representativeIndex: Math.floor((fullEnd + 1 + returnEnd) / 2) },
+    { id: 'closure', label: 'Schluss', startIndex: returnEnd + 1, endIndex: progress.length - 1, representativeIndex: Math.floor((returnEnd + 1 + progress.length - 1) / 2) },
+  ]);
+  return Object.freeze({ boundaries, workingSide });
+}
+
 export function summarizePhaseRegionStates(
   states: readonly TeacherHeuristicState[],
 ): TeacherPhaseRegionSummary {
@@ -347,8 +436,13 @@ function gateCheck(
 }
 
 export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherPhaseAnalysis {
-  const exerciseAndLevelSelected = input.exerciseLabel.toLocaleLowerCase('de-DE').includes('pli')
-    && input.levelLabel.trim().length > 0;
+  const normalizedExercise = input.exerciseLabel.toLocaleLowerCase('de-DE');
+  const exerciseId: TeacherPhaseAnalysis['exerciseId'] = normalizedExercise.includes('tendu')
+    ? 'tendu'
+    : 'plie';
+  const exerciseAndLevelSelected = (
+    normalizedExercise.includes('tendu') || normalizedExercise.includes('pli')
+  ) && input.levelLabel.trim().length > 0;
   const poseFrames = input.frames.filter((frame): frame is FrameEntry & { landmarks: PoseLandmark[] } => (
     frame.resultKind !== 'no_pose' && Array.isArray(frame.landmarks) && frame.landmarks.length >= 33
   ));
@@ -402,8 +496,9 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
   const calculator = new VaganovaAngleCalculator();
   const engine = new TeacherHeuristicEngine();
   const samples: PoseSample[] = poseFrames.flatMap(frame => {
-    const kneeAngle = averageKneeAngle(frame.landmarks, input.videoWidth, input.videoHeight);
-    if (!Number.isFinite(kneeAngle)) return [];
+    const measuredKneeAngle = averageKneeAngle(frame.landmarks, input.videoWidth, input.videoHeight);
+    if (exerciseId === 'plie' && !Number.isFinite(measuredKneeAngle)) return [];
+    const kneeAngle = Number.isFinite(measuredKneeAngle) ? measuredKneeAngle : 180;
     const skeleton = vaganova3DKinematics.solve(frame.landmarks, null, input.videoWidth, input.videoHeight);
     const motion = vaganovaMotionClassifier.classify(frame.landmarks);
     const analysis = calculator.analyzeFullFrame(frame.landmarks, input.videoWidth, input.videoHeight);
@@ -425,10 +520,24 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
       packet: engine.compute(analysis, skeleton, frame.timeMs / 1000, 0, { motion, cogX: cog.x }),
     }];
   });
-  const boundaries = detectPliePhases(samples);
+  const tenduDetection = exerciseId === 'tendu' ? detectTenduPhases(samples) : null;
+  const boundaries = exerciseId === 'tendu'
+    ? tenduDetection?.boundaries ?? null
+    : detectPliePhases(samples);
+  const workingSide = exerciseId === 'tendu' ? tenduDetection?.workingSide ?? null : null;
+  const exerciseDisplayName = exerciseId === 'tendu' ? 'Tendu' : 'Plié';
+  const completeCycleId: RecordingGateCheck['id'] = exerciseId === 'tendu'
+    ? 'complete_tendu_cycle'
+    : 'complete_plie_cycle';
+  const completeCycleLabel = exerciseId === 'tendu'
+    ? 'Vollständiger Tendu-Zyklus erkannt'
+    : 'Vollständiger Plié-Zyklus erkannt';
+  const missingCycleDetail = exerciseId === 'tendu'
+    ? 'Ausgang, volle Streckung, Rückweg oder Schluss fehlt'
+    : 'Ausgang, Tiefpunkt oder Abschluss fehlt';
 
   const checks: RecordingGateCheck[] = [
-    gateCheck('exercise_level', 'Plié und Stufe ausgewählt', exerciseAndLevelSelected, !exerciseAndLevelSelected, `${input.exerciseLabel || 'Übung fehlt'} · ${input.levelLabel || 'Stufe fehlt'}`),
+    gateCheck('exercise_level', `${exerciseDisplayName} und Stufe ausgewählt`, exerciseAndLevelSelected, !exerciseAndLevelSelected, `${input.exerciseLabel || 'Übung fehlt'} · ${input.levelLabel || 'Stufe fehlt'}`),
     gateCheck('pose_coverage', 'Körper durchgängig erkannt', poseCoverage >= 0.75, poseCoverage < 0.35, `${Math.round(poseCoverage * 100)} % der Analyseframes`),
     gateCheck('full_body', 'Vollständiger Körper sichtbar', fullBodyRatio >= 0.7, false, `${Math.round(fullBodyRatio * 100)} % mit Kopf, Armen, Beinen und Füßen`),
     gateCheck('perspective', 'Kameraperspektive eindeutig', perspectiveRatio >= 0.75, perspectiveRatio < 0.5, `${perspectivePlane} · ${Math.round(perspectiveRatio * 100)} % stabil · dominant ${detectedPerspective ?? 'nicht erkannt'}`),
@@ -437,7 +546,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
     gateCheck('feet_joints', 'Füße und relevante Gelenke sichtbar', feetRatio >= 0.72, false, `${Math.round(feetRatio * 100)} % vollständig`),
     gateCheck('sharpness', 'Ausreichende Bildschärfe', quality.length >= totalFrames * 0.7 && sharpness >= 0.08, quality.length >= totalFrames * 0.2 && sharpness < 0.02, `Schärfeindex ${sharpness.toFixed(2)}`),
     gateCheck('camera_stability', 'Kamera stabil', quality.length >= totalFrames * 0.7 && cameraMotion <= 0.12, quality.length >= totalFrames * 0.2 && cameraMotion > 0.35, `Hintergrundbewegung ${cameraMotion.toFixed(2)}`),
-    gateCheck('complete_plie_cycle', 'Vollständiger Plié-Zyklus erkannt', boundaries !== null, boundaries === null, boundaries ? '5 Phasen erkannt' : 'Ausgang, Tiefpunkt oder Abschluss fehlt'),
+    gateCheck(completeCycleId, completeCycleLabel, boundaries !== null, boundaries === null, boundaries ? '5 Phasen erkannt' : missingCycleDetail),
   ];
   const correctiveActions = checks.filter(check => !check.passed).map(check => check.label);
   const analysisBlocked = checks.some(check => check.blocksAnalysis);
@@ -478,8 +587,10 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
 
   return Object.freeze({
     schemaVersion: 1,
+    exerciseId,
     exerciseLabel: input.exerciseLabel,
     levelLabel: input.levelLabel,
+    workingSide,
     gate,
     phases,
     framesAnalyzed: samples.length,

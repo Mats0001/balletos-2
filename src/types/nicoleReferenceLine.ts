@@ -3,10 +3,8 @@ import type { SkeletonTargetId } from './skeletonTarget';
 export const NICOLE_REFERENCE_SCHEMA_VERSION = 1 as const;
 export const NICOLE_REFERENCE_DIGEST_ALGORITHM = 'sha256-canonical-json-v1' as const;
 
-export interface NicoleReferencePhaseBinding {
+interface NicoleReferencePhaseBindingBase {
   schemaVersion: 1;
-  exerciseId: 'plie';
-  phaseId: 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
   perspectivePlane: 'frontal' | 'profile';
   levelLabel: string;
   policyVersion: string;
@@ -19,6 +17,17 @@ export interface NicoleReferencePhaseBinding {
   sourcePhaseEndMs?: number;
   sourcePhaseRepresentativeTimeMs?: number;
 }
+
+export type NicoleReferencePhaseBinding = NicoleReferencePhaseBindingBase & (
+  | Readonly<{
+    exerciseId: 'plie';
+    phaseId: 'setup' | 'descent' | 'bottom' | 'ascent' | 'finish';
+  }>
+  | Readonly<{
+    exerciseId: 'tendu';
+    phaseId: 'departure' | 'extension' | 'full_extension' | 'return' | 'closure';
+  }>
+);
 
 export interface NicoleReferenceLineVersion {
   schemaVersion: typeof NICOLE_REFERENCE_SCHEMA_VERSION;

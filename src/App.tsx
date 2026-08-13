@@ -105,6 +105,7 @@ export const App: React.FC = () => {
             onVaganovaAnalysis={handleVaganovaAnalysis}
             onSelectedCue={handleSelectedCue}
             exerciseName={exerciseName}
+            onExerciseChange={setExerciseName}
             levelLabel={selectedAgeGroup}
           />
         )}

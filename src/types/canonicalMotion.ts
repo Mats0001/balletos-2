@@ -10,6 +10,22 @@ export type CanonicalMotionPhaseId =
   | 'return'
   | 'closure';
 
+export const TENDU_PHASE_ORDER: readonly CanonicalMotionPhaseId[] = Object.freeze([
+  'departure',
+  'extension',
+  'full_extension',
+  'return',
+  'closure',
+]);
+
+export const TENDU_PHASE_LABELS: Readonly<Record<CanonicalMotionPhaseId, string>> = Object.freeze({
+  departure: 'Ausgang',
+  extension: 'Abstreichen',
+  full_extension: 'Volle Streckung',
+  return: 'Rückweg',
+  closure: 'Schluss',
+});
+
 export type MotionRightsStatus =
   | 'product_technical_signal_allowed'
   | 'internal_research_only'

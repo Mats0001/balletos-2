@@ -10,6 +10,7 @@ import { AgeGroup } from '../types';
 interface Props {
   vaganovaAnalysis: VaganovaFullAnalysis | null;
   isPlie?: boolean;
+  exerciseName?: string;
   effectiveAgeGroup: AgeGroup; // resolved outside – passed in by RightInspectorPanel
 }
 
@@ -174,7 +175,8 @@ const CLASS_TOOLTIP: Record<string, string> = {
   proxy_unvalidated:          'PRX — Proxy (unvalidiert): Näherungswert, kein absoluter Standard',
 };
 
-export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isPlie, effectiveAgeGroup }) => {
+export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isPlie, exerciseName, effectiveAgeGroup }) => {
+  const isTendu = /tendu/i.test(exerciseName ?? '');
   // All classes active by default
   const [activeFilters, setActiveFilters] = useState<Set<string>>(
     () => new Set(FILTERABLE_CLASSES)
@@ -266,7 +268,7 @@ export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isP
       <MetricRow m={va.spineTilt}          label="Wirbelsäule"       targetKey="spineTilt"         showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.spineTilt)} />
       <MetricRow m={va.pelvicTilt}         label="Becken"            showTargets={false}           ageGroup={effectiveAgeGroup} hidden={isHidden(va.pelvicTilt)} />
 
-      <SectionHeader label={isPlie ? 'Beine · Plié' : 'Beine · Stand'} />
+      <SectionHeader label={isPlie ? 'Beine · Plié' : isTendu ? 'Beine · Tendu' : 'Beine · Stand'} />
       <MetricRow m={va.knieFlexionL}       label="Knieflexion links"  targetKey={isPlie ? 'knieFlexionDemi' : undefined} showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.knieFlexionL)} />
       <MetricRow m={va.knieFlexionR}       label="Knieflexion rechts" targetKey={isPlie ? 'knieFlexionDemi' : undefined} showTargets ageGroup={effectiveAgeGroup} hidden={isHidden(va.knieFlexionR)} />
       <MetricRow m={va.valgusDriftL}       label="Knieachse links"     showTargets={false}          ageGroup={effectiveAgeGroup} hidden={isHidden(va.valgusDriftL)} />
@@ -283,6 +285,12 @@ export const VaganovaLiveMetrics: React.FC<Props> = ({ vaganovaAnalysis: va, isP
         <div style={{ marginTop: '8px', padding: '6px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', fontSize: '9px', color: 'rgba(255,255,255,0.55)', lineHeight: '1.4' }}>
           ○ Plié: Die projizierte Knieachse bleibt <strong>neutral und nicht messbar</strong>.
           Referenzframe, Perspektive, Spiegelung und Bewegungsphase sind noch nicht bestätigt.
+        </div>
+      )}
+      {isTendu && (
+        <div style={{ marginTop: '8px', padding: '6px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', fontSize: '9px', color: 'rgba(255,255,255,0.55)', lineHeight: '1.4' }}>
+          ○ Tendu: Fußbahn und fünf Bewegungsphasen erscheinen in der technischen Nachanalyse.
+          Knieachsen bleiben ohne passende Referenzevidenz neutral.
         </div>
       )}
     </div>

@@ -45,6 +45,7 @@ import type { CueReviewEditablePatch } from '../types/cueReviewAudit';
 import {
   getNicoleReferenceLine,
   loadNicoleReferenceLines,
+  nicoleReferencePhaseBindingIsValid,
   projectNicoleReferenceGuide,
   saveNicoleReferenceLine,
 } from '../services/nicoleReferenceLine';
@@ -60,11 +61,14 @@ import {
   type TeacherPhaseAnalysis,
 } from '../services/teacherPhaseAnalysis';
 import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../types/teacherHeuristic';
+import { SynchronizedTenduAvatarViewport } from './SynchronizedTenduAvatarViewport';
+import { canCreateNicoleReferenceFromSource } from '../services/referenceSourcePolicy';
 
 interface VideoAnalyzerProps {
   onVaganovaAnalysis?: (va: VaganovaFullAnalysis | null) => void;
   onSelectedCue?: (cue: VaganovaCuePoint | null) => void;
   exerciseName: string;
+  onExerciseChange?: (exerciseName: string) => void;
   levelLabel: string;
 }
 
@@ -72,6 +76,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   onVaganovaAnalysis,
   onSelectedCue,
   exerciseName,
+  onExerciseChange,
   levelLabel,
 }) => {
 
@@ -240,6 +245,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [selectedDevVideoUrl, setSelectedDevVideoUrl] = useState<string>(videoList[0].url);
   const selectedDevVideoUrlRef = useRef(selectedDevVideoUrl);
   useEffect(() => { selectedDevVideoUrlRef.current = selectedDevVideoUrl; }, [selectedDevVideoUrl]);
+  const selectedVideoTopic = videoList.find(video => video.url === selectedDevVideoUrl)?.topic ?? '';
+  const effectiveExerciseLabel = /tendu/i.test(`${exerciseName} ${selectedVideoTopic}`)
+    ? 'Battement Tendu'
+    : exerciseName;
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
@@ -412,7 +421,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const refVideoRef = useRef<HTMLVideoElement>(null);
+  const getPrimaryVideoTimeMs = useCallback(
+    () => (videoRef.current?.currentTime ?? 0) * 1000,
+    [],
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isProcessingRef = useRef<boolean>(false);
   const processingStartTimeRef = useRef<number>(0);
@@ -652,7 +664,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       frames,
       videoWidth: cacheDimensions.vw,
       videoHeight: cacheDimensions.vh,
-      exerciseLabel: exerciseName,
+      exerciseLabel: effectiveExerciseLabel,
       levelLabel,
     });
     updateTeacherPhaseAnalysis(analysis);
@@ -664,7 +676,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       videoHeight: cacheDimensions.vh,
       records: loadNicoleReferenceLines(localStorage),
     }));
-  }, [exerciseName, isPreIndexing, levelLabel, nicoleReferenceStorageRevision, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
+  }, [effectiveExerciseLabel, isPreIndexing, levelLabel, nicoleReferenceStorageRevision, selectedDevVideoUrl, updateTeacherPhaseAnalysis]);
 
   // 🚀 60 FPS CANVAS-BASED RENDER LOOP
   // Landmarks are stored in refs (no React re-render per frame).
@@ -1509,6 +1521,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
   // Switch Dropdown Selection
   const handleVideoSelect = (url: string) => {
+    const selectedVideo = videoList.find(video => video.url === url);
+    if (/tendu/i.test(selectedVideo?.topic ?? '')) {
+      onExerciseChange?.('Battement Tendu');
+    }
     realMediaPipePose.reset();
     vaganova3DKinematics.reset();
     vaganovaKineticAI.reset();
@@ -1545,8 +1561,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       stabilizedOverlayRef.current = null;
 
       videoRef.current.currentTime = cue.timeSeconds;
-      if (refVideoRef.current) refVideoRef.current.currentTime = cue.timeSeconds;
-
       // Freeze frame immediately – teacher studies the still image
       videoRef.current.pause();
       setIsPlaying(false);
@@ -1972,12 +1986,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     if (videoRef.current) {
       if (!nextPlaying) {
         videoRef.current.pause();
-        if (refVideoRef.current) refVideoRef.current.pause();
         processStaticPausedFrame();
       } else {
         clearGroundedSelectionForPlayback();
         videoRef.current.play().catch(() => {});
-        if (refVideoRef.current) refVideoRef.current.play().catch(() => {});
         // Reset zoom + cue-overlays when resuming playback
         setZoomLevel(1);
         setPanOffset({ x: 0, y: 0 });
@@ -2251,6 +2263,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       showAnalyseToast('Nicole-Referenz benötigt einen exakt pausierten Bone.');
       return false;
     }
+    if (!canCreateNicoleReferenceFromSource(selectedDevVideoUrl)) {
+      showAnalyseToast('Diese spontane Studioaufnahme ist nur Testmaterial und kann keine Nicole-Referenz werden.');
+      return false;
+    }
     try {
       const phaseAnalysis = teacherPhaseAnalysisRef.current;
       const targetTimeMs = selected.mediaTimeUs / 1000;
@@ -2258,10 +2274,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         ? phaseAnalysis.phases.find(item => targetTimeMs >= item.startMs && targetTimeMs <= item.endMs)
         : undefined;
       const perspective = phaseAnalysis?.gate.detectedPerspective;
-      const phaseBinding: NicoleReferencePhaseBinding | undefined = phase && perspective
+      const phaseBindingCandidate = phase && perspective
         ? Object.freeze({
           schemaVersion: 1,
-          exerciseId: 'plie',
+          exerciseId: phaseAnalysis.exerciseId,
           phaseId: phase.id,
           perspectivePlane: perspective === 'FRONTAL' ? 'frontal' : 'profile',
           levelLabel: phaseAnalysis.levelLabel,
@@ -2271,6 +2287,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           sourcePhaseEndMs: phase.endMs,
           sourcePhaseRepresentativeTimeMs: phase.representativeTimeMs,
         })
+        : undefined;
+      const phaseBinding: NicoleReferencePhaseBinding | undefined = nicoleReferencePhaseBindingIsValid(phaseBindingCandidate)
+        ? phaseBindingCandidate
         : undefined;
       const record = saveNicoleReferenceLine({
         storage: localStorage,
@@ -2334,7 +2353,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const handleSpeedChange = (speed: number) => {
     setPlaybackSpeed(speed);
     if (videoRef.current) videoRef.current.playbackRate = speed;
-    if (refVideoRef.current) refVideoRef.current.playbackRate = speed;
   };
 
   const handleInspectTeacherPhase = (phaseTimeMs: number) => {
@@ -2798,7 +2816,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
           <button
             onClick={() => updateNicoleReference(nicoleReferenceGuide, !showNicoleReference)}
             disabled={!nicoleReferenceGuide || selectedSkeletonTarget?.frameStatus !== 'exact_cache_frame'}
-            title={nicoleReferenceGuide
+            title={!canCreateNicoleReferenceFromSource(selectedDevVideoUrl)
+              ? 'Spontane Testaufnahme mit bekannten Ausführungsfehlern · nie als Nicole-Referenz verwenden'
+              : nicoleReferenceGuide
               ? `Nicole-Referenz V${nicoleReferenceGuide.versionNumber} für den ausgewählten Bone ein-/ausblenden`
               : 'Für diesen ausgewählten Bone ist noch keine Nicole-Referenz gespeichert'}
             style={{
@@ -2907,7 +2927,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
           <button
             onClick={() => setSplitScreenMode(!splitScreenMode)}
-            title="Split-Screen"
+            title="Technischen Single-Clock-Linienavatar ein-/ausblenden"
             style={{
               background: splitScreenMode ? 'rgba(192,132,252,0.18)' : 'transparent',
               color: splitScreenMode ? '#c084fc' : 'rgba(255,255,255,0.45)',
@@ -2920,7 +2940,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               transition: 'all 0.15s ease'
             }}
           >
-            Split
+            Avatar
           </button>
 
           {/* Overlay-Modus Selector – PROJECT_DECISION 2026-08-10: volle Ampel freigegeben */}
@@ -3311,6 +3331,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             <div style={{ fontSize: '7px', opacity: 0.52, marginTop: '1px' }}>
                               Pose · Zeitverlauf · Bildqualität · Geometrie{nicolePhaseComparisons.length > 0 ? ' · Nicole-Linie' : ''}
                             </div>
+                            {!canCreateNicoleReferenceFromSource(selectedDevVideoUrl) && (
+                              <div style={{ fontSize: '7px', color: '#fbbf24', marginTop: '2px' }}>
+                                Testaufnahme · keine Nicole-Referenzquelle
+                              </div>
+                            )}
                           </div>
                           <div style={{ fontSize: '8px', opacity: 0.7, textAlign: 'right' }}>
                             {activeTeacherPhase?.label ?? 'Phase wählen'}
@@ -3348,7 +3373,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   borderRadius: '7px', fontSize: '8px', fontWeight: 850,
                                 }}
                               >
-                                {phase.id === 'setup' ? 'Start' : phase.id === 'descent' ? 'Ab' : phase.id === 'bottom' ? 'Tief' : phase.id === 'ascent' ? 'Auf' : 'Ende'}
+                                {phase.id === 'setup' || phase.id === 'departure'
+                                  ? 'Start'
+                                  : phase.id === 'descent'
+                                    ? 'Ab'
+                                    : phase.id === 'bottom'
+                                      ? 'Tief'
+                                      : phase.id === 'ascent'
+                                        ? 'Auf'
+                                        : phase.id === 'extension'
+                                          ? 'Abstr.'
+                                          : phase.id === 'full_extension'
+                                            ? 'Streck'
+                                            : phase.id === 'return'
+                                              ? 'Zurück'
+                                              : 'Schluss'}
                               </button>
                             );
                           })}
@@ -3486,6 +3525,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     : undefined}
                   onSaveNicoleReference={target.kind === 'bone'
                     && selectedSkeletonTarget?.frameStatus === 'exact_cache_frame'
+                    && canCreateNicoleReferenceFromSource(selectedDevVideoUrl)
                     ? handleSaveNicoleReference
                     : undefined}
                   nicoleReferenceVersion={nicoleReferenceGuide?.targetId === target.id
@@ -3496,24 +3536,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               );
             })()}
 
-            {/* VIEWPORT 2: MASTER REFERENCE (SPLIT-SCREEN) */}
+            {/* VIEWPORT 2: technical reference avatar on the primary clock. */}
             {splitScreenMode && (
-              <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderLeft: '2px solid rgba(168,129,189,0.5)' }}>
-                
-                <video
-                  ref={refVideoRef}
-                  src="/videos/nicole_saal_5.mp4"
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                />
-                <div style={{ position: 'absolute', top: '20px', right: '16px', background: 'linear-gradient(135deg, #a881bd 0%, #8b5a8b 100%)', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 700, color: '#fff' }}>
-                  VAGANOVA MASTER REFERENZ (100%)
-                </div>
-
-              </div>
+              <SynchronizedTenduAvatarViewport
+                analysis={teacherPhaseAnalysis}
+                isPlaying={isPlaying}
+                currentTimeMs={currentPlayTime * 1000}
+                getCurrentTimeMs={getPrimaryVideoTimeMs}
+              />
             )}
 
           </div>
@@ -3954,7 +3984,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       setIsScrubbing(true);
                       // Sofort pausieren beim Anfassen
                       if (videoRef.current) videoRef.current.pause();
-                      if (refVideoRef.current) refVideoRef.current.pause();
                       setIsPlaying(false);
                     }}
                     onMouseUp={() => {
@@ -3965,7 +3994,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     onTouchStart={() => {
                       setIsScrubbing(true);
                       if (videoRef.current) videoRef.current.pause();
-                      if (refVideoRef.current) refVideoRef.current.pause();
                       setIsPlaying(false);
                     }}
                     onTouchEnd={() => {
@@ -3977,7 +4005,6 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       setCurrentPlayTime(t);
                       if (videoRef.current) {
                         videoRef.current.currentTime = t;
-                        if (refVideoRef.current) refVideoRef.current.currentTime = t;
                       }
                     }}
                     style={{
