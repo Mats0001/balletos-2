@@ -12,6 +12,7 @@ afterEach(cleanup);
 const phase: TeacherPhaseResult = {
   id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300, representativeTimeMs: 200,
   confidence: 0.9,
+  motion: { durationMs: 200, workingFootPathLength: 0.2, workingFootJitter: 0.004, sampleCount: 5 },
   displayState: 'heuristic_attention_uncertain',
   regions: Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, {
     state: 'heuristic_attention_uncertain', corridorResult: 'overlap', sampleCount: 4, agreement: .75, uncertainRatio: .25,

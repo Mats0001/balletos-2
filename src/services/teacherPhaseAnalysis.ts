@@ -74,6 +74,12 @@ export interface TeacherPhaseResult {
   representativeTimeMs: number;
   /** Detection confidence for this temporal boundary, independent of colour. */
   confidence: number;
+  motion: Readonly<{
+    durationMs: number;
+    workingFootPathLength: number | null;
+    workingFootJitter: number | null;
+    sampleCount: number;
+  }>;
   regions: Readonly<Record<TeacherRegionKey, TeacherPhaseRegionSummary>>;
   displayState: TeacherHeuristicState;
 }
@@ -523,6 +529,30 @@ function phaseDisplayState(regions: Readonly<Record<TeacherRegionKey, TeacherPha
   return withEvidenceStrength(base, strength);
 }
 
+function phaseMotionSummary(
+  samples: readonly PoseSample[],
+  workingSide: 'left' | 'right' | null,
+): TeacherPhaseResult['motion'] {
+  const durationMs = samples.length > 1
+    ? Math.max(0, samples[samples.length - 1].frame.timeMs - samples[0].frame.timeMs)
+    : 0;
+  if (!workingSide) return Object.freeze({ durationMs, workingFootPathLength: null, workingFootJitter: null, sampleCount: samples.length });
+  const path = tenduFootPath(samples, workingSide);
+  if (!path || path.length < 3) return Object.freeze({ durationMs, workingFootPathLength: null, workingFootJitter: null, sampleCount: samples.length });
+  const steps = path.slice(1).map((point, index) => Math.hypot(point.x - path[index].x, point.y - path[index].y));
+  const pathLength = steps.reduce((sum, value) => sum + value, 0);
+  const secondDifferences = path.slice(2).map((point, index) => Math.hypot(
+    point.x - 2 * path[index + 1].x + path[index].x,
+    point.y - 2 * path[index + 1].y + path[index].y,
+  ));
+  return Object.freeze({
+    durationMs,
+    workingFootPathLength: Number(pathLength.toFixed(6)),
+    workingFootJitter: Number(median(secondDifferences).toFixed(6)),
+    sampleCount: path.length,
+  });
+}
+
 function gateCheck(
   id: RecordingGateCheck['id'],
   label: string,
@@ -697,6 +727,7 @@ export function analyzeTeacherPhases(input: TeacherPhaseAnalysisInput): TeacherP
         endMs: phaseSamples[phaseSamples.length - 1].frame.timeMs,
         representativeTimeMs: samples[boundary.representativeIndex].frame.timeMs,
         confidence: clamp01(boundary.confidence ?? phaseEngineConfidence),
+        motion: phaseMotionSummary(phaseSamples, workingSide),
         regions,
         displayState: phaseDisplayState(regions),
       };

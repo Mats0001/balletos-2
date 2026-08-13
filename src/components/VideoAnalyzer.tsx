@@ -64,6 +64,7 @@ import { heuristicColor, heuristicDash, heuristicEvidenceStrength } from '../typ
 import { SynchronizedTenduAvatarViewport } from './SynchronizedTenduAvatarViewport';
 import { canCreateNicoleReferenceFromSource } from '../services/referenceSourcePolicy';
 import {
+  buildAttemptProgressCurve,
   comparePhaseWithAttempt,
   createStudentAttemptSnapshot,
   findPreviousComparableAttempt,
@@ -2425,6 +2426,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     ? findPreviousComparableAttempt(attemptHistoryRecords, currentAttemptPreview)
     : null;
   const activeAttemptComparison = comparePhaseWithAttempt(activeTeacherPhase, previousComparableAttempt);
+  const attemptProgressCurve = buildAttemptProgressCurve(currentAttemptPreview, previousComparableAttempt);
   const currentAttemptAlreadySaved = currentAttemptPreview
     ? attemptHistoryRecords.some(record => (
       record.studentKey === currentAttemptPreview.studentKey
@@ -3580,13 +3582,36 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                             </button>
                           </div>
                           {activeAttemptComparison ? (
-                            <div style={{ marginTop: '4px', color: '#fff' }}>
-                              Gegen den letzten vergleichbaren Versuch in „{activeTeacherPhase?.label}“:
-                              {' '}<span style={{ color: '#30d158' }}>{activeAttemptComparison.improved} verbessert</span>
-                              {' · '}<span style={{ color: '#a5f3fc' }}>{activeAttemptComparison.unchanged} stabil</span>
-                              {' · '}<span style={{ color: '#ffd60a' }}>{activeAttemptComparison.needsMoreAttention} braucht mehr Aufmerksamkeit</span>
-                              {activeAttemptComparison.provisional ? ' · gepunktete Evidenz bleibt vorläufig' : ''}
-                            </div>
+                            <>
+                              <div style={{ marginTop: '4px', color: '#fff' }}>
+                                Gegen den letzten vergleichbaren Versuch in „{activeTeacherPhase?.label}“:
+                                {' '}<span style={{ color: '#30d158' }}>{activeAttemptComparison.improved} verbessert</span>
+                                {' · '}<span style={{ color: '#a5f3fc' }}>{activeAttemptComparison.unchanged} stabil</span>
+                                {' · '}<span style={{ color: '#ffd60a' }}>{activeAttemptComparison.needsMoreAttention} braucht mehr Aufmerksamkeit</span>
+                                {activeAttemptComparison.provisional ? ' · gepunktete Evidenz bleibt vorläufig' : ''}
+                              </div>
+                              {activeAttemptComparison.motion.steadinessTrend !== 'not_comparable' && (
+                                <div style={{ marginTop: '3px', color: '#c4b5fd' }}>
+                                  Fußbahn {activeAttemptComparison.motion.footPathLengthDeltaPercent === null ? 'vergleichbar' : `${activeAttemptComparison.motion.footPathLengthDeltaPercent > 0 ? '+' : ''}${activeAttemptComparison.motion.footPathLengthDeltaPercent} % Weg`}
+                                  {' · '}{activeAttemptComparison.motion.steadinessTrend === 'steadier' ? 'ruhiger'
+                                    : activeAttemptComparison.motion.steadinessTrend === 'more_restless' ? 'unruhiger' : 'ähnlich ruhig'}
+                                  {activeAttemptComparison.motion.jitterDeltaPercent === null ? '' : ` (${activeAttemptComparison.motion.jitterDeltaPercent > 0 ? '+' : ''}${activeAttemptComparison.motion.jitterDeltaPercent} % Unruhe)`}
+                                  {activeAttemptComparison.motion.durationDeltaPercent === null ? '' : ` · Tempo ${activeAttemptComparison.motion.durationDeltaPercent > 0 ? '+' : ''}${activeAttemptComparison.motion.durationDeltaPercent} %`}
+                                </div>
+                              )}
+                              {attemptProgressCurve.length > 0 && (
+                                <div aria-label="Fortschrittskurve über die Phasen" style={{ display: 'grid', gridTemplateColumns: `repeat(${attemptProgressCurve.length}, minmax(0,1fr))`, gap: 2, alignItems: 'end', height: 20, marginTop: 5 }}>
+                                  {attemptProgressCurve.map((point, index) => (
+                                    <div key={`${point.phaseId}:${index}`} title={`${point.label}: ${point.score > 0 ? '+' : ''}${Math.round(point.score * 100)}${point.provisional ? ' · vorläufig' : ''}`} style={{
+                                      height: `${5 + Math.abs(point.score) * 15}px`, borderRadius: 2,
+                                      background: point.score > .12 ? '#30d158' : point.score < -.12 ? '#ff9f0a' : '#67e8f9',
+                                      opacity: point.provisional ? .58 : .9,
+                                      border: point.provisional ? '1px dotted rgba(255,255,255,.65)' : 'none',
+                                    }} />
+                                  ))}
+                                </div>
+                              )}
+                            </>
                           ) : (
                             <div style={{ marginTop: '4px', opacity: 0.7 }}>
                               Noch kein anderer vergleichbarer Versuch gespeichert. Der erste gespeicherte Versuch wird nur zur persönlichen Verlaufslinie – niemals zur Soll-Referenz.

@@ -15,7 +15,9 @@ function regions(state = 'heuristic_attention_uncertain' as const) {
 
 const phase: TeacherPhaseResult = Object.freeze({
   id: 'extension', cycleIndex: 0, label: 'Abstreichen', startMs: 100, endMs: 300,
-  representativeTimeMs: 200, confidence: 0.9, regions: regions(), displayState: 'heuristic_attention_uncertain',
+  representativeTimeMs: 200, confidence: 0.9,
+  motion: { durationMs: 200, workingFootPathLength: 0.2, workingFootJitter: 0.004, sampleCount: 5 },
+  regions: regions(), displayState: 'heuristic_attention_uncertain',
 });
 const analysis: TeacherPhaseAnalysis = Object.freeze({
   schemaVersion: 1, exerciseId: 'tendu', exerciseLabel: 'Battement Tendu', levelLabel: 'MINIS',

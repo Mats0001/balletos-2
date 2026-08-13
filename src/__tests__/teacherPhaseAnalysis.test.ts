@@ -118,6 +118,9 @@ describe('teacher phase-based post analysis', () => {
       passed: true,
     }));
     expect(result.phases.every(phase => phase.confidence >= 0.5 && phase.confidence <= 1)).toBe(true);
+    expect(result.phases.every(phase => phase.motion.sampleCount >= 3)).toBe(true);
+    expect(result.phases.some(phase => (phase.motion.workingFootPathLength ?? 0) > 0)).toBe(true);
+    expect(result.phases.every(phase => phase.motion.workingFootJitter !== null)).toBe(true);
   });
 
   it('uses hysteresis so near-closed foot jitter does not invent extra Tendu cycles', () => {

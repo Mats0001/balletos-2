@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAttemptProgressCurve,
   comparePhaseWithAttempt,
   createStudentAttemptSnapshot,
   findPreviousComparableAttempt,
@@ -29,6 +30,7 @@ function phase(
     endMs: cycleIndex * 1000 + 500,
     representativeTimeMs: cycleIndex * 1000 + 250,
     confidence: 0.9,
+    motion: { durationMs: 500, workingFootPathLength: 0.24, workingFootJitter: 0.004, sampleCount: 5 },
     regions,
     displayState: state,
   };
@@ -129,7 +131,22 @@ describe('student attempt history', () => {
       unchanged: 0,
       needsMoreAttention: 0,
       provisional: true,
+      motion: expect.objectContaining({ steadinessTrend: 'similar' }),
     });
+    const smootherPhase = {
+      ...phase('heuristic_match_uncertain'),
+      motion: { durationMs: 450, workingFootPathLength: 0.27, workingFootJitter: 0.002, sampleCount: 5 },
+    };
+    expect(comparePhaseWithAttempt(smootherPhase, previous)?.motion).toMatchObject({
+      footPathLengthDeltaPercent: 13,
+      jitterDeltaPercent: -50,
+      durationDeltaPercent: -10,
+      steadinessTrend: 'steadier',
+    });
+    const curve = buildAttemptProgressCurve(current, previous);
+    expect(curve).toHaveLength(1);
+    expect(curve[0]).toMatchObject({ phaseId: 'full_extension', provisional: true });
+    expect(curve[0].score).toBeGreaterThan(0);
   });
 
   it('fails closed on malformed storage and propagates write failures', () => {

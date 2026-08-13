@@ -28,6 +28,13 @@ export type AttemptPhaseSnapshot = Readonly<{
   id: TeacherPhaseId;
   cycleIndex: number;
   label: string;
+  phaseConfidence?: number;
+  motion?: Readonly<{
+    durationMs: number;
+    workingFootPathLength: number | null;
+    workingFootJitter: number | null;
+    sampleCount: number;
+  }>;
   regions: Readonly<Record<TeacherRegionKey, AttemptRegionSnapshot>>;
 }>;
 
@@ -60,7 +67,20 @@ export type AttemptPhaseComparison = Readonly<{
   needsMoreAttention: number;
   comparableRegions: number;
   provisional: boolean;
+  motion: Readonly<{
+    footPathLengthDeltaPercent: number | null;
+    jitterDeltaPercent: number | null;
+    durationDeltaPercent: number | null;
+    steadinessTrend: 'steadier' | 'similar' | 'more_restless' | 'not_comparable';
+  }>;
   regions: Readonly<Partial<Record<TeacherRegionKey, 'improved' | 'unchanged' | 'needs_more_attention'>>>;
+}>;
+
+export type AttemptProgressPoint = Readonly<{
+  phaseId: TeacherPhaseId;
+  label: string;
+  score: number;
+  provisional: boolean;
 }>;
 
 type AttemptHistoryEnvelope = Readonly<{
@@ -109,6 +129,14 @@ function phaseSnapshotIsValid(value: unknown): value is AttemptPhaseSnapshot {
     || (value.cycleIndex as number) < 0
     || !stringValue(value.label)
     || !objectLike(value.regions)) return false;
+  if (value.phaseConfidence !== undefined && (!Number.isFinite(value.phaseConfidence) || (value.phaseConfidence as number) < 0 || (value.phaseConfidence as number) > 1)) return false;
+  if (value.motion !== undefined) {
+    if (!objectLike(value.motion)
+      || !Number.isFinite(value.motion.durationMs) || (value.motion.durationMs as number) < 0
+      || !Number.isInteger(value.motion.sampleCount) || (value.motion.sampleCount as number) < 0
+      || !(value.motion.workingFootPathLength === null || (Number.isFinite(value.motion.workingFootPathLength) && (value.motion.workingFootPathLength as number) >= 0))
+      || !(value.motion.workingFootJitter === null || (Number.isFinite(value.motion.workingFootJitter) && (value.motion.workingFootJitter as number) >= 0))) return false;
+  }
   const regions = value.regions;
   return TEACHER_REGION_KEYS.every(key => regionSnapshotIsValid(regions[key]));
 }
@@ -163,6 +191,8 @@ function snapshotPhase(phase: TeacherPhaseResult): AttemptPhaseSnapshot {
     id: phase.id,
     cycleIndex: phase.cycleIndex,
     label: phase.label,
+    phaseConfidence: phase.confidence,
+    motion: Object.freeze({ ...phase.motion }),
     regions: Object.freeze(Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, Object.freeze({
       state: heuristicBaseState(phase.regions[key].state),
       evidenceStrength: heuristicEvidenceStrength(phase.regions[key].state),
@@ -231,6 +261,10 @@ function severity(state: TeacherHeuristicBaseState): number {
   return state === 'heuristic_match' ? 0 : state === 'heuristic_attention' ? 1 : 2;
 }
 
+function arithmeticMean(values: readonly number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
 export function comparePhaseWithAttempt(
   phase: TeacherPhaseResult | null,
   previous: StudentAttemptSnapshot | null,
@@ -265,6 +299,26 @@ export function comparePhaseWithAttempt(
   }
   const comparableRegions = improved + unchanged + needsMoreAttention;
   if (comparableRegions === 0) return null;
+  const previousMotion = previousPhases.map(candidate => candidate.motion).filter((value): value is NonNullable<AttemptPhaseSnapshot['motion']> => Boolean(value));
+  const percentDelta = (current: number | null, historic: readonly (number | null)[]) => {
+    const usable = historic.filter((value): value is number => value !== null && Number.isFinite(value));
+    if (current === null || !Number.isFinite(current) || usable.length === 0) return null;
+    const baseline = arithmeticMean(usable);
+    return Math.abs(baseline) <= 1e-9 ? null : Math.round((current - baseline) / baseline * 100);
+  };
+  const footPathLengthDeltaPercent = percentDelta(
+    phase.motion.workingFootPathLength,
+    previousMotion.map(motion => motion.workingFootPathLength),
+  );
+  const jitterDeltaPercent = percentDelta(
+    phase.motion.workingFootJitter,
+    previousMotion.map(motion => motion.workingFootJitter),
+  );
+  const durationDeltaPercent = percentDelta(phase.motion.durationMs, previousMotion.map(motion => motion.durationMs));
+  const steadinessTrend = jitterDeltaPercent === null ? 'not_comparable'
+    : jitterDeltaPercent <= -12 ? 'steadier'
+      : jitterDeltaPercent >= 12 ? 'more_restless'
+        : 'similar';
   return Object.freeze({
     previousAttemptId: previous.attemptId,
     previousCapturedAt: previous.capturedAt,
@@ -274,8 +328,40 @@ export function comparePhaseWithAttempt(
     needsMoreAttention,
     comparableRegions,
     provisional,
+    motion: Object.freeze({ footPathLengthDeltaPercent, jitterDeltaPercent, durationDeltaPercent, steadinessTrend }),
     regions: Object.freeze(regions),
   });
+}
+
+/** Compact cross-phase curve; positive means more stable than the previous comparable attempt. */
+export function buildAttemptProgressCurve(
+  current: StudentAttemptSnapshot | null,
+  previous: StudentAttemptSnapshot | null,
+): readonly AttemptProgressPoint[] {
+  if (!current || !previous) return Object.freeze([]);
+  return Object.freeze(current.phases.map(phase => {
+    const historic = previous.phases.filter(candidate => candidate.id === phase.id);
+    if (historic.length === 0) return Object.freeze({ phaseId: phase.id, label: phase.label, score: 0, provisional: true });
+    const deltas = TEACHER_REGION_KEYS.flatMap(key => {
+      const currentState = phase.regions[key].state;
+      const old = historic.flatMap(candidate => candidate.regions[key].state ?? []);
+      return currentState && old.length > 0 ? [arithmeticMean(old.map(severity)) - severity(currentState)] : [];
+    });
+    let score = deltas.length > 0 ? arithmeticMean(deltas) / 2 : 0;
+    const currentJitter = phase.motion?.workingFootJitter;
+    const oldJitter = historic.flatMap(candidate => candidate.motion?.workingFootJitter ?? []);
+    if (currentJitter !== null && currentJitter !== undefined && oldJitter.length > 0) {
+      const baseline = arithmeticMean(oldJitter);
+      if (baseline > 1e-9) score += Math.max(-0.5, Math.min(0.5, (baseline - currentJitter) / baseline * 0.35));
+    }
+    return Object.freeze({
+      phaseId: phase.id,
+      label: phase.label,
+      score: Math.max(-1, Math.min(1, Number(score.toFixed(3)))),
+      provisional: phase.phaseConfidence === undefined || phase.phaseConfidence < 0.7
+        || Object.values(phase.regions).some(region => region.evidenceStrength !== 'stable'),
+    });
+  }));
 }
 
 export class StudentAttemptHistoryStore {
