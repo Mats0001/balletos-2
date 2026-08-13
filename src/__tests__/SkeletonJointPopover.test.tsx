@@ -13,6 +13,13 @@ import { buildGroundedTeacherDraft } from '../services/groundedTeacherDraftEngin
 import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import { createBlockedPacket } from '../types/teacherHeuristic';
 import { getSkeletonTarget } from '../services/skeletonTargetRegistry';
+import { bindAssessmentIfCurrent, createAnalysisContextEpoch } from '../services/analysisContextGuard';
+import {
+  createNicoleProExactFrameArtifactId,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  planNicoleProGroundedDraft,
+} from '../services/nicoleProContentPlanner';
+import type { NicoleProDraftV1 } from '../types/nicoleProContent';
 
 function setViewportWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', {
@@ -61,10 +68,41 @@ function measurable(status?: 'CORRECT' | 'WARNING' | 'ERROR'): VaganovaMeasureme
   };
 }
 
+function proDraftFor(groundedTeacherDraft: GroundedTeacherDraft): Readonly<{
+  draft: NicoleProDraftV1;
+  context: ReturnType<typeof createAnalysisContextEpoch>;
+}> {
+  if (groundedTeacherDraft.kind !== 'ready') throw new Error('Pro fixture requires a ready Grounded draft.');
+  const currentContext = createAnalysisContextEpoch({
+    schemaVersion: 1,
+    sourceId: groundedTeacherDraft.evidence.sourceId,
+    studentId: 'student:emma-berger',
+    exerciseId: 'plie',
+    levelId: 'minis',
+  }, 3);
+  const groundedAssessment = bindAssessmentIfCurrent(currentContext, currentContext, groundedTeacherDraft);
+  if (!groundedAssessment) throw new Error('Pro fixture must bind.');
+  const draft = planNicoleProGroundedDraft({
+    groundedAssessment,
+    currentContext,
+    analysisArtifactId: createNicoleProExactFrameArtifactId(
+      currentContext, groundedTeacherDraft.evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+    ),
+    view: 'frontal',
+    landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    captureQuality: 'ready',
+    draftId: `draft:${groundedTeacherDraft.evidence.metricId}`,
+    generatedAt: '2026-08-13T20:00:00.000Z',
+  });
+  if (!draft) throw new Error('Pro fixture must plan.');
+  return { draft, context: currentContext };
+}
+
 function renderJoint(
   landmarkIndex: number,
   vaganovaAnalysis: VaganovaFullAnalysis | null,
   groundedTeacherDraft?: GroundedTeacherDraft,
+  nicoleProDraft?: NicoleProDraftV1 | null,
 ) {
   return render(
     <SkeletonJointPopover
@@ -77,6 +115,7 @@ function renderJoint(
       vaganovaAnalysis={vaganovaAnalysis}
       landmarkIndex={landmarkIndex}
       groundedTeacherDraft={groundedTeacherDraft}
+      nicoleProDraft={nicoleProDraft}
     />,
   );
 }
@@ -85,6 +124,8 @@ function renderTarget(
   targetId: string,
   vaganovaAnalysis: VaganovaFullAnalysis | null,
   groundedTeacherDraft?: GroundedTeacherDraft,
+  nicoleProDraft?: NicoleProDraftV1 | null,
+  nicoleProContext?: ReturnType<typeof createAnalysisContextEpoch> | null,
 ) {
   const target = getSkeletonTarget(targetId);
   if (!target) throw new Error(`Missing test target ${targetId}`);
@@ -99,15 +140,18 @@ function renderTarget(
       vaganovaAnalysis={vaganovaAnalysis}
       landmarkIndex={target.representativeLandmarkIndex}
       groundedTeacherDraft={groundedTeacherDraft}
+      nicoleProDraft={nicoleProDraft}
+      nicoleProCaptureQuality={nicoleProDraft ? 'ready' : null}
+      currentAnalysisContext={nicoleProContext}
       selectedTarget={target}
       selectedTargetIdentity={{
         targetId: target.id,
         kind: target.kind,
         anchorNormalized: { x: 0.3, y: 0.3 },
-        sourceId: 'clip-a',
-        streamEpoch: 4,
-        generation: 2,
-        mediaTimeUs: 1_500_000,
+        sourceId: groundedTeacherDraft?.kind === 'ready' ? groundedTeacherDraft.evidence.sourceId : 'clip-a',
+        streamEpoch: groundedTeacherDraft?.kind === 'ready' ? groundedTeacherDraft.evidence.streamEpoch : 4,
+        generation: groundedTeacherDraft?.kind === 'ready' ? groundedTeacherDraft.evidence.generation : 2,
+        mediaTimeUs: groundedTeacherDraft?.kind === 'ready' ? groundedTeacherDraft.evidence.mediaTimeUs : 1_500_000,
         frameStatus: 'exact_cache_frame',
       }}
     />,
@@ -277,17 +321,23 @@ describe('SkeletonJointPopover evidence color semantics', () => {
       },
     });
 
-    renderJoint(100, torsoAnalysis, draft);
+    if (draft.kind !== 'ready') throw new Error('Expected ready torso fixture.');
+    const pro = proDraftFor(draft);
+    renderTarget('bone.torso_side_r', torsoAnalysis, draft, pro.draft, pro.context);
 
-    expect(screen.getByText('KI-Entwurf · Nicole prüft')).toBeTruthy();
-    expect(screen.getByText('Was wir sehen')).toBeTruthy();
-    expect(screen.getByText('Warum das technisch wichtig sein kann')).toBeTruthy();
-    expect(screen.getByText('Zielbild für Nicoles Prüfung')).toBeTruthy();
-    expect(screen.getByText('Üben & verbessern')).toBeTruthy();
-    expect(screen.getByText('Metapher / Bild')).toBeTruthy();
-    expect(screen.getByText('Technik für Nicole')).toBeTruthy();
-    expect(screen.getByText('Grenzen & Prüffragen')).toBeTruthy();
-    expect(screen.getAllByText(/6\.3°/)).toHaveLength(2);
+    expect(screen.getByText('Nicole-Pro · KI-Arbeitsfassung')).toBeTruthy();
+    expect(screen.getByText(/Ampel Gelb · durchgezogen · Signal stabil/)).toBeTruthy();
+    expect(screen.getByText(/Messung experimentell · Messunsicherheit nicht bestimmt/)).toBeTruthy();
+    expect(screen.getByText('Befund')).toBeTruthy();
+    expect(screen.getByText('Biomechanische Einordnung')).toBeTruthy();
+    expect(screen.getByText('Mögliche Erklärungen')).toBeTruthy();
+    expect(screen.getByText('So prüfst du es')).toBeTruthy();
+    expect(screen.getByText('Ziel & Üben')).toBeTruthy();
+    expect(screen.getByText('Bildsprache')).toBeTruthy();
+    expect(screen.getByText('Messdetails & Provenienz')).toBeTruthy();
+    expect(screen.getAllByText(/6,3°/)).toHaveLength(2);
+    expect(screen.getByText(/Sofort-Cue:/)).toBeTruthy();
+    expect(screen.getByText(/Sichtbarer Erfolg:/)).toBeTruthy();
     expect(screen.queryByText('Oberkörper neigt sich beim Plie nach vorne oder zur Seite.')).toBeNull();
     expect(screen.queryByText(/Beckenboden aktiv|10x/)).toBeNull();
   });

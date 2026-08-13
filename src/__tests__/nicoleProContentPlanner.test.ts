@@ -9,7 +9,15 @@ import {
   createNicoleProValidationAuthority,
   validateNicoleProDraft,
 } from '../services/nicoleProContentValidator';
-import { planNicoleProDraft } from '../services/nicoleProContentPlanner';
+import {
+  createNicoleProExactFrameArtifactId,
+  currentNicoleProDraftForGrounded,
+  groundedDraftMatchesCurrentSelection,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  nicoleProDraftMatchesGroundedSelection,
+  planNicoleProDraft,
+  planNicoleProGroundedDraft,
+} from '../services/nicoleProContentPlanner';
 import { projectGroundedTeacherEvidence } from '../services/nicoleProGroundedEvidence';
 import { teacherHeuristicEngine } from '../services/teacherHeuristicEngine';
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
@@ -118,7 +126,7 @@ function buildFixture(
     analysisArtifactId: `artifact:plie:${suffix}`,
     context: currentContext,
     view: 'frontal',
-    landmarkModel: { modelId: 'mediapipe-pose', modelVersion: '0.5' },
+    landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
     captureQuality: 'ready',
   });
   if (!evidence) throw new Error('Golden fixture must project evidence.');
@@ -278,6 +286,157 @@ describe('Nicole-Pro deterministic grounded vertical slice', () => {
     expect(second).toEqual(first.draft);
     expect(Object.isFrozen(first.draft)).toBe(true);
     expect(Object.isFrozen(first.draft.claims[0])).toBe(true);
+  });
+
+  it('runs the complete Grounded-to-Pro composition and rejects a stale epoch', () => {
+    const fixture = buildFixture('spine_tilt_aplomb', 5.5, 'heuristic_attention', 'composed');
+    const input = {
+      groundedAssessment: fixture.groundedAssessment,
+      currentContext: fixture.currentContext,
+      analysisArtifactId: fixture.evidence.analysisArtifactId,
+      view: 'frontal' as const,
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+      captureQuality: 'ready' as const,
+      draftId: fixture.draft.draftId,
+      generatedAt: fixture.draft.generatedAt,
+    };
+    expect(planNicoleProGroundedDraft(input)).toEqual(fixture.draft);
+    expect(planNicoleProGroundedDraft({
+      ...input,
+      currentContext: context(fixture.currentContext.generation + 1),
+    })).toBeNull();
+    expect(planNicoleProGroundedDraft(undefined as never)).toBeNull();
+  });
+
+  it('allows the 2D spine-axis rule in a profile view but keeps shoulder and pelvis frontal-only', () => {
+    const spine = buildFixture('spine_tilt_aplomb', 5.5, 'heuristic_attention', 'profile-spine');
+    const common = {
+      currentContext: spine.currentContext,
+      analysisArtifactId: createNicoleProExactFrameArtifactId(
+        spine.currentContext, spine.grounded.evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+      ),
+      view: 'profile_left' as const,
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+      captureQuality: 'ready' as const,
+      generatedAt: '2026-08-13T20:00:00.000Z',
+    };
+    expect(planNicoleProGroundedDraft({
+      ...common,
+      groundedAssessment: spine.groundedAssessment,
+      draftId: 'draft:profile-spine',
+    })).not.toBeNull();
+
+    const shoulder = buildFixture('shoulder_horizontal', 6.2, 'heuristic_attention', 'profile-shoulder');
+    expect(planNicoleProGroundedDraft({
+      ...common,
+      groundedAssessment: shoulder.groundedAssessment,
+      analysisArtifactId: createNicoleProExactFrameArtifactId(
+        shoulder.currentContext, shoulder.grounded.evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+      ),
+      draftId: 'draft:profile-shoulder',
+    })).toBeNull();
+
+    const pelvis = buildFixture(
+      'projected_hip_line_obliquity', 6.4, 'heuristic_attention', 'profile-pelvis',
+    );
+    expect(planNicoleProGroundedDraft({
+      ...common,
+      groundedAssessment: pelvis.groundedAssessment,
+      analysisArtifactId: createNicoleProExactFrameArtifactId(
+        pelvis.currentContext, pelvis.grounded.evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+      ),
+      draftId: 'draft:profile-pelvis',
+    })).toBeNull();
+  });
+
+  it('uses one exact capability contract for context, gate, selection and Grounded/Pro evidence', () => {
+    const fixture = buildFixture('spine_tilt_aplomb', 5.5, 'heuristic_attention', 'capability');
+    const analysisArtifactId = createNicoleProExactFrameArtifactId(
+      fixture.currentContext, fixture.grounded.evidence.mediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+    );
+    const pro = planNicoleProGroundedDraft({
+      groundedAssessment: fixture.groundedAssessment,
+      currentContext: fixture.currentContext,
+      analysisArtifactId,
+      view: 'frontal',
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+      captureQuality: 'ready',
+      draftId: 'draft:capability',
+      generatedAt: '2026-08-13T20:00:00.000Z',
+    });
+    expect(pro).not.toBeNull();
+    const proAssessment = pro
+      ? bindAssessmentIfCurrent(fixture.currentContext, fixture.currentContext, pro)
+      : null;
+    const selectedTarget = {
+      targetId: 'bone.torso_side_r' as const,
+      kind: 'bone' as const,
+      anchorNormalized: { x: 0.5, y: 0.5 },
+      sourceId: fixture.grounded.evidence.sourceId,
+      streamEpoch: fixture.grounded.evidence.streamEpoch,
+      generation: fixture.grounded.evidence.generation,
+      mediaTimeUs: fixture.grounded.evidence.mediaTimeUs,
+      frameStatus: 'exact_cache_frame' as const,
+    };
+    const capability = {
+      groundedAssessment: fixture.groundedAssessment,
+      proAssessment,
+      currentContext: fixture.currentContext,
+      selectedTarget,
+      captureQuality: 'ready' as const,
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    };
+    expect(currentNicoleProDraftForGrounded(capability)).toEqual(pro);
+    expect(currentNicoleProDraftForGrounded({ ...capability, captureQuality: null })).toBeNull();
+    expect(currentNicoleProDraftForGrounded({
+      ...capability,
+      currentContext: context(fixture.currentContext.generation + 1),
+    })).toBeNull();
+    expect(currentNicoleProDraftForGrounded({
+      ...capability,
+      selectedTarget: { ...selectedTarget, generation: selectedTarget.generation + 1 },
+    })).toBeNull();
+    expect(currentNicoleProDraftForGrounded({
+      ...capability,
+      selectedTarget: { ...selectedTarget, targetId: 'bone.shoulder_line' },
+    })).toBeNull();
+    const tampered = pro ? structuredClone(pro) : null;
+    if (tampered) tampered.evidence[0].value = 99;
+    expect(nicoleProDraftMatchesGroundedSelection({
+      grounded: fixture.grounded,
+      pro: tampered,
+      currentContext: fixture.currentContext,
+      selectedTarget,
+      captureQuality: 'ready',
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    })).toBe(false);
+    expect(currentNicoleProDraftForGrounded({
+      ...capability,
+      landmarkModel: { modelId: 'second-pose-model', modelVersion: '2.0.0' },
+    })).toBeNull();
+
+    const secondModel = { modelId: 'second-pose-model', modelVersion: '2.0.0' } as const;
+    const foreignPro = planNicoleProGroundedDraft({
+      groundedAssessment: fixture.groundedAssessment,
+      currentContext: fixture.currentContext,
+      analysisArtifactId: createNicoleProExactFrameArtifactId(
+        fixture.currentContext, fixture.grounded.evidence.mediaTimeUs, secondModel,
+      ),
+      view: 'frontal',
+      landmarkModel: secondModel,
+      captureQuality: 'ready',
+      draftId: 'draft:capability:second-model',
+      generatedAt: '2026-08-13T20:00:00.000Z',
+    });
+    expect(foreignPro).not.toBeNull();
+    expect(currentNicoleProDraftForGrounded({
+      ...capability,
+      proAssessment: foreignPro
+        ? bindAssessmentIfCurrent(fixture.currentContext, fixture.currentContext, foreignPro)
+        : null,
+    })).toBeNull();
+    expect(currentNicoleProDraftForGrounded(undefined as never)).toBeNull();
+    expect(groundedDraftMatchesCurrentSelection(undefined as never)).toBe(false);
   });
 
   it('uses definition-bound one-decimal display precision for experimental measurements', () => {

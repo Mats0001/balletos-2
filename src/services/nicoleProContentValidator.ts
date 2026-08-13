@@ -23,7 +23,7 @@ import {
 
 export const NICOLE_PRO_VALIDATOR_VERSION = 'nicole-pro-validator-v1' as const;
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID = 'balletos-nicole-pro-knowledge' as const;
-export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.1.0' as const;
+export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.2.0' as const;
 
 interface GroundedRuleProfile {
   key: string;
@@ -31,6 +31,7 @@ interface GroundedRuleProfile {
   metricId: string;
   definitionVersion: string;
   side: NicoleProEvidencePacketV1['side'];
+  views: readonly NicoleProEvidencePacketV1['view'][];
   subjectConceptId: string;
   finding: string;
   metric: string;
@@ -55,7 +56,7 @@ function createGroundedKnowledgeRule(profile: GroundedRuleProfile): NicoleProKno
     exerciseIds: ['plie'],
     phaseIds: ['paused_exact_frame'],
     sides: [profile.side],
-    views: ['frontal'],
+    views: profile.views,
     metrics: [{ metricId: profile.metricId, definitionVersion: profile.definitionVersion }],
     frameAuthorities: ['exact_cache_frame'],
     measurementStatuses: ['experimental', 'limited'],
@@ -131,6 +132,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
     metricId: 'shoulder_horizontal',
     definitionVersion: 'shoulder-horizontal-image-v1',
     side: 'bilateral',
+    views: ['frontal'],
     subjectConceptId: 'shoulder_line_continuity',
     finding: 'Im {phaseLabel} ist die projizierte Schulterlinie gegenüber der Bildhorizontalen sichtbar geneigt.',
     metric: 'Die projizierte Schulterlinie weicht in diesem Bild um {value} von der Bildhorizontalen ab.',
@@ -153,6 +155,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
     metricId: 'spine_tilt_aplomb',
     definitionVersion: 'spine-center-image-vertical-v1',
     side: 'center',
+    views: ['frontal', 'profile_left', 'profile_right'],
     subjectConceptId: 'projected_spine_aplomb',
     finding: 'Im {phaseLabel} ist die projizierte Rumpfachse gegenüber der Bildvertikalen sichtbar geneigt.',
     metric: 'Die projizierte Rumpfachse weicht in diesem Bild um {value} von der Bildvertikalen ab.',
@@ -175,6 +178,7 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
     metricId: 'projected_hip_line_obliquity',
     definitionVersion: 'pelvis-line-image-v1',
     side: 'bilateral',
+    views: ['frontal'],
     subjectConceptId: 'projected_pelvis_line',
     finding: 'Im {phaseLabel} ist die projizierte Beckenlinie zwischen den sichtbaren Hüftpunkten gegenüber der Bildhorizontalen geneigt.',
     metric: 'Die projizierte Beckenlinie weicht in diesem Bild um {value} von der Bildhorizontalen ab.',

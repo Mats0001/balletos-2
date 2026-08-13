@@ -8,7 +8,14 @@ import {
   VaganovaMeasurement
 } from '../services/vaganovaAngleCalculator';
 import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { NicoleProClaimV1, NicoleProDraftV1 } from '../types/nicoleProContent';
 import type { SelectedSkeletonTarget, SkeletonTargetDefinition } from '../types/skeletonTarget';
+import type { AnalysisContextEpochV1 } from '../services/analysisContextGuard';
+import {
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  nicoleProDraftMatchesGroundedSelection,
+  type NicoleProCaptureQuality,
+} from '../services/nicoleProContentPlanner';
 
 interface Props {
   knowledge: JointKnowledge;
@@ -29,6 +36,10 @@ interface Props {
   landmarkIndex: number;
   /** Exact-frame, provenance-gated teacher draft for the synthetic torso bone. */
   groundedTeacherDraft?: GroundedTeacherDraft;
+  /** Validated, context-current Pro content for this exact Grounded frame. */
+  nicoleProDraft?: NicoleProDraftV1 | null;
+  nicoleProCaptureQuality?: NicoleProCaptureQuality | null;
+  currentAnalysisContext?: AnalysisContextEpochV1 | null;
   /** Exact joint or bone selected from the canonical rendered geometry. */
   selectedTarget?: SkeletonTargetDefinition;
   /** Immutable frame identity captured with the selection. */
@@ -106,6 +117,9 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   vaganovaAnalysis,
   landmarkIndex,
   groundedTeacherDraft,
+  nicoleProDraft,
+  nicoleProCaptureQuality,
+  currentAnalysisContext,
   selectedTarget,
   selectedTargetIdentity,
 }) => {
@@ -130,8 +144,78 @@ export const SkeletonJointPopover: React.FC<Props> = ({
     : null;
   const blockedGroundedMessage = blockedGroundedDraft?.message
     ?? 'Für diesen Zeitpunkt liegt noch kein abgesicherter Lehrerentwurf vor.';
+  const readyNicoleProDraft = readyGroundedDraft
+    && nicoleProDraftMatchesGroundedSelection({
+      grounded: readyGroundedDraft,
+      pro: nicoleProDraft ?? null,
+      currentContext: currentAnalysisContext ?? null,
+      selectedTarget: selectedTargetIdentity ?? null,
+      captureQuality: nicoleProCaptureQuality ?? null,
+      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+    })
+    ? nicoleProDraft
+    : null;
+  const proClaimsById = new Map(readyNicoleProDraft?.claims.map(claim => [claim.claimId, claim]) ?? []);
+  const proClaims = (section: keyof NicoleProDraftV1['sections']): NicoleProClaimV1[] => (
+    readyNicoleProDraft?.sections[section].map(claimId => proClaimsById.get(claimId)).filter(
+      (claim): claim is NicoleProClaimV1 => Boolean(claim),
+    ) ?? []
+  );
+  const signalLabel = readyNicoleProDraft?.evidence[0].teacherSignal.state === 'strong_attention'
+    ? 'Rot'
+    : readyNicoleProDraft?.evidence[0].teacherSignal.state === 'attention'
+      ? 'Gelb'
+      : 'Grün';
+  const certaintyLabel = readyNicoleProDraft?.evidence[0].teacherSignal.certainty === 'supported'
+    ? 'durchgezogen · Signal stabil'
+    : readyNicoleProDraft?.evidence[0].teacherSignal.certainty === 'uncertain'
+      ? 'fein gepunktet · Signal unsicher'
+      : 'Punktpaare · Signal schwach';
+  const measurementStatusLabel = readyNicoleProDraft?.evidence[0].measurementStatus === 'experimental'
+    ? 'Messung experimentell'
+    : readyNicoleProDraft?.evidence[0].measurementStatus === 'limited'
+      ? 'Messung eingeschränkt'
+      : readyNicoleProDraft?.evidence[0].measurementStatus === 'validated'
+        ? 'Messung validiert'
+        : 'Messung nicht verfügbar';
+  const uncertaintyLabel = readyNicoleProDraft?.evidence[0].uncertainty.kind === 'not_characterized'
+    ? 'Messunsicherheit nicht bestimmt'
+    : readyNicoleProDraft?.evidence[0].uncertainty.kind === 'validated_mdc'
+      ? 'Validierte Änderungsschwelle hinterlegt'
+      : 'Geschätzter Messbereich hinterlegt';
 
   const handleCopyAll = useCallback(() => {
+    if (readyNicoleProDraft) {
+      const text = (section: keyof NicoleProDraftV1['sections']) => proClaims(section).map(claim => claim.text).join('\n');
+      const hypotheses = proClaims('hypotheses');
+      const hypothesisText = hypotheses.map((claim, index) => `${index + 1}. ${claim.text}`).join('\n');
+      const testText = proClaims('differentiationTests').map(claim => {
+        const relatedNumbers = claim.relatedClaimIds
+          .map(id => hypotheses.findIndex(hypothesis => hypothesis.claimId === id) + 1)
+          .filter(index => index > 0);
+        return `Test zu Hypothese ${relatedNumbers.join(', ')}: ${claim.text}`;
+      }).join('\n');
+      const evidence = readyNicoleProDraft.evidence[0];
+      navigator.clipboard.writeText([
+        `${selectedTarget?.label ?? knowledge.name} · NICOLE-PRO · KI-ARBEITSFASSUNG`, '',
+        `STATUS: Ampel ${signalLabel} · ${certaintyLabel} · ${measurementStatusLabel} · ${uncertaintyLabel}`,
+        'NUR INTERN: Nicht für Lernende oder Eltern freigegeben.', '',
+        `BEFUND:\n${text('finding')}`, '',
+        `BIOMECHANISCHE EINORDNUNG:\n${text('interpretation')}`, '',
+        `MÖGLICHE ERKLÄRUNGEN:\n${hypothesisText}`, '',
+        `SO PRÜFST DU ES:\n${testText}`, '',
+        `ZIEL & ÜBEN:\n${text('targetAndPractice')}`, '',
+        `BILDSPRACHE:\n${text('metaphor')}`, '',
+        `MESSDETAILS:\n${text('measurementDetails')}`, '',
+        `PROVENIENZ: Frame ${(evidence.mediaTimeUs / 1_000_000).toFixed(3)}s · Quelle ${evidence.sourceId} · Policy ${evidence.policyVersion}`,
+        `Kontext ${evidence.analysisContextFingerprint}@${evidence.analysisContextGeneration} · Modell ${evidence.landmarkQuality.modelId}@${evidence.landmarkQuality.modelVersion}`,
+        `Artifact ${evidence.analysisArtifactId} · Planner ${readyNicoleProDraft.plannerId}@${readyNicoleProDraft.plannerVersion} · Validator ${readyNicoleProDraft.validatorVersion}`,
+      ].join('\n')).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      });
+      return;
+    }
     if (readyGroundedDraft) {
       const sections = readyGroundedDraft.sections;
       navigator.clipboard.writeText([
@@ -181,7 +265,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [knowledge, liveMeasurements, readyGroundedDraft, selectedTarget]);
+  }, [knowledge, liveMeasurements, readyGroundedDraft, readyNicoleProDraft, selectedTarget]);
 
   // ESC to close
   useEffect(() => {
@@ -373,7 +457,81 @@ export const SkeletonJointPopover: React.FC<Props> = ({
           </div>
         )}
 
-        {readyGroundedDraft ? (
+        {readyNicoleProDraft ? (
+          <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(192,132,252,0.09)', border: '1px solid rgba(192,132,252,0.3)', borderRadius: '8px', padding: '7px 9px' }}>
+              <div style={{ fontSize: '9px', fontWeight: 900, color: '#d8b4fe', textTransform: 'uppercase', letterSpacing: '0.7px' }}>
+                Nicole-Pro · KI-Arbeitsfassung
+              </div>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.72)', lineHeight: 1.45 }}>
+                Ampel {signalLabel} · {certaintyLabel} · intern · Nicole prüft
+              </div>
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.55)', lineHeight: 1.4 }}>
+                {measurementStatusLabel} · {uncertaintyLabel}
+              </div>
+              <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.48)', lineHeight: 1.4 }}>
+                Keine Ausgabe an Lernende oder Eltern ohne separate Freigabe.
+              </div>
+            </div>
+            <Section icon={<span style={{ fontSize: '9px' }}>👁</span>} label="Befund" color={color} highlight>
+              {proClaims('finding').map(claim => <span key={claim.claimId} style={{ display: 'block', marginBottom: '4px' }}>{claim.text}</span>)}
+            </Section>
+            <Section icon={<Zap size={9} />} label="Biomechanische Einordnung" color={color}>
+              {proClaims('interpretation').map(claim => <span key={claim.claimId}>{claim.text}</span>)}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>◇</span>} label="Mögliche Erklärungen" color="#ffd60a">
+              {proClaims('hypotheses').map((claim, index) => (
+                <span key={claim.claimId} style={{ display: 'block', marginBottom: '5px' }}>{index + 1}. {claim.text}</span>
+              ))}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>✓</span>} label="So prüfst du es" color="#64d2ff">
+              {proClaims('differentiationTests').map(claim => {
+                const relatedNumbers = claim.relatedClaimIds
+                  .map(id => proClaims('hypotheses').findIndex(hypothesis => hypothesis.claimId === id) + 1)
+                  .filter(index => index > 0);
+                return (
+                  <span key={claim.claimId} style={{ display: 'block', marginBottom: '5px' }}>
+                    Test zu Hypothese {relatedNumbers.join(', ')}: {claim.text}
+                  </span>
+                );
+              })}
+            </Section>
+            <Section icon={<Dumbbell size={9} />} label="Ziel & Üben" color="#30d158">
+              {proClaims('targetAndPractice').map(claim => {
+                const label = claim.type === 'teaching_target' ? 'Ziel'
+                  : claim.type === 'immediate_cue' ? 'Sofort-Cue'
+                    : claim.type === 'practice' ? 'Übung' : 'Sichtbarer Erfolg';
+                return <span key={claim.claimId} style={{ display: 'block', marginBottom: '5px' }}><strong>{label}:</strong> {claim.text}</span>;
+              })}
+            </Section>
+            <Section icon={<span style={{ fontSize: '9px' }}>✨</span>} label="Bildsprache" color="#c084fc">
+              {proClaims('metaphor').map(claim => <span key={claim.claimId}>{claim.text}</span>)}
+            </Section>
+            <details style={{ background: 'rgba(100,210,255,0.045)', border: '1px solid rgba(100,210,255,0.18)', borderRadius: '8px', padding: '7px 9px' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '9px', fontWeight: 900, color: '#64d2ff', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                Messdetails & Provenienz
+              </summary>
+              <div style={{ marginTop: '7px', fontSize: '9.5px', color: 'rgba(255,255,255,0.66)', lineHeight: 1.55 }}>
+                {proClaims('measurementDetails').map(claim => <span key={claim.claimId} style={{ display: 'block', marginBottom: '5px' }}>{claim.text}</span>)}
+                <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.42)' }}>
+                  Frame {(readyNicoleProDraft.evidence[0].mediaTimeUs / 1_000_000).toFixed(3)}s · {readyNicoleProDraft.evidence[0].metricId} · {readyNicoleProDraft.evidence[0].definitionVersion} · {readyNicoleProDraft.evidence[0].measurementStatus}
+                </span>
+                <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.42)' }}>
+                  Gate {readyNicoleProDraft.evidence[0].captureQuality} · Metrik-Confidence {readyNicoleProDraft.evidence[0].metricInputConfidence === null ? 'n/a' : `${Math.round(readyNicoleProDraft.evidence[0].metricInputConfidence * 100)}%`} · Landmark-Sichtbarkeit {readyNicoleProDraft.evidence[0].landmarkQuality.score === null ? 'n/a' : `${Math.round(readyNicoleProDraft.evidence[0].landmarkQuality.score * 100)}%`}
+                </span>
+                <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.42)', overflowWrap: 'anywhere' }}>
+                  Modell {readyNicoleProDraft.evidence[0].landmarkQuality.modelId}@{readyNicoleProDraft.evidence[0].landmarkQuality.modelVersion} · Artifact {readyNicoleProDraft.evidence[0].analysisArtifactId}
+                </span>
+                <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.42)', overflowWrap: 'anywhere' }}>
+                  Quelle {readyNicoleProDraft.evidence[0].sourceId} · Policy {readyNicoleProDraft.evidence[0].policyVersion}
+                </span>
+                <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.42)', overflowWrap: 'anywhere' }}>
+                  Kontext {readyNicoleProDraft.evidence[0].analysisContextFingerprint}@{readyNicoleProDraft.evidence[0].analysisContextGeneration} · Planner {readyNicoleProDraft.plannerId}@{readyNicoleProDraft.plannerVersion} · Validator {readyNicoleProDraft.validatorVersion}
+                </span>
+              </div>
+            </details>
+          </div>
+        ) : readyGroundedDraft ? (
           <div style={{ padding: '8px 10px 16px', display: 'flex', flexDirection: 'column', gap: '7px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,214,10,0.08)', border: '1px solid rgba(255,214,10,0.25)', borderRadius: '8px', padding: '7px 9px' }}>
               <span aria-hidden="true" style={{ color: '#ffd60a', fontSize: '11px' }}>✦</span>

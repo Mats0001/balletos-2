@@ -32,7 +32,16 @@ import { useUndoableAnnotations } from '../hooks/useUndoableAnnotations';
 import { SkeletonJointPopover } from './SkeletonJointPopover';
 import { getJointKnowledge } from '../services/skeletonJointKnowledge';
 import { buildGroundedTeacherDraft, createBlockedGroundedTeacherDraft, findNearestExactPoseFrame, groundedTeacherDraftFingerprint } from '../services/groundedTeacherDraftEngine';
-import type { GroundedGuideFrameContext, GroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { GroundedGuideFrameContext, GroundedTeacherDraft, ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import {
+  createNicoleProExactFrameArtifactId,
+  currentNicoleProDraftForGrounded,
+  groundedDraftMatchesCurrentSelection,
+  NICOLE_PRO_LANDMARK_MODEL_V1,
+  planNicoleProGroundedDraft,
+  type NicoleProCaptureQuality,
+} from '../services/nicoleProContentPlanner';
+import type { NicoleProDraftV1 } from '../types/nicoleProContent';
 import {
   createSelectedSkeletonTarget,
   findSkeletonTargetAtPoint,
@@ -169,6 +178,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const groundedTeacherDraftRef = useRef<GroundedTeacherDraft>(groundedTeacherDraft);
   const groundedDraftPendingRef = useRef(false);
   const groundedSnapPendingRef = useRef(false);
+  const groundedDraftRequestContextRef = useRef<AnalysisContextEpochV1 | null>(null);
   const groundedDraftTargetRef = useRef<Readonly<{
     metricAdapter: GroundedMetricAdapterId;
     focusId: SkeletonTargetFocusId;
@@ -192,6 +202,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   ) => {
     groundedDraftPendingRef.current = false;
     groundedSnapPendingRef.current = false;
+    groundedDraftRequestContextRef.current = null;
     groundedDraftTargetRef.current = null;
     skeletonTargetRebindRef.current = null;
     activeCueGlowTypeRef.current = undefined;
@@ -302,6 +313,21 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       : null
   ), [analysisContextGeneration, analysisContextIdentity, analysisContextIdentityFingerprint]);
   const currentAnalysisContextEpochRef = useRef<AnalysisContextEpochV1 | null>(currentAnalysisContextEpoch);
+  const [boundGroundedTeacherAssessment, setBoundGroundedTeacherAssessment] = useState<BoundAssessmentV1<ReadyGroundedTeacherDraft> | null>(null);
+  const [boundNicoleProDraft, setBoundNicoleProDraft] = useState<BoundAssessmentV1<NicoleProDraftV1> | null>(null);
+  const currentGroundedTeacherDraft = assessmentValueForCurrentContext(
+    boundGroundedTeacherAssessment,
+    currentAnalysisContextEpoch,
+  );
+  const groundedTeacherDraftForCurrentContext: GroundedTeacherDraft = currentGroundedTeacherDraft
+    ?? (groundedTeacherDraft.kind === 'blocked'
+      ? groundedTeacherDraft
+      : createBlockedGroundedTeacherDraft('analysis_stale', groundedTeacherDraft.target));
+  useEffect(() => {
+    if (groundedTeacherDraft.kind === 'ready') return;
+    setBoundGroundedTeacherAssessment(null);
+    setBoundNicoleProDraft(null);
+  }, [groundedTeacherDraft.kind]);
 
   // Dynamic MediaPipe Landmarks
   const [detectedLandmarks, setDetectedLandmarks] = useState<PoseLandmark[] | null>(null);
@@ -317,6 +343,25 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     boundTeacherPhaseAssessment,
     currentAnalysisContextEpoch,
   );
+  const nicoleProCaptureQuality: NicoleProCaptureQuality | null = teacherPhaseAnalysis?.gate.status === 'ready'
+    ? 'ready'
+    : teacherPhaseAnalysis?.gate.status === 'usable_with_caution'
+      ? 'usable_with_caution'
+      : null;
+  const currentNicoleProDraft = currentNicoleProDraftForGrounded({
+    groundedAssessment: boundGroundedTeacherAssessment,
+    proAssessment: boundNicoleProDraft,
+    currentContext: currentAnalysisContextEpoch,
+    selectedTarget: selectedSkeletonTarget,
+    captureQuality: nicoleProCaptureQuality,
+    landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+  });
+  const groundedDraftTakeoverAvailable = groundedDraftMatchesCurrentSelection({
+    grounded: currentGroundedTeacherDraft,
+    currentContext: currentAnalysisContextEpoch,
+    selectedTarget: selectedSkeletonTarget,
+    captureQuality: nicoleProCaptureQuality,
+  });
   const assessmentCapabilities = assessmentCapabilitiesForCurrentContext(
     boundTeacherPhaseAssessment,
     currentAnalysisContextEpoch,
@@ -368,6 +413,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       currentAnalysisContextEpochRef.current = nextEpoch;
       setAnalysisContextGeneration(nextGeneration);
       setAssessmentRequest(null);
+      setBoundGroundedTeacherAssessment(null);
+      setBoundNicoleProDraft(null);
+      clearSkeletonSelection('analysis_stale');
       clearTeacherPhaseAssessment();
       return;
     }
@@ -376,6 +424,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   }, [
     analysisContextIdentity,
     analysisContextIdentityFingerprint,
+    clearSkeletonSelection,
     clearTeacherPhaseAssessment,
     currentAnalysisContextEpoch,
     teacherPhaseAnalysis,
@@ -685,6 +734,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     );
 
     setIsPreIndexing(true);
+    setBoundGroundedTeacherAssessment(null);
+    setBoundNicoleProDraft(null);
+    clearSkeletonSelection('analysis_stale');
     clearTeacherPhaseAssessment();
     setLoadedFromCache(false);
     setIndexingProgress(0);
@@ -882,6 +934,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       activeCueGlowTypeRef.current = undefined;
       groundedDraftPendingRef.current = false;
       groundedSnapPendingRef.current = false;
+      groundedDraftRequestContextRef.current = null;
       groundedDraftTargetRef.current = null;
       skeletonTargetRebindRef.current = null;
       updateSelectedSkeletonTarget(null);
@@ -950,6 +1003,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       // No action needed – the seeking handler already cleared everything
       console.debug('[VideoAnalyzer] seeked – pump generation:', framePump.generation);
       if (groundedSnapPendingRef.current) {
+        if (!sameAnalysisContextEpoch(
+          groundedDraftRequestContextRef.current,
+          currentAnalysisContextEpochRef.current,
+        )) {
+          clearSkeletonSelection('analysis_stale');
+          return;
+        }
         groundedSnapPendingRef.current = false;
         const pendingTarget = skeletonTargetRebindRef.current
           ? getSkeletonTarget(skeletonTargetRebindRef.current.targetId)
@@ -1369,6 +1429,42 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                     runtime: runtimeContext,
                   });
                   groundedDraftPendingRef.current = false;
+                  const assessmentContext = groundedDraftRequestContextRef.current;
+                  const groundedAssessment = refreshedDraft.kind === 'ready'
+                    ? bindAssessmentIfCurrent(assessmentContext, currentAnalysisContextEpochRef.current, refreshedDraft)
+                    : null;
+                  const captureView = c.motionCls.detectedPerspective === 'FRONTAL'
+                    ? 'frontal'
+                    : c.motionCls.detectedPerspective === 'PROFILE_LEFT'
+                      ? 'profile_left'
+                      : 'profile_right';
+                  const phaseGate = teacherPhaseAnalysisRef.current?.gate.status;
+                  const captureQuality: NicoleProCaptureQuality | null = phaseGate === 'ready'
+                    ? 'ready'
+                    : phaseGate === 'usable_with_caution'
+                      ? 'usable_with_caution'
+                      : null;
+                  const proDraft = groundedAssessment
+                    && assessmentContext
+                    && captureQuality
+                    ? planNicoleProGroundedDraft({
+                      groundedAssessment,
+                      currentContext: assessmentContext,
+                      analysisArtifactId: createNicoleProExactFrameArtifactId(
+                        assessmentContext, c.packetMediaTimeUs, NICOLE_PRO_LANDMARK_MODEL_V1,
+                      ),
+                      view: captureView,
+                      landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
+                      captureQuality,
+                      draftId: `nicole-pro:${assessmentContext.generation}:${c.packetMediaTimeUs}:${refreshedDraft.kind === 'ready' ? refreshedDraft.evidence.metricId : 'blocked'}`,
+                      generatedAt: new Date().toISOString(),
+                    })
+                    : null;
+                  groundedDraftRequestContextRef.current = null;
+                  setBoundGroundedTeacherAssessment(groundedAssessment);
+                  setBoundNicoleProDraft(proDraft && assessmentContext
+                    ? bindAssessmentIfCurrent(assessmentContext, currentAnalysisContextEpochRef.current, proDraft)
+                    : null);
                   updateGroundedTeacherDraft(refreshedDraft);
                 }
 
@@ -1929,6 +2025,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         updateSelectedSkeletonTarget(pendingSelection);
 
         if (!nearestExactFrame || !currentVideo) {
+          groundedDraftRequestContextRef.current = null;
           skeletonTargetRebindRef.current = null;
           groundedDraftPendingRef.current = false;
           groundedSnapPendingRef.current = false;
@@ -1939,6 +2036,9 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
             hit.target.focusId,
           ));
         } else {
+          groundedDraftRequestContextRef.current = hit.target.metricAdapter
+            ? currentAnalysisContextEpochRef.current
+            : null;
           skeletonTargetRebindRef.current = Object.freeze({
             targetId: hit.target.id,
             segmentT: hit.segmentT,
@@ -2413,12 +2513,27 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   };
 
   const handleTakeOverGroundedDraft = () => {
-    if (groundedTeacherDraft.kind !== 'ready' || !selectedSkeletonTarget) return false;
+    const currentGroundedDraft = assessmentValueForCurrentContext(
+      boundGroundedTeacherAssessment,
+      currentAnalysisContextEpochRef.current,
+    );
+    const gateStatus = teacherPhaseAnalysisRef.current?.gate.status;
+    const captureQuality: NicoleProCaptureQuality | null = gateStatus === 'ready'
+      ? 'ready'
+      : gateStatus === 'usable_with_caution'
+        ? 'usable_with_caution'
+        : null;
+    if (!currentGroundedDraft || !selectedSkeletonTarget || !groundedDraftMatchesCurrentSelection({
+      grounded: currentGroundedDraft,
+      currentContext: currentAnalysisContextEpochRef.current,
+      selectedTarget: selectedSkeletonTarget,
+      captureQuality,
+    })) return false;
     let updated: VaganovaCuePoint[];
     try {
       updated = vaganovaPreAnalyzer.addGroundedTeacherDraft(
         selectedDevVideoUrl,
-        groundedTeacherDraft,
+        currentGroundedDraft,
         selectedSkeletonTarget,
         motionClass.detectedPoseName,
       );
@@ -2427,7 +2542,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       return false;
     }
     setCuePoints(updated);
-    const created = updated.find(cue => cue.reviewAudit?.origin.anchor.mediaTimeUs === groundedTeacherDraft.evidence.mediaTimeUs
+    const created = updated.find(cue => cue.reviewAudit?.origin.anchor.mediaTimeUs === currentGroundedDraft.evidence.mediaTimeUs
       && cue.reviewAudit.origin.anchor.targetId === selectedSkeletonTarget.targetId);
     if (created) {
       setExpandedCueIds(previous => new Set(previous).add(created.id));
@@ -3961,8 +4076,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   landmarkIndex={target.representativeLandmarkIndex}
                   selectedTarget={target}
                   selectedTargetIdentity={selectedSkeletonTarget}
-                  groundedTeacherDraft={groundedTeacherDraft}
-                  onAddToCueManager={groundedTeacherDraft.kind === 'ready'
+                  groundedTeacherDraft={groundedTeacherDraftForCurrentContext}
+                  nicoleProDraft={currentNicoleProDraft}
+                  nicoleProCaptureQuality={nicoleProCaptureQuality}
+                  currentAnalysisContext={currentAnalysisContextEpoch}
+                  onAddToCueManager={groundedDraftTakeoverAvailable && !currentNicoleProDraft
                     ? handleTakeOverGroundedDraft
                     : undefined}
                   onSaveNicoleReference={target.kind === 'bone'

@@ -1,5 +1,10 @@
-import type { AnalysisContextEpochV1 } from './analysisContextGuard';
 import {
+  assessmentValueForCurrentContext,
+  type AnalysisContextEpochV1,
+  type BoundAssessmentV1,
+} from './analysisContextGuard';
+import {
+  createNicoleProValidationAuthority,
   nicoleProStatementMatchesEvidence,
   nicoleProStatementSemanticKey,
   projectNicoleProStatementText,
@@ -8,6 +13,11 @@ import {
   NICOLE_PRO_VALIDATOR_VERSION,
   validateNicoleProDraft,
 } from './nicoleProContentValidator';
+import { projectGroundedTeacherEvidence } from './nicoleProGroundedEvidence';
+import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
+import type { NicoleProCaptureView } from '../types/nicoleProContent';
+import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
+import { heuristicBaseState, heuristicEvidenceStrength } from '../types/teacherHeuristic';
 import type {
   NicoleProClaimType,
   NicoleProClaimV1,
@@ -93,6 +103,211 @@ export interface NicoleProPlannerInput {
   evidenceId: string;
   authority: NicoleProTrustedValidationAuthorityV1;
   currentContext: AnalysisContextEpochV1;
+}
+
+export interface NicoleProGroundedPlannerInput {
+  groundedAssessment: BoundAssessmentV1<ReadyGroundedTeacherDraft>;
+  currentContext: AnalysisContextEpochV1;
+  analysisArtifactId: string;
+  view: NicoleProCaptureView;
+  landmarkModel: Readonly<{ modelId: string; modelVersion: string }>;
+  captureQuality: 'ready' | 'usable_with_caution';
+  draftId: string;
+  generatedAt: string;
+}
+
+export type NicoleProCaptureQuality = 'ready' | 'usable_with_caution';
+export type NicoleProLandmarkModel = Readonly<{ modelId: string; modelVersion: string }>;
+
+export const NICOLE_PRO_LANDMARK_MODEL_V1: NicoleProLandmarkModel = Object.freeze({
+  modelId: 'mediapipe-pose',
+  modelVersion: '0.5.1675469404:model-complexity-1',
+});
+
+export function createNicoleProExactFrameArtifactId(
+  context: AnalysisContextEpochV1,
+  mediaTimeUs: number,
+  landmarkModel: NicoleProLandmarkModel,
+): string {
+  return `exact-frame:${context.fingerprint}:${context.generation}:${mediaTimeUs}:${landmarkModel.modelId}@${landmarkModel.modelVersion}`;
+}
+
+const TARGET_IDS_BY_GROUNDED_METRIC = Object.freeze({
+  spine_tilt_aplomb: [
+    'bone.neck_sternum', 'bone.sternum_navel', 'bone.navel_pelvis', 'bone.torso_side_l', 'bone.torso_side_r',
+  ] as const,
+  shoulder_horizontal: ['bone.shoulder_line'] as const,
+  projected_hip_line_obliquity: ['bone.pelvis_line'] as const,
+}) satisfies Readonly<Record<ReadyGroundedTeacherDraft['evidence']['metricId'], readonly SelectedSkeletonTarget['targetId'][]>>;
+
+export function groundedDraftMatchesCurrentSelection(input: Readonly<{
+  grounded: ReadyGroundedTeacherDraft | null;
+  currentContext: AnalysisContextEpochV1 | null;
+  selectedTarget: SelectedSkeletonTarget | null;
+  captureQuality: NicoleProCaptureQuality | null;
+}>): boolean {
+  try {
+    const grounded = input.grounded;
+    const selected = input.selectedTarget;
+    return Boolean(grounded && input.currentContext && selected && input.captureQuality
+      && selected.frameStatus === 'exact_cache_frame'
+      && (TARGET_IDS_BY_GROUNDED_METRIC[grounded.evidence.metricId] as readonly SelectedSkeletonTarget['targetId'][])
+        .includes(selected.targetId)
+      && input.currentContext.context.sourceId === grounded.evidence.sourceId
+      && selected.sourceId === grounded.evidence.sourceId
+      && selected.streamEpoch === grounded.evidence.streamEpoch
+      && selected.generation === grounded.evidence.generation
+      && selected.mediaTimeUs === grounded.evidence.mediaTimeUs
+      && grounded.reviewState === 'pending_nicole'
+      && grounded.learnerVisible === false
+      && grounded.parentVisible === false);
+  } catch {
+    return false;
+  }
+}
+
+function expectedTeacherSignal(
+  state: ReadyGroundedTeacherDraft['evidence']['heuristicState'],
+): NicoleProEvidencePacketV1['teacherSignal'] | null {
+  const base = heuristicBaseState(state);
+  if (!base) return null;
+  const strength = heuristicEvidenceStrength(state);
+  return Object.freeze({
+    state: base === 'heuristic_strong_attention'
+      ? 'strong_attention'
+      : base === 'heuristic_attention'
+        ? 'attention'
+        : 'match',
+    certainty: strength === 'weak'
+      ? 'weak_evidence'
+      : strength === 'uncertain'
+        ? 'uncertain'
+        : 'supported',
+  });
+}
+
+/**
+ * One capability contract for display, clipboard and later persistence.
+ * It binds the selected exact skeleton frame, the Grounded observation and the
+ * Nicole-Pro plan to the same current context and explicit recording gate.
+ */
+export function nicoleProDraftMatchesGroundedSelection(input: Readonly<{
+  grounded: ReadyGroundedTeacherDraft | null;
+  pro: NicoleProDraftV1 | null;
+  currentContext: AnalysisContextEpochV1 | null;
+  selectedTarget: SelectedSkeletonTarget | null;
+  captureQuality: NicoleProCaptureQuality | null;
+  landmarkModel: NicoleProLandmarkModel | null;
+}>): boolean {
+  try {
+    const grounded = input.grounded;
+    const pro = input.pro;
+    const selected = input.selectedTarget;
+    const evidence = pro?.evidence.length === 1 ? pro.evidence[0] : null;
+    const expectedSignal = grounded ? expectedTeacherSignal(grounded.evidence.heuristicState) : null;
+    if (!groundedDraftMatchesCurrentSelection({
+      grounded,
+      currentContext: input.currentContext,
+      selectedTarget: selected,
+      captureQuality: input.captureQuality,
+    })
+      || !grounded || !pro || !evidence || !expectedSignal || !input.currentContext
+      || !selected || !input.captureQuality || !input.landmarkModel
+      || pro.reviewState !== 'pending_nicole' || pro.learnerVisible || pro.parentVisible
+      || evidence.analysisContextFingerprint !== input.currentContext.fingerprint
+      || evidence.analysisContextGeneration !== input.currentContext.generation
+      || evidence.exerciseId !== input.currentContext.context.exerciseId
+      || evidence.sourceId !== grounded.evidence.sourceId
+      || evidence.sourceId !== selected.sourceId
+      || evidence.mediaTimeUs !== grounded.evidence.mediaTimeUs
+      || evidence.mediaTimeUs !== selected.mediaTimeUs
+      || selected.streamEpoch !== grounded.evidence.streamEpoch
+      || selected.generation !== grounded.evidence.generation
+      || evidence.evidenceId !== `grounded:${grounded.evidence.metricId}:${grounded.evidence.streamEpoch}:${grounded.evidence.generation}:${grounded.evidence.mediaTimeUs}`
+      || evidence.analysisArtifactId !== createNicoleProExactFrameArtifactId(
+        input.currentContext, grounded.evidence.mediaTimeUs, input.landmarkModel,
+      )
+      || evidence.metricId !== grounded.evidence.metricId
+      || evidence.value !== grounded.evidence.valueDeg
+      || evidence.metricInputConfidence !== grounded.evidence.confidence
+      || evidence.landmarkQuality.score !== grounded.evidence.landmarkVisibility
+      || evidence.videoWidth !== grounded.evidence.videoWidth
+      || evidence.videoHeight !== grounded.evidence.videoHeight
+      || evidence.policyVersion !== grounded.evidence.policyVersion
+      || evidence.captureQuality !== input.captureQuality
+      || evidence.landmarkQuality.modelId !== input.landmarkModel.modelId
+      || evidence.landmarkQuality.modelVersion !== input.landmarkModel.modelVersion
+      || evidence.evidenceSource !== 'exact_frame_cache'
+      || evidence.frameAuthority !== 'exact_cache_frame'
+      || evidence.teacherSignal.state !== expectedSignal.state
+      || evidence.teacherSignal.certainty !== expectedSignal.certainty) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function currentNicoleProDraftForGrounded(input: Readonly<{
+  groundedAssessment: BoundAssessmentV1<ReadyGroundedTeacherDraft> | null;
+  proAssessment: BoundAssessmentV1<NicoleProDraftV1> | null;
+  currentContext: AnalysisContextEpochV1 | null;
+  selectedTarget: SelectedSkeletonTarget | null;
+  captureQuality: NicoleProCaptureQuality | null;
+  landmarkModel: NicoleProLandmarkModel | null;
+}>): NicoleProDraftV1 | null {
+  try {
+    const grounded = assessmentValueForCurrentContext(input.groundedAssessment, input.currentContext);
+    const pro = assessmentValueForCurrentContext(input.proAssessment, input.currentContext);
+    return nicoleProDraftMatchesGroundedSelection({
+      grounded,
+      pro,
+      currentContext: input.currentContext,
+      selectedTarget: input.selectedTarget,
+      captureQuality: input.captureQuality,
+      landmarkModel: input.landmarkModel,
+    }) ? pro : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Complete fail-closed Grounded → Evidence → Authority → Pro planning path. */
+export function planNicoleProGroundedDraft(input: NicoleProGroundedPlannerInput): NicoleProDraftV1 | null {
+  try {
+    const evidence = projectGroundedTeacherEvidence({
+      groundedAssessment: input.groundedAssessment,
+      analysisArtifactId: input.analysisArtifactId,
+      context: input.currentContext,
+      view: input.view,
+      landmarkModel: input.landmarkModel,
+      captureQuality: input.captureQuality,
+    });
+    if (!evidence) return null;
+    const authority = createNicoleProValidationAuthority({
+      currentContext: input.currentContext,
+      assessment: {
+        schemaVersion: 1,
+        contextFingerprint: input.currentContext.fingerprint,
+        contextGeneration: input.currentContext.generation,
+        value: {
+          analysisArtifactId: evidence.analysisArtifactId,
+          sourceId: evidence.sourceId,
+          exerciseId: evidence.exerciseId,
+          policyVersion: evidence.policyVersion,
+          evidence: [evidence],
+        },
+      },
+    });
+    return authority ? planNicoleProDraft({
+      draftId: input.draftId,
+      generatedAt: input.generatedAt,
+      evidenceId: evidence.evidenceId,
+      authority,
+      currentContext: input.currentContext,
+    }) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Produces only content already represented by trusted rule statements. */
