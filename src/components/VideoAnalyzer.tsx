@@ -43,7 +43,12 @@ import {
   type NicoleProCaptureQuality,
 } from '../services/nicoleProContentPlanner';
 import type { NicoleProDraftV1 } from '../types/nicoleProContent';
-import type { NicoleAnatomyProBundleV1 } from '../types/nicoleProAnatomy';
+import type {
+  NicoleAnatomyEpistemicKind,
+  NicoleAnatomyProBundleV1,
+  NicoleAnatomyReviewState,
+  NicoleAnatomyScientificValidation,
+} from '../types/nicoleProAnatomy';
 import {
   nicoleAnatomyBundleMatchesNicoleProDraft,
   planNicoleAnatomyForNicoleProDraft,
@@ -111,6 +116,29 @@ import {
 const SynchronizedMotionAvatarViewport = lazy(async () => {
   const module = await import('./SynchronizedTenduAvatarViewport');
   return { default: module.SynchronizedMotionAvatarViewport };
+});
+
+const ANATOMY_EPISTEMIC_LABELS: Readonly<Record<NicoleAnatomyEpistemicKind, string>> = Object.freeze({
+  measurement: 'Messung',
+  visible_observation: 'Sichtbefund',
+  general_knowledge: 'Fachwissen',
+  working_hypothesis: 'Arbeitshypothese',
+  counter_hypothesis: 'Gegenhypothese',
+  differentiation_step: 'Prüfschritt',
+  safety_notice: 'Sicherheitshinweis',
+});
+
+const ANATOMY_REVIEW_LABELS: Readonly<Record<NicoleAnatomyReviewState, string>> = Object.freeze({
+  ai_draft: 'KI-Entwurf',
+  nicole_accepted: 'Von Nicole übernommen',
+  nicole_revised: 'Von Nicole revidiert',
+  rejected: 'Verworfen',
+});
+
+const ANATOMY_SCIENCE_LABELS: Readonly<Record<NicoleAnatomyScientificValidation, string>> = Object.freeze({
+  curated_internal: 'intern kuratiert',
+  source_supported: 'quellengestütztes Fachwissen',
+  externally_validated_for_stated_scope: 'extern validiert · definierter Scope',
 });
 
 interface VideoAnalyzerProps {
@@ -5037,6 +5065,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               const nicoleProClaimReviews = cue.reviewAudit && nicoleProOrigin
                 ? projectNicoleProClaimReviews(cue.reviewAudit)
                 : [];
+              const anatomySnapshot = nicoleProOrigin?.anatomyBundle ?? null;
+              const nicoleProClaimReviewById = new Map(
+                nicoleProClaimReviews.map(item => [item.claim.claimId, item]),
+              );
               const currentStudentDerivation = cue.reviewAudit && nicoleProOrigin
                 ? projectCurrentStudentDerivation(cue.reviewAudit)
                 : null;
@@ -5514,6 +5546,87 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                         <div style={{ fontSize: '8px', color: 'rgba(100,210,255,0.72)', lineHeight: 1.4 }}>
                           Wissensbasis {nicoleProOrigin.knowledgeRegistryId}@{nicoleProOrigin.knowledgeRegistryVersion} · {nicoleProOrigin.ruleVersions.map(rule => `${rule.ruleId}@${rule.version}`).join(' · ')}
                         </div>
+                      )}
+                      {anatomySnapshot && (
+                        <details style={{ background: 'rgba(99,102,241,0.055)', border: '1px solid rgba(129,140,248,0.2)', borderRadius: '7px', padding: '6px 7px' }}>
+                          <summary style={{ cursor: 'pointer', fontSize: '9px', color: '#a5b4fc', fontWeight: 900 }}>
+                            Anatomie & fachliche Hypothesen · interner Ursprung
+                          </summary>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '7px' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              <span style={{ borderLeft: '2px solid #5eead4', padding: '2px 5px', fontSize: '8px', fontWeight: 900, color: '#99f6e4', textTransform: 'uppercase', letterSpacing: '0.45px' }}>
+                                KI-Ursprung unverändert
+                              </span>
+                              <span style={{ borderLeft: '2px solid #818cf8', padding: '2px 5px', fontSize: '8px', fontWeight: 900, color: '#c7d2fe', textTransform: 'uppercase', letterSpacing: '0.45px' }}>
+                                Nur intern
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.45 }}>
+                              Fachwissen bleibt quellgebunden. Fallhypothesen und Prüfschritte werden über die zugehörigen Pro-Claims darunter akzeptiert, bearbeitet oder verworfen.
+                            </div>
+                            {anatomySnapshot.knowledgeItems.filter(item => (
+                              item.sourceRefs.some(source => source.evidenceKind !== 'product_policy')
+                            )).map(item => (
+                              <div key={item.itemId} style={{ borderLeft: '2px solid #818cf8', paddingLeft: '7px' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '3px' }}>
+                                  <span style={{ fontSize: '8px', color: '#c7d2fe', fontWeight: 900, textTransform: 'uppercase' }}>{ANATOMY_EPISTEMIC_LABELS[item.epistemicKind]}</span>
+                                  <span style={{ fontSize: '8px', color: '#99f6e4' }}>{ANATOMY_REVIEW_LABELS[item.reviewState]}</span>
+                                  <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.42)' }}>{ANATOMY_SCIENCE_LABELS[item.scientificValidation]}</span>
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>{item.statement}</div>
+                                <details style={{ marginTop: '4px' }}>
+                                  <summary style={{ cursor: 'pointer', fontSize: '8.5px', color: 'rgba(165,180,252,0.82)' }}>Quellen & Geltungsbereich</summary>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '4px', fontSize: '8.5px', color: 'rgba(255,255,255,0.48)', lineHeight: 1.45 }}>
+                                    {item.sourceRefs.map(source => (
+                                      <div key={source.sourceId}>
+                                        {source.locator.startsWith('https://') ? (
+                                          <a href={source.locator} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()} style={{ color: '#a5b4fc' }}>{source.title}</a>
+                                        ) : <span style={{ color: '#a5b4fc' }}>{source.title}</span>}
+                                        <span style={{ display: 'block' }}>{source.scope}</span>
+                                        <span style={{ display: 'block', color: 'rgba(255,255,255,0.35)' }}>{source.limitations}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              </div>
+                            ))}
+                            {anatomySnapshot.claimAnnotations.map(annotation => {
+                              const review = annotation.kind === 'hypothesis_annotation'
+                                || annotation.kind === 'differentiation_annotation'
+                                ? nicoleProClaimReviewById.get(annotation.sourceClaimId)
+                                : null;
+                              if (!review) return null;
+                              const reviewLabel = review.decision === 'accepted'
+                                ? 'Von Nicole übernommen'
+                                : review.decision === 'edited'
+                                  ? 'Von Nicole revidiert'
+                                  : review.decision === 'rejected'
+                                    ? 'Verworfen'
+                                    : 'Prüfung ausstehend';
+                              const accent = annotation.epistemicKind === 'differentiation_step'
+                                ? '#64d2ff'
+                                : annotation.epistemicKind === 'working_hypothesis' ? '#fbbf24' : '#d6a65c';
+                              return (
+                                <div key={annotation.statementId} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: '7px' }}>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '3px' }}>
+                                    <span style={{ fontSize: '8px', color: accent, fontWeight: 900, textTransform: 'uppercase' }}>{ANATOMY_EPISTEMIC_LABELS[annotation.epistemicKind]}</span>
+                                    <span style={{ fontSize: '8px', color: review.decision === 'rejected' ? '#ff7b72' : review.decision ? '#99f6e4' : 'rgba(255,255,255,0.42)' }}>{reviewLabel}</span>
+                                    <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.42)' }}>{ANATOMY_SCIENCE_LABELS[annotation.scientificValidation]}</span>
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: review.decision === 'rejected' ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>
+                                    {review.reviewedText ?? review.claim.text}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            <div style={{ borderTop: '1px solid rgba(129,140,248,0.16)', paddingTop: '6px', fontSize: '8.5px', color: 'rgba(255,255,255,0.44)', lineHeight: 1.45 }}>
+                              Dieser einzelne 2D-Frame bestimmt weder Muskelkraft, Muskellänge noch eine alleinige Ursache. Nicole prüft die fallbezogenen Arbeitshypothesen separat.
+                            </div>
+                            <div style={{ fontFamily: 'monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', overflowWrap: 'anywhere' }}>
+                              {anatomySnapshot.knowledgeRegistryId}@{anatomySnapshot.knowledgeRegistryVersion} · {anatomySnapshot.bundleId}
+                            </div>
+                          </div>
+                        </details>
                       )}
                       {nicoleProOrigin && (
                         <details style={{ background: 'rgba(0,0,0,0.18)', borderRadius: '7px', padding: '6px 7px' }}>
