@@ -82,6 +82,7 @@ export type CueReviewAuditEventType =
   | 'rejected'
   | 'reopened'
   | 'claim_reviewed'
+  | 'anatomy_expert_note_recorded'
   | 'student_derivation_created'
   | 'audience_granted'
   | 'audience_revoked'
@@ -96,6 +97,22 @@ export interface CueNicoleProClaimReview {
   decision: CueNicoleProClaimDecision;
   editedText?: string;
   selectedForStudentDerivation: boolean;
+}
+
+/**
+ * A local reviewer entry attached to the immutable Anatomy-Pro origin.
+ * It is deliberately non-computational and never eligible for audience output.
+ */
+export interface CueNicoleAnatomyExpertNote {
+  schemaVersion: 1;
+  noteId: string;
+  anatomyBundleId: string;
+  previousNoteEventId: string | null;
+  text: string;
+  authorship: 'local_reviewer_entry_unverified';
+  nonComputational: true;
+  internalOnly: true;
+  outwardEligibility: false;
 }
 
 /** The only pedagogical fields that may cross the teacher/audience boundary. */
@@ -135,6 +152,7 @@ export interface CueReviewAuditEvent {
   studentDerivationRef?: Readonly<{ derivationId: string; derivationDigest: string }>;
   reason?: 'superseded_by_revision' | 'teacher_action' | 'legacy_migration';
   claimReview?: CueNicoleProClaimReview;
+  anatomyExpertNote?: CueNicoleAnatomyExpertNote;
   studentDerivation?: CueStudentDerivation;
   previousEventDigest: string | null;
   digestAlgorithm: 'sha256-canonical-json-v1';

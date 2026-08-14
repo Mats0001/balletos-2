@@ -13,10 +13,12 @@ import {
   cueReviewExpectedState,
   projectCueReviewAudit,
   projectCueReviewForAudience,
+  projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
   nicoleProStudentDerivationReadiness,
   rejectCueReviewAudit,
+  recordNicoleAnatomyExpertNote,
   reopenCueReviewAudit,
   reviseCueReviewAudit,
   reviewNicoleProClaim,
@@ -233,6 +235,93 @@ describe('cue review audit', () => {
       currentContext,
       context,
     })).toThrow(/exact-frame origin/i);
+  });
+
+  it('records Nicole Anatomy expert notes append-only without changing the immutable origin', () => {
+    const { audit, context } = createNicoleProFixture();
+    const stale = cueReviewExpectedState(audit);
+    const first = recordNicoleAnatomyExpertNote(
+      audit,
+      'Piriformis und Iliopsoas bleiben mögliche Arbeitshypothesen; Kraft, Länge und Ursache sind aus dem 2D-Frame nicht bestimmt.',
+      stale,
+      context,
+    );
+    const firstProjection = projectCurrentNicoleAnatomyExpertNote(first);
+
+    expect(cueReviewAuditIsValid(first)).toBe(true);
+    expect(first.origin).toEqual(audit.origin);
+    expect(firstProjection).toMatchObject({
+      authorship: 'local_reviewer_entry_unverified',
+      actorId: 'nicole-test',
+    });
+    expect(firstProjection?.text).toContain('Piriformis und Iliopsoas');
+    expect(() => recordNicoleAnatomyExpertNote(first, 'Stale write', stale, context)).toThrow(/changed/i);
+
+    const second = recordNicoleAnatomyExpertNote(
+      first,
+      'Nicole prüft Iliopsoas und Piriformis getrennt über sichere Vergleichsaufgaben; keine alleinige Ursache wird behauptet.',
+      cueReviewExpectedState(first),
+      context,
+    );
+    const noteEvents = second.events.filter(item => item.type === 'anatomy_expert_note_recorded');
+    expect(noteEvents).toHaveLength(2);
+    expect(noteEvents[1].anatomyExpertNote?.previousNoteEventId).toBe(noteEvents[0].eventId);
+    expect(projectCurrentNicoleAnatomyExpertNote(second)?.text).toContain('sichere Vergleichsaufgaben');
+    expect(recordNicoleAnatomyExpertNote(
+      second,
+      projectCurrentNicoleAnatomyExpertNote(second)!.text,
+      cueReviewExpectedState(second),
+      context,
+    )).toBe(second);
+  });
+
+  it('keeps Anatomy expert notes internal and invalidates their projection after a content revision', () => {
+    const { derived, context } = reviewAndDeriveStudentCopy();
+    const granted = setCueReviewAudience(
+      derived, 'learner', true, cueReviewExpectedState(derived), context,
+    );
+    const before = projectCueReviewForAudience(granted, 'learner');
+    const noted = recordNicoleAnatomyExpertNote(
+      granted,
+      'Ausführliche interne Fachnotiz zu Piriformis und Iliopsoas, ohne maschinenwirksame Fallkausalität.',
+      cueReviewExpectedState(granted),
+      context,
+    );
+    const after = projectCueReviewForAudience(noted, 'learner');
+
+    expect(after).toEqual(before);
+    expect(canonicalJson(after)).not.toMatch(/Piriformis|Iliopsoas|expert/i);
+    expect(projectCueReviewAudit(noted).learnerVisible).toBe(true);
+    const revised = reviseCueReviewAudit(
+      noted,
+      { headline: 'Neue Lehrerrevision nach der internen Fachnotiz' },
+      cueReviewExpectedState(noted),
+      context,
+    );
+    expect(projectCurrentNicoleAnatomyExpertNote(revised)).toBeNull();
+    expect(projectCueReviewAudit(revised).learnerVisible).toBe(false);
+  });
+
+  it('rejects Anatomy expert notes without the exact origin and event linkage', () => {
+    const grounded = createAudit();
+    expect(() => recordNicoleAnatomyExpertNote(
+      grounded.audit, 'Not allowed', cueReviewExpectedState(grounded.audit), grounded.context,
+    )).toThrow(/Anatomy-Pro origin/i);
+
+    const { audit, context } = createNicoleProFixture();
+    const first = recordNicoleAnatomyExpertNote(
+      audit, 'Interne Notiz', cueReviewExpectedState(audit), context,
+    );
+    for (const mutate of [
+      (stored: any) => { stored.events[stored.events.length - 1].anatomyExpertNote.previousNoteEventId = 'forged-event'; },
+      (stored: any) => { stored.events[stored.events.length - 1].anatomyExpertNote.anatomyBundleId = 'forged-bundle'; },
+      (stored: any) => { stored.events[stored.events.length - 1].anatomyExpertNote.clinicalDiagnosis = 'forged'; },
+    ]) {
+      const stored = JSON.parse(JSON.stringify(first));
+      mutate(stored);
+      redigestStoredEvents(stored);
+      expect(cueReviewAuditIsValid(stored)).toBe(false);
+    }
   });
 
   it('publishes only the narrow approved current revision and revokes it after an edit', () => {

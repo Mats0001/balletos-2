@@ -28,6 +28,7 @@ import type {
   CueReviewEditablePatch,
   CueReviewExpectedState,
   CueReviewProjection,
+  CueNicoleAnatomyExpertNote,
   CueNicoleProClaimDecision,
   CueNicoleProClaimReview,
   CueStudentDerivation,
@@ -159,7 +160,7 @@ function event(
   revisionId: string,
   revisionDigest: string,
   context: CueReviewCommandContext,
-  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason' | 'claimReview' | 'studentDerivation' | 'studentDerivationRef'> = {},
+  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason' | 'claimReview' | 'anatomyExpertNote' | 'studentDerivation' | 'studentDerivationRef'> = {},
   previousEvents: readonly CueReviewAuditEvent[] = [],
 ): CueReviewAuditEvent {
   const previousEventDigest = previousEvents.length > 0
@@ -619,6 +620,49 @@ export function projectNicoleProClaimReviews(audit: CueReviewAudit): readonly Ni
   }));
 }
 
+export interface NicoleAnatomyExpertNoteProjection {
+  noteId: string;
+  text: string;
+  eventId: string;
+  actorId: string;
+  recordedAt: string;
+  authorship: CueNicoleAnatomyExpertNote['authorship'];
+}
+
+function anatomyExpertNoteId(audit: CueReviewAudit): string {
+  return `anatomy-note:${audit.origin.originId}`;
+}
+
+function latestAnatomyExpertNoteEvent(
+  audit: CueReviewAudit,
+  revisionId: string,
+): CueReviewAuditEvent | null {
+  let latest: CueReviewAuditEvent | null = null;
+  for (const auditEvent of audit.events) {
+    if (auditEvent.revisionId === revisionId
+      && auditEvent.type === 'anatomy_expert_note_recorded'
+      && auditEvent.anatomyExpertNote) latest = auditEvent;
+  }
+  return latest;
+}
+
+export function projectCurrentNicoleAnatomyExpertNote(
+  audit: CueReviewAudit,
+): NicoleAnatomyExpertNoteProjection | null {
+  if (!cueReviewAuditIsValid(audit) || audit.origin.kind !== 'nicole_pro_draft'
+    || !audit.origin.nicoleProPayload?.anatomyBundle) return null;
+  const latest = latestAnatomyExpertNoteEvent(audit, audit.currentRevisionId);
+  if (!latest?.anatomyExpertNote) return null;
+  return cloneFreeze({
+    noteId: latest.anatomyExpertNote.noteId,
+    text: latest.anatomyExpertNote.text,
+    eventId: latest.eventId,
+    actorId: latest.actorId,
+    recordedAt: latest.at,
+    authorship: latest.anatomyExpertNote.authorship,
+  });
+}
+
 export function projectCurrentStudentDerivation(audit: CueReviewAudit): CueStudentDerivation | null {
   if (!cueReviewAuditIsValid(audit)) return null;
   return latestStudentDerivation(audit, audit.currentRevisionId);
@@ -925,6 +969,50 @@ export function reviewNicoleProClaim(
   return cloneFreeze({ ...audit, events: nextEvents });
 }
 
+export function recordNicoleAnatomyExpertNote(
+  audit: CueReviewAudit,
+  text: string,
+  expected: CueReviewExpectedState,
+  context: CueReviewCommandContext = defaultCueReviewContext(),
+): CueReviewAudit {
+  assertExpectedState(audit, expected);
+  if (audit.events.some(item => item.type === 'archived')) {
+    throw new Error('Archived reviews cannot be changed.');
+  }
+  if (projectCueReviewAudit(audit).provenance === 'nicole_rejected') {
+    throw new Error('Reopen the rejected Nicole revision before recording an expert note.');
+  }
+  const anatomyBundle = audit.origin.nicoleProPayload?.anatomyBundle;
+  if (audit.origin.kind !== 'nicole_pro_draft' || !anatomyBundle) {
+    throw new Error('Anatomy expert notes require an immutable Anatomy-Pro origin.');
+  }
+  const normalizedText = text.trim();
+  if (!normalizedText || normalizedText.length > 4_000) {
+    throw new Error('An Anatomy expert note requires 1 to 4000 characters.');
+  }
+  const revision = currentRevision(audit);
+  const previous = latestAnatomyExpertNoteEvent(audit, revision.revisionId);
+  if (previous?.anatomyExpertNote?.text === normalizedText) return audit;
+  const note = cloneFreeze({
+    schemaVersion: 1 as const,
+    noteId: anatomyExpertNoteId(audit),
+    anatomyBundleId: anatomyBundle.bundleId,
+    previousNoteEventId: previous?.eventId ?? null,
+    text: normalizedText,
+    authorship: 'local_reviewer_entry_unverified' as const,
+    nonComputational: true as const,
+    internalOnly: true as const,
+    outwardEligibility: false as const,
+  });
+  return cloneFreeze({
+    ...audit,
+    events: [...audit.events, event(
+      'anatomy_expert_note_recorded', audit, revision.revisionId, revision.revisionDigest,
+      context, { anatomyExpertNote: note }, audit.events,
+    )],
+  });
+}
+
 export function createNicoleProStudentDerivation(
   audit: CueReviewAudit,
   selectedClaimReviewEventIds: readonly string[],
@@ -1146,15 +1234,17 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   const revisionIds = new Set(candidate.revisions.map(revision => revision.revisionId));
   const eventTypes = new Set([
     'revision_created', 'approved', 'rejected', 'reopened', 'claim_reviewed',
-    'student_derivation_created', 'audience_granted',
+    'anatomy_expert_note_recorded', 'student_derivation_created', 'audience_granted',
     'audience_revoked', 'archived', 'legacy_import',
   ]);
   const structurallyValid = candidate.events.every((auditEvent, index) => {
     const { eventDigest: _eventDigest, digestAlgorithm: _digestAlgorithm, ...eventCore } = auditEvent;
     const audienceEvent = auditEvent.type === 'audience_granted' || auditEvent.type === 'audience_revoked';
     const claimReviewEvent = auditEvent.type === 'claim_reviewed';
+    const anatomyNoteEvent = auditEvent.type === 'anatomy_expert_note_recorded';
     const studentDerivationEvent = auditEvent.type === 'student_derivation_created';
     const claimReview = auditEvent.claimReview;
+    const anatomyExpertNote = auditEvent.anatomyExpertNote;
     const studentDerivation = auditEvent.studentDerivation;
     const claimReviewValid = !claimReviewEvent ? claimReview === undefined : (
       candidate.origin.kind === 'nicole_pro_draft'
@@ -1172,6 +1262,27 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
         ? typeof claimReview.editedText === 'string' && claimReview.editedText.trim() === claimReview.editedText
           && claimReview.editedText.length > 0 && claimReview.editedText.length <= 1_400
         : claimReview.editedText === undefined)
+    );
+    const anatomyNoteValid = !anatomyNoteEvent ? anatomyExpertNote === undefined : (
+      candidate.origin.kind === 'nicole_pro_draft'
+      && candidate.origin.nicoleProPayload?.anatomyBundle !== undefined
+      && anatomyExpertNote !== undefined
+      && Object.keys(anatomyExpertNote).every(key => [
+        'schemaVersion', 'noteId', 'anatomyBundleId', 'previousNoteEventId', 'text',
+        'authorship', 'nonComputational', 'internalOnly', 'outwardEligibility',
+      ].includes(key))
+      && anatomyExpertNote.schemaVersion === 1
+      && anatomyExpertNote.noteId === anatomyExpertNoteId(candidate)
+      && anatomyExpertNote.anatomyBundleId === candidate.origin.nicoleProPayload.anatomyBundle.bundleId
+      && (anatomyExpertNote.previousNoteEventId === null || typeof anatomyExpertNote.previousNoteEventId === 'string')
+      && typeof anatomyExpertNote.text === 'string'
+      && anatomyExpertNote.text.trim() === anatomyExpertNote.text
+      && anatomyExpertNote.text.length > 0
+      && anatomyExpertNote.text.length <= 4_000
+      && anatomyExpertNote.authorship === 'local_reviewer_entry_unverified'
+      && anatomyExpertNote.nonComputational === true
+      && anatomyExpertNote.internalOnly === true
+      && anatomyExpertNote.outwardEligibility === false
     );
     const studentContentValid = studentDerivation?.content
       && typeof studentDerivation.content.poseName === 'string'
@@ -1211,8 +1322,9 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
       ? ['audience', 'reason', ...(auditEvent.type === 'audience_granted' && candidate.origin.kind === 'nicole_pro_draft'
         ? ['studentDerivationRef'] : [])]
       : claimReviewEvent ? ['claimReview']
-        : studentDerivationEvent ? ['studentDerivation']
-          : auditEvent.type === 'legacy_import' ? ['reason'] : [];
+        : anatomyNoteEvent ? ['anatomyExpertNote']
+          : studentDerivationEvent ? ['studentDerivation']
+            : auditEvent.type === 'legacy_import' ? ['reason'] : [];
     const exactEventShape = Object.keys(auditEvent).every(key => [...baseEventKeys, ...allowedExtraKeys].includes(key));
     const canonicalIso = (value: string) => {
       try { return new Date(value).toISOString() === value; } catch { return false; }
@@ -1234,6 +1346,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
           && typeof auditEvent.studentDerivationRef.derivationDigest === 'string')
         : auditEvent.studentDerivationRef === undefined)
       && claimReviewValid
+      && anatomyNoteValid
       && studentDerivationValid
       && (!studentDerivationEvent || (
         studentDerivation!.actorId === auditEvent.actorId
@@ -1264,6 +1377,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   const created = new Set<string>();
   const state = new Map<string, 'pending' | 'approved' | 'rejected'>();
   const latestClaimReview = new Map<string, number>();
+  const latestAnatomyNoteEventId = new Map<string, string>();
   const latestStudentDerivationSequence = new Map<string, number>();
   const latestStudentDerivationValue = new Map<string, CueStudentDerivation>();
   let archived = false;
@@ -1289,6 +1403,10 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     } else if (auditEvent.type === 'claim_reviewed') {
       if (auditEvent.revisionId !== activeRevisionId || current === 'rejected') return false;
       latestClaimReview.set(auditEvent.revisionId, auditEvent.eventSequence);
+    } else if (auditEvent.type === 'anatomy_expert_note_recorded') {
+      if (auditEvent.revisionId !== activeRevisionId || current === 'rejected'
+        || auditEvent.anatomyExpertNote?.previousNoteEventId !== (latestAnatomyNoteEventId.get(auditEvent.revisionId) ?? null)) return false;
+      latestAnatomyNoteEventId.set(auditEvent.revisionId, auditEvent.eventId);
     } else if (auditEvent.type === 'student_derivation_created') {
       if (auditEvent.revisionId !== activeRevisionId || current !== 'approved') return false;
       latestStudentDerivationSequence.set(auditEvent.revisionId, auditEvent.eventSequence);
