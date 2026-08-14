@@ -668,6 +668,7 @@ export interface NicoleAnatomyDifferentiationResultProjection {
   resultId: string;
   differentiationStatementId: string;
   sourceClaimId: string;
+  sourceClaimReviewEventId: string | null;
   result: CueNicoleAnatomyDifferentiationResult['result'];
   note: string | null;
   recordedByRole: CueNicoleAnatomyDifferentiationResult['recordedByRole'];
@@ -702,12 +703,18 @@ export function projectCurrentNicoleAnatomyDifferentiationResults(
   if (!cueReviewAuditIsValid(audit) || audit.origin.kind !== 'nicole_pro_draft'
     || !audit.origin.nicoleProPayload?.anatomyBundle) return Object.freeze([]);
   const latest = latestAnatomyTestResultEvents(audit, audit.currentRevisionId);
-  return cloneFreeze([...latest.values()].map(auditEvent => {
+  const currentClaimReviews = latestClaimReviewEvents(audit, audit.currentRevisionId);
+  return cloneFreeze([...latest.values()].flatMap(auditEvent => {
     const result = auditEvent.anatomyTestResult!;
-    return {
+    const currentClaimReview = currentClaimReviews.get(result.sourceClaimId) ?? null;
+    if (result.sourceClaimReviewEventId !== (currentClaimReview?.eventId ?? null)
+      || result.sourceClaimReviewEventDigest !== (currentClaimReview?.eventDigest ?? null)
+      || currentClaimReview?.claimReview?.decision === 'rejected') return [];
+    return [{
       resultId: result.resultId,
       differentiationStatementId: result.differentiationStatementId,
       sourceClaimId: result.sourceClaimId,
+      sourceClaimReviewEventId: result.sourceClaimReviewEventId,
       result: result.result,
       note: result.note,
       recordedByRole: result.recordedByRole,
@@ -715,7 +722,7 @@ export function projectCurrentNicoleAnatomyDifferentiationResults(
       eventId: auditEvent.eventId,
       actorId: auditEvent.actorId,
       recordedAt: auditEvent.at,
-    };
+    }];
   }));
 }
 
@@ -1108,16 +1115,24 @@ export function recordNicoleAnatomyDifferentiationResult(
     throw new Error('A differentiation-result note may contain at most 1200 characters.');
   }
   const revision = currentRevision(audit);
+  const sourceClaimReview = latestClaimReviewEvents(audit, revision.revisionId).get(differentiation.sourceClaimId) ?? null;
+  if (sourceClaimReview?.claimReview?.decision === 'rejected') {
+    throw new Error('A rejected differentiation step cannot receive a result.');
+  }
   const previous = latestAnatomyTestResultEvents(audit, revision.revisionId).get(differentiationStatementId);
   if (previous?.anatomyTestResult?.result === result
     && previous.anatomyTestResult.note === normalizedNote
-    && previous.anatomyTestResult.recordedByRole === recordedByRole) return audit;
+    && previous.anatomyTestResult.recordedByRole === recordedByRole
+    && previous.anatomyTestResult.sourceClaimReviewEventId === (sourceClaimReview?.eventId ?? null)
+    && previous.anatomyTestResult.sourceClaimReviewEventDigest === (sourceClaimReview?.eventDigest ?? null)) return audit;
   const testResult = cloneFreeze({
     schemaVersion: 1 as const,
     resultId: anatomyTestResultId(audit, differentiationStatementId),
     anatomyBundleId: anatomyBundle.bundleId,
     differentiationStatementId,
     sourceClaimId: differentiation.sourceClaimId,
+    sourceClaimReviewEventId: sourceClaimReview?.eventId ?? null,
+    sourceClaimReviewEventDigest: sourceClaimReview?.eventDigest ?? null,
     previousResultEventId: previous?.eventId ?? null,
     result,
     note: normalizedNote,
@@ -1423,13 +1438,21 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
       && differentiation?.kind === 'differentiation_annotation'
       && Object.keys(anatomyTestResult).every(key => [
         'schemaVersion', 'resultId', 'anatomyBundleId', 'differentiationStatementId',
-        'sourceClaimId', 'previousResultEventId', 'result', 'note', 'recordedByRole',
+        'sourceClaimId', 'sourceClaimReviewEventId', 'sourceClaimReviewEventDigest',
+        'previousResultEventId', 'result', 'note', 'recordedByRole',
         'authorship', 'nonDiagnostic', 'internalOnly', 'outwardEligibility',
       ].includes(key))
       && anatomyTestResult.schemaVersion === 1
       && anatomyTestResult.resultId === anatomyTestResultId(candidate, anatomyTestResult.differentiationStatementId)
       && anatomyTestResult.anatomyBundleId === candidate.origin.nicoleProPayload.anatomyBundle.bundleId
       && anatomyTestResult.sourceClaimId === differentiation.sourceClaimId
+      && (anatomyTestResult.sourceClaimReviewEventId === null || typeof anatomyTestResult.sourceClaimReviewEventId === 'string')
+      && (anatomyTestResult.sourceClaimReviewEventDigest === null || (
+        typeof anatomyTestResult.sourceClaimReviewEventDigest === 'string'
+        && anatomyTestResult.sourceClaimReviewEventDigest.length === 64
+      ))
+      && ((anatomyTestResult.sourceClaimReviewEventId === null)
+        === (anatomyTestResult.sourceClaimReviewEventDigest === null))
       && (anatomyTestResult.previousResultEventId === null || typeof anatomyTestResult.previousResultEventId === 'string')
       && ['supports', 'weakens', 'inconclusive', 'not_performed'].includes(anatomyTestResult.result)
       && (anatomyTestResult.note === null || (
@@ -1539,6 +1562,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   const created = new Set<string>();
   const state = new Map<string, 'pending' | 'approved' | 'rejected'>();
   const latestClaimReview = new Map<string, number>();
+  const latestClaimReviewEvent = new Map<string, CueReviewAuditEvent>();
   const latestAnatomyNoteEventId = new Map<string, string>();
   const latestAnatomyTestResultEventId = new Map<string, string>();
   const latestStudentDerivationSequence = new Map<string, number>();
@@ -1566,6 +1590,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     } else if (auditEvent.type === 'claim_reviewed') {
       if (auditEvent.revisionId !== activeRevisionId || current === 'rejected') return false;
       latestClaimReview.set(auditEvent.revisionId, auditEvent.eventSequence);
+      latestClaimReviewEvent.set(`${auditEvent.revisionId}:${auditEvent.claimReview!.claimId}`, auditEvent);
     } else if (auditEvent.type === 'anatomy_expert_note_recorded') {
       if (auditEvent.revisionId !== activeRevisionId || current === 'rejected'
         || auditEvent.anatomyExpertNote?.previousNoteEventId !== (latestAnatomyNoteEventId.get(auditEvent.revisionId) ?? null)) return false;
@@ -1574,7 +1599,11 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
       const result = auditEvent.anatomyTestResult;
       if (auditEvent.revisionId !== activeRevisionId || current === 'rejected' || !result) return false;
       const key = `${auditEvent.revisionId}:${result.differentiationStatementId}`;
+      const sourceReview = latestClaimReviewEvent.get(`${auditEvent.revisionId}:${result.sourceClaimId}`) ?? null;
       if (result.previousResultEventId !== (latestAnatomyTestResultEventId.get(key) ?? null)) return false;
+      if (result.sourceClaimReviewEventId !== (sourceReview?.eventId ?? null)
+        || result.sourceClaimReviewEventDigest !== (sourceReview?.eventDigest ?? null)
+        || sourceReview?.claimReview?.decision === 'rejected') return false;
       latestAnatomyTestResultEventId.set(key, auditEvent.eventId);
     } else if (auditEvent.type === 'student_derivation_created') {
       if (auditEvent.revisionId !== activeRevisionId || current !== 'approved') return false;

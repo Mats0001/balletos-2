@@ -5687,6 +5687,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                               const canRecordTestResult = annotation.kind === 'differentiation_annotation'
                                 && annotation.allowedPerformer === 'nicole'
                                 && annotation.safetyClass !== 'clinical_only'
+                                && review.decision !== 'rejected'
                                 && auditProjection.provenance !== 'nicole_rejected';
                               return (
                                 <div key={annotation.statementId} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: '7px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -5746,7 +5747,11 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                           {canRecordTestResult ? (
                                             <button onClick={event => { event.stopPropagation(); setAnatomyTestResultEditState({ cueId: cue.id, differentiationStatementId: annotation.statementId, result: currentTestResult?.result ?? 'not_performed', note: currentTestResult?.note ?? '' }); }} style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid rgba(100,210,255,0.24)', color: '#93c5fd', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>{currentTestResult ? 'Ergebnis ändern' : '+ Ergebnis eintragen'}</button>
                                           ) : (
-                                            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.32)' }}>Nur durch {annotation.allowedPerformer} im erlaubten Prüfkontext erfassbar.</span>
+                                            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.32)' }}>
+                                              {review.decision === 'rejected'
+                                                ? 'Verworfener Prüfschritt · kein Ergebnis erfassbar.'
+                                                : `Nur durch ${annotation.allowedPerformer} im erlaubten Prüfkontext erfassbar.`}
+                                            </span>
                                           )}
                                         </>
                                       )}

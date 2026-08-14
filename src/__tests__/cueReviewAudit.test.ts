@@ -398,6 +398,58 @@ describe('cue review audit', () => {
     expect(projectCueReviewAudit(revised).learnerVisible).toBe(false);
   });
 
+  it('makes a differentiation result stale after its exact source-claim review changes', () => {
+    const { audit, anatomyBundle, context } = createNicoleProFixture();
+    const differentiation = anatomyBundle.claimAnnotations.find(item => item.kind === 'differentiation_annotation');
+    if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+      throw new Error('Fixture requires a differentiation annotation.');
+    }
+    const first = recordNicoleAnatomyDifferentiationResult(
+      audit, differentiation.statementId, 'supports', 'Erster Vergleich.', 'nicole',
+      cueReviewExpectedState(audit), context,
+    );
+    const editedClaim = reviewNicoleProClaim(
+      first, differentiation.sourceClaimId, 'edited',
+      'Nicole prüft jetzt einen bewusst veränderten Vergleich.', false,
+      cueReviewExpectedState(first), context,
+    );
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(editedClaim)).toEqual([]);
+
+    const rerecorded = recordNicoleAnatomyDifferentiationResult(
+      editedClaim, differentiation.statementId, 'inconclusive', 'Neuer Teststand.', 'nicole',
+      cueReviewExpectedState(editedClaim), context,
+    );
+    const sourceClaimReviews = rerecorded.events.filter(item => (
+      item.type === 'claim_reviewed' && item.claimReview?.claimId === differentiation.sourceClaimId
+    ));
+    const latestClaimReview = sourceClaimReviews[sourceClaimReviews.length - 1];
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(rerecorded)[0]).toMatchObject({
+      result: 'inconclusive', sourceClaimReviewEventId: latestClaimReview.eventId,
+    });
+
+    const rejectedClaim = reviewNicoleProClaim(
+      rerecorded, differentiation.sourceClaimId, 'rejected', undefined, false,
+      cueReviewExpectedState(rerecorded), context,
+    );
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(rejectedClaim)).toEqual([]);
+    expect(() => recordNicoleAnatomyDifferentiationResult(
+      rejectedClaim, differentiation.statementId, 'weakens', null, 'nicole',
+      cueReviewExpectedState(rejectedClaim), context,
+    )).toThrow(/rejected differentiation step/i);
+
+    const reaccepted = reviewNicoleProClaim(
+      rejectedClaim, differentiation.sourceClaimId, 'accepted', undefined, false,
+      cueReviewExpectedState(rejectedClaim), context,
+    );
+    const finalResult = recordNicoleAnatomyDifferentiationResult(
+      reaccepted, differentiation.statementId, 'weakens', 'Nach erneuter Prüfung.', 'nicole',
+      cueReviewExpectedState(reaccepted), context,
+    );
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(finalResult)[0]).toMatchObject({
+      result: 'weakens', note: 'Nach erneuter Prüfung.',
+    });
+  });
+
   it('rejects differentiation results without exact origin, performer and append linkage', () => {
     const grounded = createAudit();
     expect(() => recordNicoleAnatomyDifferentiationResult(
@@ -427,6 +479,10 @@ describe('cue review audit', () => {
       (stored: any) => { stored.events.at(-1).anatomyTestResult.previousResultEventId = 'forged-event'; },
       (stored: any) => { stored.events.at(-1).anatomyTestResult.anatomyBundleId = 'forged-bundle'; },
       (stored: any) => { stored.events.at(-1).anatomyTestResult.sourceClaimId = 'forged-claim'; },
+      (stored: any) => {
+        stored.events.at(-1).anatomyTestResult.sourceClaimReviewEventId = 'forged-review';
+        stored.events.at(-1).anatomyTestResult.sourceClaimReviewEventDigest = 'a'.repeat(64);
+      },
       (stored: any) => { stored.events.at(-1).anatomyTestResult.diagnosis = 'forged'; },
     ]) {
       const stored = JSON.parse(JSON.stringify(recorded));

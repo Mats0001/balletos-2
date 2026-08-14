@@ -123,6 +123,9 @@ export interface CueNicoleAnatomyDifferentiationResult {
   anatomyBundleId: string;
   differentiationStatementId: string;
   sourceClaimId: string;
+  /** Exact current Claim Review at recording time; null means the original unreviewed claim. */
+  sourceClaimReviewEventId: string | null;
+  sourceClaimReviewEventDigest: string | null;
   previousResultEventId: string | null;
   result: 'supports' | 'weakens' | 'inconclusive' | 'not_performed';
   note: string | null;
