@@ -1,4 +1,5 @@
 import type { BalletMotionId } from '../types/motionRegistry';
+import { resolveStudentId } from './studentRegistry';
 
 /**
  * Context dimensions that are real capture inputs in the current V1 UI.
@@ -57,21 +58,6 @@ const CURRENT_CAPABILITIES: AssessmentCapabilities = Object.freeze({
   canUseFeedback: true,
 });
 
-const CURRENT_STUDENT_IDS: Readonly<Record<string, string>> = Object.freeze({
-  emma: 'student:emma-berger',
-  'emma-berger': 'student:emma-berger',
-  'emma-berger-minis': 'student:emma-berger',
-  clara: 'student:clara-schulze',
-  'clara-schulze': 'student:clara-schulze',
-  'clara-schulze-kids': 'student:clara-schulze',
-  sophie: 'student:sophie-mainz',
-  'sophie-mainz': 'student:sophie-mainz',
-  'sophie-mainz-teens': 'student:sophie-mainz',
-  mia: 'student:mia-hoffmann',
-  'mia-hoffmann': 'student:mia-hoffmann',
-  'mia-hoffmann-pro': 'student:mia-hoffmann',
-});
-
 const CURRENT_LEVEL_IDS: Readonly<Record<string, AnalysisContextV1['levelId']>> = Object.freeze({
   MINIS: 'minis',
   KIDS: 'kids',
@@ -80,18 +66,8 @@ const CURRENT_LEVEL_IDS: Readonly<Record<string, AnalysisContextV1['levelId']>> 
   MASTERCLASS: 'masterclass',
 });
 
-function selectionKey(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLocaleLowerCase('de-DE')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
 export function resolveCurrentStudentId(selection: string): string | null {
-  return CURRENT_STUDENT_IDS[selectionKey(selection)] ?? null;
+  return resolveStudentId(selection);
 }
 
 export function resolveCurrentLevelId(selection: string): AnalysisContextV1['levelId'] | null {

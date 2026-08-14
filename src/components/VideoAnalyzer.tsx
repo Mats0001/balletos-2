@@ -2843,10 +2843,14 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const attemptProgressCurve = buildAttemptProgressCurve(currentAttemptPreview, previousComparableAttempt);
   const currentAttemptAlreadySaved = currentAttemptPreview
     ? attemptHistoryRecords.some(record => (
-      record.studentKey === currentAttemptPreview.studentKey
+      record.studentId === currentAttemptPreview.studentId
       && record.sourceId === currentAttemptPreview.sourceId
       && record.exerciseId === currentAttemptPreview.exerciseId
       && record.levelLabel === currentAttemptPreview.levelLabel
+      && record.perspective === currentAttemptPreview.perspective
+      && record.workingSide === currentAttemptPreview.workingSide
+      && record.direction === currentAttemptPreview.direction
+      && record.policyVersion === currentAttemptPreview.policyVersion
     ))
     : false;
   const handleSaveStudentAttempt = () => {

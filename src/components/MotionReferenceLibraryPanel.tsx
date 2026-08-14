@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, FlaskConical, History, LockKeyhole, UserRound, X } from 'lucide-react';
 import type { MotionReferenceLibraryEntry } from '../services/motionReferenceLibrary';
-import type { StudentAttemptSnapshot } from '../services/studentAttemptHistory';
+import { buildStudentProgressSummaries, type StudentAttemptSnapshot } from '../services/studentAttemptHistory';
 import type { NicoleReferenceLineRecord } from '../types/nicoleReferenceLine';
 
 type LibraryTab = 'nicole' | 'technical' | 'attempts';
@@ -96,6 +96,10 @@ export const MotionReferenceLibraryPanel: React.FC<MotionReferenceLibraryPanelPr
       || (view === 'frontal' && attempt.perspective === 'FRONTAL')
       || (view === 'profile' && (attempt.perspective === 'PROFILE_LEFT' || attempt.perspective === 'PROFILE_RIGHT')))
   )), [attempts, exercise, view]);
+  const progressSummaries = useMemo(
+    () => buildStudentProgressSummaries(filteredAttempts),
+    [filteredAttempts],
+  );
 
   if (!open) return null;
 
@@ -156,12 +160,44 @@ export const MotionReferenceLibraryPanel: React.FC<MotionReferenceLibraryPanelPr
             </article>;
           }) : <EmptyState text="Für diesen Filter ist keine technische Quelle registriert." />)}
 
-          {tab === 'attempts' && (filteredAttempts.length > 0 ? filteredAttempts.slice().sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt)).map(attempt => (
-            <article key={attempt.attemptId} style={panelCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}><div><div style={{ fontSize: '12px', fontWeight: 850 }}>{attempt.studentLabel} · {attempt.exerciseLabel}</div><div style={{ marginTop: '3px', color: 'rgba(255,255,255,0.48)', fontSize: '9px' }}>{new Date(attempt.capturedAt).toLocaleString('de-DE')} · {sourceName(attempt.sourceId)}</div></div><span style={badge('#c084fc')}>Fortschrittsvergleich · keine Referenz</span></div>
-              <div style={{ marginTop: '9px', color: 'rgba(255,255,255,0.68)', fontSize: '9px' }}>{attempt.cycleCount} Zyklus{attempt.cycleCount === 1 ? '' : 'sen'} · {attempt.phases.length} Phasenmessungen · {attempt.gateStatus === 'ready' ? 'Aufnahme stabil' : 'mit Evidenzhinweisen'}</div>
-            </article>
-          )) : <EmptyState text="Noch kein passender Schülervergleich gespeichert. Schülerverläufe werden niemals als Sollreferenz verwendet." />)}
+          {tab === 'attempts' && (filteredAttempts.length > 0 ? <>
+            {progressSummaries.length > 0 && <section aria-label="Fortschrittszusammenfassungen" style={{ display: 'grid', gap: '10px' }}>
+              {progressSummaries.map(summary => {
+                const trend = summary.phaseTrend === 'improved'
+                  ? { label: 'Heute stabiler', color: '#30d158' }
+                  : summary.phaseTrend === 'needs_more_attention'
+                    ? { label: 'Heute unruhiger', color: '#ff9f0a' }
+                    : { label: 'Ähnlicher Verlauf', color: '#67e8f9' };
+                const steadiness = summary.steadinessTrend === 'steadier'
+                  ? 'Fußbahn ruhiger'
+                  : summary.steadinessTrend === 'more_restless'
+                    ? 'Fußbahn unruhiger'
+                    : summary.steadinessTrend === 'similar'
+                      ? 'Fußbahn ähnlich ruhig'
+                      : 'Fußbahn nicht vergleichbar';
+                return <article key={summary.summaryId} style={{ ...panelCard, borderColor: `${trend.color}55`, background: `linear-gradient(135deg, ${trend.color}12, rgba(255,255,255,0.025))` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                    <div><div style={{ fontSize: '12px', fontWeight: 900 }}>{summary.studentLabel} · {summary.exerciseLabel}</div><div style={{ marginTop: '3px', color: 'rgba(255,255,255,0.5)', fontSize: '9px' }}>Heute {new Date(summary.latestCapturedAt).toLocaleDateString('de-DE')} ↔ vorher {new Date(summary.previousCapturedAt).toLocaleDateString('de-DE')} · {summary.attemptCount} vergleichbare Versuche</div></div>
+                    <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}><span style={badge(trend.color)}><History size={9} /> {trend.label}</span>{summary.provisional && <span style={badge('#fbbf24')}>Evidenzhinweis</span>}</div>
+                  </div>
+                  <div style={{ marginTop: '10px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(135px,1fr))', gap: '6px' }}>
+                    <ProgressFact label="Phasen" value={`${summary.comparablePhaseCount} vergleichbar`} />
+                    <ProgressFact label="Bewegungsruhe" value={steadiness} />
+                    <ProgressFact label="Fußbahn-Länge" value={summary.footPathDeltaPercent === null ? 'nicht vergleichbar' : `${summary.footPathDeltaPercent > 0 ? '+' : ''}${summary.footPathDeltaPercent}% verändert`} />
+                    <ProgressFact label="Unruhe" value={summary.jitterDeltaPercent === null ? 'nicht vergleichbar' : `${summary.jitterDeltaPercent > 0 ? '+' : ''}${summary.jitterDeltaPercent}%`} />
+                  </div>
+                  <div style={{ marginTop: '8px', color: 'rgba(255,255,255,0.43)', fontSize: '8px', lineHeight: 1.45 }}>Vergleich nur bei gleicher Schülerin, Übung, Stufe, Ansicht, Seite, Richtung und Policy · keine Sollreferenz und keine Prozentnote.</div>
+                </article>;
+              })}
+            </section>}
+            <div style={{ marginTop: progressSummaries.length > 0 ? '5px' : 0, color: 'rgba(255,255,255,0.42)', fontSize: '8px', fontWeight: 850, letterSpacing: '.04em', textTransform: 'uppercase' }}>Gespeicherte Versuche</div>
+            {filteredAttempts.slice().sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt)).map(attempt => (
+              <article key={attempt.attemptId} style={panelCard}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}><div><div style={{ fontSize: '12px', fontWeight: 850 }}>{attempt.studentLabel} · {attempt.exerciseLabel}</div><div style={{ marginTop: '3px', color: 'rgba(255,255,255,0.48)', fontSize: '9px' }}>{new Date(attempt.capturedAt).toLocaleString('de-DE')} · {sourceName(attempt.sourceId)}</div></div><span style={badge('#c084fc')}>Fortschrittsvergleich · keine Referenz</span></div>
+                <div style={{ marginTop: '9px', color: 'rgba(255,255,255,0.68)', fontSize: '9px' }}>{attempt.cycleCount} Zyklus{attempt.cycleCount === 1 ? '' : 'sen'} · {attempt.phases.length} Phasenmessungen · {attempt.gateStatus === 'ready' ? 'Aufnahme stabil' : 'mit Evidenzhinweisen'}</div>
+              </article>
+            ))}
+          </> : <EmptyState text="Noch kein passender Schülervergleich gespeichert. Schülerverläufe werden niemals als Sollreferenz verwendet." />)}
         </div>
       </section>
     </div>,
@@ -170,3 +206,5 @@ export const MotionReferenceLibraryPanel: React.FC<MotionReferenceLibraryPanelPr
 };
 
 const EmptyState: React.FC<{ text: string }> = ({ text }) => <div style={{ ...panelCard, padding: '26px', textAlign: 'center', color: 'rgba(255,255,255,0.5)', fontSize: '10px', lineHeight: 1.6 }}>{text}</div>;
+
+const ProgressFact: React.FC<{ label: string; value: string }> = ({ label, value }) => <div style={{ borderRadius: '8px', padding: '7px 8px', background: 'rgba(255,255,255,0.045)', minWidth: 0 }}><div style={{ color: 'rgba(255,255,255,0.42)', fontSize: '7px', fontWeight: 850, textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div><div style={{ marginTop: '2px', color: 'rgba(255,255,255,0.8)', fontSize: '9px', fontWeight: 750 }}>{value}</div></div>;

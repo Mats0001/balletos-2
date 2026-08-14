@@ -5,6 +5,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MotionReferenceLibraryPanel } from '../components/MotionReferenceLibraryPanel';
 import { MOTION_REFERENCE_LIBRARY } from '../services/motionReferenceLibrary';
+import type { StudentAttemptSnapshot } from '../services/studentAttemptHistory';
+import { TEACHER_REGION_KEYS, type TeacherHeuristicBaseState } from '../types/teacherHeuristic';
 import type { NicoleReferenceLineRecord } from '../types/nicoleReferenceLine';
 
 afterEach(cleanup);
@@ -47,6 +49,36 @@ const nicoleRecord: NicoleReferenceLineRecord = {
   }],
 };
 
+function attempt(attemptId: string, sourceId: string, capturedAt: string, state: TeacherHeuristicBaseState, jitter: number): StudentAttemptSnapshot {
+  return {
+    schemaVersion: 2,
+    attemptId,
+    studentId: 'student:emma-berger',
+    studentLabel: 'Emma Berger',
+    sourceId,
+    sourceRole: 'student_attempt',
+    referenceAuthority: 'none',
+    capturedAt,
+    exerciseId: 'tendu',
+    exerciseLabel: 'Battement Tendu',
+    levelLabel: 'MINIS',
+    perspective: 'FRONTAL',
+    workingSide: 'right',
+    direction: 'a_la_seconde',
+    gateStatus: 'ready',
+    cycleCount: 1,
+    policyVersion: 'test-policy',
+    phases: [{
+      id: 'full_extension',
+      cycleIndex: 0,
+      label: 'Volle Streckung',
+      phaseConfidence: 0.9,
+      motion: { durationMs: 500, workingFootPathLength: 0.25, workingFootJitter: jitter, sampleCount: 5 },
+      regions: Object.fromEntries(TEACHER_REGION_KEYS.map(key => [key, { state, evidenceStrength: 'stable' }])) as StudentAttemptSnapshot['phases'][number]['regions'],
+    }],
+  };
+}
+
 describe('cross-video reference library', () => {
   it('keeps Nicole references, technical sources and student attempts visibly separate', () => {
     render(<MotionReferenceLibraryPanel
@@ -71,5 +103,25 @@ describe('cross-video reference library', () => {
     fireEvent.click(screen.getByRole('button', { name: /Schülerverlauf/i }));
     expect(screen.getByText(/niemals als Sollreferenz/i)).toBeTruthy();
   });
-});
 
+  it('shows a context-matched latest-vs-previous progress summary without a grade', () => {
+    render(<MotionReferenceLibraryPanel
+      open
+      onClose={() => undefined}
+      currentExerciseId="tendu"
+      currentVideoSourceId="/videos/student-tendu-b.mp4"
+      nicoleRecords={[]}
+      technicalSources={MOTION_REFERENCE_LIBRARY}
+      attempts={[
+        attempt('before', '/videos/student-tendu-a.mp4', '2026-08-12T10:00:00.000Z', 'heuristic_strong_attention', 0.008),
+        attempt('today', '/videos/student-tendu-b.mp4', '2026-08-13T10:00:00.000Z', 'heuristic_match', 0.004),
+      ]}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Schülerverlauf/i }));
+    expect(screen.getByRole('region', { name: 'Fortschrittszusammenfassungen' })).toBeTruthy();
+    expect(screen.getByText('Heute stabiler')).toBeTruthy();
+    expect(screen.getByText('Fußbahn ruhiger')).toBeTruthy();
+    expect(screen.getByText(/keine Sollreferenz und keine Prozentnote/i)).toBeTruthy();
+  });
+});
