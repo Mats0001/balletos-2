@@ -11,7 +11,12 @@ import {
   resolveNicoleProAnatomyRegistry,
   validateNicoleAnatomyProBundle,
 } from '../services/nicoleProAnatomyValidator';
-import { planNicoleAnatomyProBundle } from '../services/nicoleProAnatomyPlanner';
+import {
+  createNicoleAnatomyBundleId,
+  nicoleAnatomyBundleMatchesNicoleProDraft,
+  planNicoleAnatomyForNicoleProDraft,
+  planNicoleAnatomyProBundle,
+} from '../services/nicoleProAnatomyPlanner';
 import type { NicoleProClaimV1, NicoleProEvidencePacketV1 } from '../types/nicoleProContent';
 import type {
   NicoleAnatomyDifferentiationAnnotationV1,
@@ -521,6 +526,26 @@ describe('Nicole Anatomy Pro contract V1', () => {
       .toMatchObject({ scientificValidation: 'source_supported', outwardEligibility: false });
     expect(bundle?.claimAnnotations.some(item => 'text' in item || 'prompt' in item)).toBe(false);
     expect(validateNicoleAnatomyProBundle(bundle, built.authority, built.currentContext).valid).toBe(true);
+  });
+
+  it('plans and revalidates the current runtime Anatomy bundle from the parent Pro draft', () => {
+    const built = fixture();
+    const bundle = planNicoleAnatomyForNicoleProDraft({
+      draft: built.draft,
+      currentContext: built.currentContext,
+    });
+
+    expect(bundle?.bundleId).toBe(createNicoleAnatomyBundleId(built.draft));
+    expect(nicoleAnatomyBundleMatchesNicoleProDraft({
+      bundle,
+      draft: built.draft,
+      currentContext: built.currentContext,
+    })).toBe(true);
+    expect(nicoleAnatomyBundleMatchesNicoleProDraft({
+      bundle,
+      draft: built.draft,
+      currentContext: { ...built.currentContext, generation: built.currentContext.generation + 1 },
+    })).toBe(false);
   });
 
   it('plans the position-dependent Piriformis chain without strength, length or cause claims', () => {

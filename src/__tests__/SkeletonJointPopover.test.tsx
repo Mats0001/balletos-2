@@ -20,6 +20,8 @@ import {
   planNicoleProGroundedDraft,
 } from '../services/nicoleProContentPlanner';
 import type { NicoleProDraftV1 } from '../types/nicoleProContent';
+import type { NicoleAnatomyProBundleV1 } from '../types/nicoleProAnatomy';
+import { planNicoleAnatomyForNicoleProDraft } from '../services/nicoleProAnatomyPlanner';
 
 function setViewportWidth(width: number) {
   Object.defineProperty(window, 'innerWidth', {
@@ -126,6 +128,7 @@ function renderTarget(
   groundedTeacherDraft?: GroundedTeacherDraft,
   nicoleProDraft?: NicoleProDraftV1 | null,
   nicoleProContext?: ReturnType<typeof createAnalysisContextEpoch> | null,
+  nicoleAnatomyBundle?: NicoleAnatomyProBundleV1 | null,
 ) {
   const target = getSkeletonTarget(targetId);
   if (!target) throw new Error(`Missing test target ${targetId}`);
@@ -141,6 +144,7 @@ function renderTarget(
       landmarkIndex={target.representativeLandmarkIndex}
       groundedTeacherDraft={groundedTeacherDraft}
       nicoleProDraft={nicoleProDraft}
+      nicoleAnatomyBundle={nicoleAnatomyBundle}
       nicoleProCaptureQuality={nicoleProDraft ? 'ready' : null}
       currentAnalysisContext={nicoleProContext}
       selectedTarget={target}
@@ -270,6 +274,11 @@ describe('SkeletonJointPopover evidence color semantics', () => {
   });
 
   it('renders the exact-frame torso draft as rich pending-Nicole coaching', () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     const points = Array.from({ length: 33 }, (_, index) => ({
       x: 0.2 + index * 0.01,
       y: 0.3 + index * 0.005,
@@ -323,7 +332,9 @@ describe('SkeletonJointPopover evidence color semantics', () => {
 
     if (draft.kind !== 'ready') throw new Error('Expected ready torso fixture.');
     const pro = proDraftFor(draft);
-    renderTarget('bone.torso_side_r', torsoAnalysis, draft, pro.draft, pro.context);
+    const anatomy = planNicoleAnatomyForNicoleProDraft({ draft: pro.draft, currentContext: pro.context });
+    if (!anatomy) throw new Error('Expected Anatomy-Pro fixture.');
+    renderTarget('bone.torso_side_r', torsoAnalysis, draft, pro.draft, pro.context, anatomy);
 
     expect(screen.getByText('Nicole-Pro · KI-Arbeitsfassung')).toBeTruthy();
     expect(screen.getByText(/Ampel Gelb · durchgezogen · Signal stabil/)).toBeTruthy();
@@ -335,11 +346,73 @@ describe('SkeletonJointPopover evidence color semantics', () => {
     expect(screen.getByText('Ziel & Üben')).toBeTruthy();
     expect(screen.getByText('Bildsprache')).toBeTruthy();
     expect(screen.getByText('Messdetails & Provenienz')).toBeTruthy();
+    expect(screen.getByText('Anatomie & fachliche Hypothesen')).toBeTruthy();
+    expect(screen.getByText(/Volle interne Fachansicht/)).toBeTruthy();
+    expect(screen.getByText(/Dieser einzelne 2D-Frame bestimmt weder Muskelkraft/)).toBeTruthy();
     expect(screen.getAllByText(/6,3°/)).toHaveLength(2);
     expect(screen.getByText(/Sofort-Cue:/)).toBeTruthy();
     expect(screen.getByText(/Sichtbarer Erfolg:/)).toBeTruthy();
     expect(screen.queryByText('Oberkörper neigt sich beim Plie nach vorne oder zur Seite.')).toBeNull();
     expect(screen.queryByText(/Beckenboden aktiv|10x/)).toBeNull();
+
+    screen.getByRole('button', { name: 'Inhalt in Zwischenablage kopieren' }).click();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copiedText = writeText.mock.calls[0][0];
+    expect(copiedText).toContain('ANATOMIE & FACHLICHE HYPOTHESEN · NUR INTERN');
+    expect(copiedText).toContain('Iliopsoas');
+    expect(copiedText).toContain('NBK560799');
+    expect(copiedText).toContain('weder Muskelkraft, Muskellänge noch eine alleinige Ursache');
+  });
+
+  it('fails closed for an Anatomy bundle from a stale context generation', () => {
+    const points = Array.from({ length: 33 }, (_, index) => ({
+      x: 0.2 + index * 0.01,
+      y: 0.3 + index * 0.005,
+      z: -index * 0.001,
+      visibility: 0.95,
+    }));
+    const torsoAnalysis = analysis({
+      spineTilt: {
+        value: 6.25,
+        unit: 'deg',
+        confidence: 0.91,
+        label: 'Aplomb',
+        measurement_class: 'vaganova_relation',
+      },
+    });
+    const overlay = createBlockedPacket(2.5, 42);
+    overlay.spine = 'heuristic_attention';
+    const draft = buildGroundedTeacherDraft({
+      metricAdapter: 'spine_tilt_aplomb',
+      targetJointId: 'spine_center',
+      isPaused: true,
+      exactCacheLandmarks: points,
+      posePacket: {
+        streamEpoch: 42, frameSeq: 75, mediaTimeUs: 2_500_000,
+        inferenceStartedAtMs: 1, inferenceEndedAtMs: 2, resultKind: 'pose',
+        landmarks: points.map(point => ({ ...point })), avgVisibility: 0.95,
+        source: 'frame_cache', generation: 7, sourceId: '/videos/nicole_saal_1.mp4',
+        videoWidth: 960, videoHeight: 1280,
+      },
+      analysis: torsoAnalysis,
+      analysisMediaTimeUs: 2_500_000,
+      overlayPacket: overlay,
+      runtime: {
+        sourceId: '/videos/nicole_saal_1.mp4', streamEpoch: 42, generation: 7,
+        mediaTimeUs: 2_500_000, videoWidth: 960, videoHeight: 1280,
+        policyVersion: '0.4.0-phase-evidence-separation',
+      },
+    });
+    if (draft.kind !== 'ready') throw new Error('Expected ready torso fixture.');
+    const pro = proDraftFor(draft);
+    const anatomy = planNicoleAnatomyForNicoleProDraft({ draft: pro.draft, currentContext: pro.context });
+    if (!anatomy) throw new Error('Expected Anatomy-Pro fixture.');
+    const staleContext = { ...pro.context, generation: pro.context.generation + 1 };
+
+    renderTarget('bone.torso_side_r', torsoAnalysis, draft, pro.draft, staleContext, anatomy);
+
+    expect(screen.queryByText('Anatomie & fachliche Hypothesen')).toBeNull();
+    expect(screen.queryByText(/Iliopsoas/)).toBeNull();
   });
 
   it('renders an exact shoulder-line draft instead of generic neutral copy', () => {

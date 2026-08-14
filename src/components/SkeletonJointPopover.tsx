@@ -9,6 +9,12 @@ import {
 } from '../services/vaganovaAngleCalculator';
 import type { GroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { NicoleProClaimV1, NicoleProDraftV1 } from '../types/nicoleProContent';
+import type {
+  NicoleAnatomyEpistemicKind,
+  NicoleAnatomyProBundleV1,
+  NicoleAnatomyReviewState,
+  NicoleAnatomyScientificValidation,
+} from '../types/nicoleProAnatomy';
 import type { SelectedSkeletonTarget, SkeletonTargetDefinition } from '../types/skeletonTarget';
 import type { AnalysisContextEpochV1 } from '../services/analysisContextGuard';
 import {
@@ -16,6 +22,7 @@ import {
   nicoleProDraftMatchesGroundedSelection,
   type NicoleProCaptureQuality,
 } from '../services/nicoleProContentPlanner';
+import { nicoleAnatomyBundleMatchesNicoleProDraft } from '../services/nicoleProAnatomyPlanner';
 
 interface Props {
   knowledge: JointKnowledge;
@@ -38,6 +45,8 @@ interface Props {
   groundedTeacherDraft?: GroundedTeacherDraft;
   /** Validated, context-current Pro content for this exact Grounded frame. */
   nicoleProDraft?: NicoleProDraftV1 | null;
+  /** Internal-only Anatomy annotations over the exact current Nicole-Pro claims. */
+  nicoleAnatomyBundle?: NicoleAnatomyProBundleV1 | null;
   nicoleProCaptureQuality?: NicoleProCaptureQuality | null;
   currentAnalysisContext?: AnalysisContextEpochV1 | null;
   /** Exact joint or bone selected from the canonical rendered geometry. */
@@ -54,6 +63,29 @@ const REGION_COLORS: Record<string, string> = {
   leg: '#c084fc',
   foot: '#f472b6',
 };
+
+const EPISTEMIC_LABELS: Readonly<Record<NicoleAnatomyEpistemicKind, string>> = Object.freeze({
+  measurement: 'Messung',
+  visible_observation: 'Sichtbefund',
+  general_knowledge: 'Fachwissen',
+  working_hypothesis: 'Arbeitshypothese',
+  counter_hypothesis: 'Gegenhypothese',
+  differentiation_step: 'Prüfschritt',
+  safety_notice: 'Sicherheitshinweis',
+});
+
+const REVIEW_LABELS: Readonly<Record<NicoleAnatomyReviewState, string>> = Object.freeze({
+  ai_draft: 'KI-Entwurf',
+  nicole_accepted: 'Von Nicole übernommen',
+  nicole_revised: 'Von Nicole revidiert',
+  rejected: 'Verworfen',
+});
+
+const SCIENCE_LABELS: Readonly<Record<NicoleAnatomyScientificValidation, string>> = Object.freeze({
+  curated_internal: 'intern kuratiert',
+  source_supported: 'quellengestütztes Fachwissen',
+  externally_validated_for_stated_scope: 'extern validiert · definierter Scope',
+});
 
 /** Maps landmark index to relevant VaganovaFullAnalysis fields */
 const LIVE_MEASUREMENT_KEYS: Record<number, Array<keyof VaganovaFullAnalysis>> = {
@@ -118,6 +150,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
   landmarkIndex,
   groundedTeacherDraft,
   nicoleProDraft,
+  nicoleAnatomyBundle,
   nicoleProCaptureQuality,
   currentAnalysisContext,
   selectedTarget,
@@ -154,6 +187,14 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
     })
     ? nicoleProDraft
+    : null;
+  const readyNicoleAnatomyBundle = readyNicoleProDraft
+    && nicoleAnatomyBundleMatchesNicoleProDraft({
+      bundle: nicoleAnatomyBundle ?? null,
+      draft: readyNicoleProDraft,
+      currentContext: currentAnalysisContext ?? null,
+    })
+    ? nicoleAnatomyBundle
     : null;
   const proClaimsById = new Map(readyNicoleProDraft?.claims.map(claim => [claim.claimId, claim]) ?? []);
   const proClaims = (section: keyof NicoleProDraftV1['sections']): NicoleProClaimV1[] => (
@@ -196,6 +237,19 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         return `Test zu Hypothese ${relatedNumbers.join(', ')}: ${claim.text}`;
       }).join('\n');
       const evidence = readyNicoleProDraft.evidence[0];
+      const anatomyText = readyNicoleAnatomyBundle ? [
+        '', 'ANATOMIE & FACHLICHE HYPOTHESEN · NUR INTERN:',
+        ...readyNicoleAnatomyBundle.knowledgeItems.filter(item => (
+          item.sourceRefs.some(source => source.evidenceKind !== 'product_policy')
+        )).map(item => (
+          `[${EPISTEMIC_LABELS[item.epistemicKind]} · ${REVIEW_LABELS[item.reviewState]} · ${SCIENCE_LABELS[item.scientificValidation]}] ${item.statement}\nQuellen: ${item.sourceRefs.map(source => `${source.title} — ${source.locator}`).join('; ')}\nGrenze: ${item.sourceRefs.map(source => source.limitations).join(' ')}`
+        )),
+        ...readyNicoleAnatomyBundle.claimAnnotations.map(annotation => {
+          const sourceClaim = proClaimsById.get(annotation.sourceClaimId);
+          return `[${EPISTEMIC_LABELS[annotation.epistemicKind]} · ${REVIEW_LABELS[annotation.reviewState]} · ${SCIENCE_LABELS[annotation.scientificValidation]}] ${sourceClaim?.text ?? 'Nicht auflösbarer Claim'}`;
+        }),
+        'EPISTEMISCHE GRENZE: Fachwissen und Arbeitshypothesen sind keine Diagnose und bestimmen aus diesem 2D-Frame weder Muskelkraft, Muskellänge noch eine alleinige Ursache.',
+      ] : [];
       navigator.clipboard.writeText([
         `${selectedTarget?.label ?? knowledge.name} · NICOLE-PRO · KI-ARBEITSFASSUNG`, '',
         `STATUS: Ampel ${signalLabel} · ${certaintyLabel} · ${measurementStatusLabel} · ${uncertaintyLabel}`,
@@ -210,6 +264,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
         `PROVENIENZ: Frame ${(evidence.mediaTimeUs / 1_000_000).toFixed(3)}s · Quelle ${evidence.sourceId} · Policy ${evidence.policyVersion}`,
         `Kontext ${evidence.analysisContextFingerprint}@${evidence.analysisContextGeneration} · Modell ${evidence.landmarkQuality.modelId}@${evidence.landmarkQuality.modelVersion}`,
         `Artifact ${evidence.analysisArtifactId} · Planner ${readyNicoleProDraft.plannerId}@${readyNicoleProDraft.plannerVersion} · Validator ${readyNicoleProDraft.validatorVersion}`,
+        ...anatomyText,
       ].join('\n')).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -265,7 +320,7 @@ export const SkeletonJointPopover: React.FC<Props> = ({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [knowledge, liveMeasurements, readyGroundedDraft, readyNicoleProDraft, selectedTarget]);
+  }, [knowledge, liveMeasurements, readyGroundedDraft, readyNicoleAnatomyBundle, readyNicoleProDraft, selectedTarget]);
 
   // ESC to close
   useEffect(() => {
@@ -496,6 +551,95 @@ export const SkeletonJointPopover: React.FC<Props> = ({
                 );
               })}
             </Section>
+            {readyNicoleAnatomyBundle ? (
+              <details style={{ background: 'rgba(99,102,241,0.055)', border: '1px solid rgba(129,140,248,0.24)', borderRadius: '8px', padding: '7px 9px' }}>
+                <summary style={{ cursor: 'pointer', color: '#a5b4fc', listStylePosition: 'outside' }}>
+                  <span style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                    Anatomie & fachliche Hypothesen
+                  </span>
+                  <span style={{ display: 'block', marginTop: '3px', fontSize: '9.5px', color: 'rgba(255,255,255,0.58)', lineHeight: 1.4 }}>
+                    Volle interne Fachansicht · Quellen, Geltungsgrenzen und Prüfschritte
+                  </span>
+                </summary>
+                <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    <span style={{ borderLeft: '2px solid #5eead4', padding: '2px 5px', fontSize: '8px', fontWeight: 900, color: '#99f6e4', textTransform: 'uppercase', letterSpacing: '0.5px', background: 'rgba(20,184,166,0.08)' }}>
+                      KI-Entwurf
+                    </span>
+                    <span style={{ borderLeft: '2px solid #818cf8', padding: '2px 5px', fontSize: '8px', fontWeight: 900, color: '#c7d2fe', textTransform: 'uppercase', letterSpacing: '0.5px', background: 'rgba(99,102,241,0.08)' }}>
+                      Nur intern
+                    </span>
+                  </div>
+
+                  {readyNicoleAnatomyBundle.knowledgeItems.filter(item => (
+                    item.sourceRefs.some(source => source.evidenceKind !== 'product_policy')
+                  )).map(item => (
+                    <div key={item.itemId} style={{ borderLeft: '2px solid #818cf8', paddingLeft: '7px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '8px', fontWeight: 900, color: '#c7d2fe', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {EPISTEMIC_LABELS[item.epistemicKind]}
+                        </span>
+                        <span style={{ fontSize: '8px', color: '#99f6e4' }}>{REVIEW_LABELS[item.reviewState]}</span>
+                        <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.46)' }}>{SCIENCE_LABELS[item.scientificValidation]}</span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>
+                        {item.statement}
+                      </div>
+                      <details style={{ marginTop: '5px' }}>
+                        <summary style={{ cursor: 'pointer', fontSize: '8.5px', color: 'rgba(165,180,252,0.82)' }}>
+                          Quellen & Geltungsbereich
+                        </summary>
+                        <div style={{ marginTop: '4px', fontSize: '8.5px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.45 }}>
+                          {item.sourceRefs.map(source => (
+                            <div key={source.sourceId} style={{ marginBottom: '5px' }}>
+                              {source.locator.startsWith('https://') ? (
+                                <a href={source.locator} target="_blank" rel="noreferrer" style={{ color: '#a5b4fc' }}>{source.title}</a>
+                              ) : <span style={{ color: '#a5b4fc' }}>{source.title}</span>}
+                              <span style={{ display: 'block' }}>{source.scope}</span>
+                              <span style={{ display: 'block', color: 'rgba(255,255,255,0.38)' }}>{source.limitations}</span>
+                            </div>
+                          ))}
+                          <span style={{ display: 'block', fontFamily: 'monospace', color: 'rgba(255,255,255,0.35)', overflowWrap: 'anywhere' }}>
+                            {item.itemId}@{item.version}
+                          </span>
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+
+                  {readyNicoleAnatomyBundle.claimAnnotations.map(annotation => {
+                    const sourceClaim = proClaimsById.get(annotation.sourceClaimId);
+                    if (!sourceClaim) return null;
+                    const accent = annotation.epistemicKind === 'differentiation_step' ? '#64d2ff'
+                      : annotation.epistemicKind === 'working_hypothesis' ? '#fbbf24' : '#d6a65c';
+                    return (
+                      <div key={annotation.statementId} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: '7px' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '8px', fontWeight: 900, color: accent, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                            {EPISTEMIC_LABELS[annotation.epistemicKind]}
+                          </span>
+                          <span style={{ fontSize: '8px', color: '#99f6e4' }}>{REVIEW_LABELS[annotation.reviewState]}</span>
+                          <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.46)' }}>{SCIENCE_LABELS[annotation.scientificValidation]}</span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>{sourceClaim.text}</div>
+                        {annotation.kind === 'differentiation_annotation' ? (
+                          <div style={{ marginTop: '4px', fontSize: '8.5px', color: 'rgba(255,255,255,0.48)', lineHeight: 1.4 }}>
+                            Ausführung: Nicole · beobachtender Vergleich · Ergebnis wird nicht automatisch behauptet.
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ borderTop: '1px solid rgba(129,140,248,0.16)', paddingTop: '7px', fontSize: '9px', color: 'rgba(255,255,255,0.5)', lineHeight: 1.45 }}>
+                    Fachwissen beschreibt allgemeine Zusammenhänge. Die fallbezogenen Aussagen bleiben prüfbare Arbeitshypothesen: Dieser einzelne 2D-Frame bestimmt weder Muskelkraft, Muskellänge noch eine alleinige Ursache.
+                  </div>
+                  <div style={{ fontFamily: 'monospace', fontSize: '8px', color: 'rgba(255,255,255,0.32)', overflowWrap: 'anywhere' }}>
+                    Registry {readyNicoleAnatomyBundle.knowledgeRegistryId}@{readyNicoleAnatomyBundle.knowledgeRegistryVersion} · Bundle {readyNicoleAnatomyBundle.bundleId}
+                  </div>
+                </div>
+              </details>
+            ) : null}
             <Section icon={<Dumbbell size={9} />} label="Ziel & Üben" color="#30d158">
               {proClaims('targetAndPractice').map(claim => {
                 const label = claim.type === 'teaching_target' ? 'Ziel'

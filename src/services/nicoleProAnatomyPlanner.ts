@@ -1,5 +1,9 @@
 import type { AnalysisContextEpochV1 } from './analysisContextGuard';
+import { createNicoleProValidationAuthority } from './nicoleProContentValidator';
 import {
+  createNicoleAnatomyValidationAuthority,
+  NICOLE_PRO_ANATOMY_REGISTRY_ID,
+  NICOLE_PRO_ANATOMY_REGISTRY_VERSION,
   validateNicoleAnatomyProBundle,
   type NicoleAnatomyTrustedValidationAuthorityV1,
 } from './nicoleProAnatomyValidator';
@@ -13,6 +17,7 @@ import type {
   NicoleAnatomyScientificValidation,
 } from '../types/nicoleProAnatomy';
 import type { NicoleProClaimV1 } from '../types/nicoleProContent';
+import type { NicoleProDraftV1 } from '../types/nicoleProContent';
 
 type PlainObject = Record<string, unknown>;
 
@@ -58,6 +63,97 @@ export interface NicoleAnatomyPlannerInputV1 {
   createdAt: string;
   authority: NicoleAnatomyTrustedValidationAuthorityV1;
   currentContext: AnalysisContextEpochV1;
+}
+
+function createParentAuthority(
+  draft: NicoleProDraftV1,
+  currentContext: AnalysisContextEpochV1,
+) {
+  const evidence = draft.evidence.length === 1 ? draft.evidence[0] : null;
+  if (!evidence) return null;
+  return createNicoleProValidationAuthority({
+    currentContext,
+    assessment: {
+      schemaVersion: 1,
+      contextFingerprint: currentContext.fingerprint,
+      contextGeneration: currentContext.generation,
+      value: {
+        analysisArtifactId: evidence.analysisArtifactId,
+        sourceId: evidence.sourceId,
+        exerciseId: evidence.exerciseId,
+        policyVersion: evidence.policyVersion,
+        evidence: draft.evidence,
+      },
+    },
+  });
+}
+
+export function createNicoleAnatomyBundleId(draft: NicoleProDraftV1): string {
+  return `anatomy:${NICOLE_PRO_ANATOMY_REGISTRY_ID}@${NICOLE_PRO_ANATOMY_REGISTRY_VERSION}:${draft.draftId}`;
+}
+
+/**
+ * Current-runtime adapter from a validated Nicole-Pro draft into Anatomy Pro.
+ * It re-mints both product-owned authorities and never accepts caller-authored
+ * case text, knowledge or review state.
+ */
+export function planNicoleAnatomyForNicoleProDraft(input: Readonly<{
+  draft: NicoleProDraftV1;
+  currentContext: AnalysisContextEpochV1;
+}>): NicoleAnatomyProBundleV1 | null {
+  try {
+    const evidence = input.draft.evidence.length === 1 ? input.draft.evidence[0] : null;
+    const nicoleProAuthority = createParentAuthority(input.draft, input.currentContext);
+    if (!evidence || !nicoleProAuthority) return null;
+    const anatomyAuthority = createNicoleAnatomyValidationAuthority({
+      draft: input.draft,
+      nicoleProAuthority,
+      currentContext: input.currentContext,
+      phaseId: evidence.phaseId,
+      side: evidence.side,
+      view: evidence.view,
+    });
+    if (!anatomyAuthority) return null;
+    return planNicoleAnatomyProBundle({
+      bundleId: createNicoleAnatomyBundleId(input.draft),
+      createdAt: input.draft.generatedAt,
+      authority: anatomyAuthority,
+      currentContext: input.currentContext,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** One fail-closed display/copy capability for the current Pro frame. */
+export function nicoleAnatomyBundleMatchesNicoleProDraft(input: Readonly<{
+  bundle: NicoleAnatomyProBundleV1 | null;
+  draft: NicoleProDraftV1 | null;
+  currentContext: AnalysisContextEpochV1 | null;
+}>): boolean {
+  try {
+    if (!input.bundle || !input.draft || !input.currentContext) return false;
+    const evidence = input.draft.evidence.length === 1 ? input.draft.evidence[0] : null;
+    const nicoleProAuthority = createParentAuthority(input.draft, input.currentContext);
+    if (!evidence || !nicoleProAuthority) return false;
+    const anatomyAuthority = createNicoleAnatomyValidationAuthority({
+      draft: input.draft,
+      nicoleProAuthority,
+      currentContext: input.currentContext,
+      phaseId: evidence.phaseId,
+      side: evidence.side,
+      view: evidence.view,
+    });
+    return Boolean(anatomyAuthority
+      && input.bundle.bundleId === createNicoleAnatomyBundleId(input.draft)
+      && validateNicoleAnatomyProBundle(
+        input.bundle,
+        anatomyAuthority,
+        input.currentContext,
+      ).valid);
+  } catch {
+    return false;
+  }
 }
 
 /**

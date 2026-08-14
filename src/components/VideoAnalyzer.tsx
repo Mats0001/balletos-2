@@ -43,6 +43,11 @@ import {
   type NicoleProCaptureQuality,
 } from '../services/nicoleProContentPlanner';
 import type { NicoleProDraftV1 } from '../types/nicoleProContent';
+import type { NicoleAnatomyProBundleV1 } from '../types/nicoleProAnatomy';
+import {
+  nicoleAnatomyBundleMatchesNicoleProDraft,
+  planNicoleAnatomyForNicoleProDraft,
+} from '../services/nicoleProAnatomyPlanner';
 import {
   createSelectedSkeletonTarget,
   findSkeletonTargetAtPoint,
@@ -324,6 +329,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const currentAnalysisContextEpochRef = useRef<AnalysisContextEpochV1 | null>(currentAnalysisContextEpoch);
   const [boundGroundedTeacherAssessment, setBoundGroundedTeacherAssessment] = useState<BoundAssessmentV1<ReadyGroundedTeacherDraft> | null>(null);
   const [boundNicoleProDraft, setBoundNicoleProDraft] = useState<BoundAssessmentV1<NicoleProDraftV1> | null>(null);
+  const [boundNicoleAnatomyBundle, setBoundNicoleAnatomyBundle] = useState<BoundAssessmentV1<NicoleAnatomyProBundleV1> | null>(null);
   const currentGroundedTeacherDraft = assessmentValueForCurrentContext(
     boundGroundedTeacherAssessment,
     currentAnalysisContextEpoch,
@@ -336,6 +342,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     if (groundedTeacherDraft.kind === 'ready') return;
     setBoundGroundedTeacherAssessment(null);
     setBoundNicoleProDraft(null);
+    setBoundNicoleAnatomyBundle(null);
   }, [groundedTeacherDraft.kind]);
 
   // Dynamic MediaPipe Landmarks
@@ -365,6 +372,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     captureQuality: nicoleProCaptureQuality,
     landmarkModel: NICOLE_PRO_LANDMARK_MODEL_V1,
   });
+  const currentNicoleAnatomyCandidate = assessmentValueForCurrentContext(
+    boundNicoleAnatomyBundle,
+    currentAnalysisContextEpoch,
+  );
+  const currentNicoleAnatomyBundle = nicoleAnatomyBundleMatchesNicoleProDraft({
+    bundle: currentNicoleAnatomyCandidate,
+    draft: currentNicoleProDraft,
+    currentContext: currentAnalysisContextEpoch,
+  }) ? currentNicoleAnatomyCandidate : null;
   const groundedDraftTakeoverAvailable = groundedDraftMatchesCurrentSelection({
     grounded: currentGroundedTeacherDraft,
     currentContext: currentAnalysisContextEpoch,
@@ -424,6 +440,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
       setAssessmentRequest(null);
       setBoundGroundedTeacherAssessment(null);
       setBoundNicoleProDraft(null);
+      setBoundNicoleAnatomyBundle(null);
       clearSkeletonSelection('analysis_stale');
       clearTeacherPhaseAssessment();
       return;
@@ -750,6 +767,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     setIsPreIndexing(true);
     setBoundGroundedTeacherAssessment(null);
     setBoundNicoleProDraft(null);
+    setBoundNicoleAnatomyBundle(null);
     clearSkeletonSelection('analysis_stale');
     clearTeacherPhaseAssessment();
     setLoadedFromCache(false);
@@ -1480,10 +1498,19 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                       generatedAt: new Date().toISOString(),
                     })
                     : null;
+                  const anatomyBundle = proDraft && assessmentContext
+                    ? planNicoleAnatomyForNicoleProDraft({
+                      draft: proDraft,
+                      currentContext: assessmentContext,
+                    })
+                    : null;
                   groundedDraftRequestContextRef.current = null;
                   setBoundGroundedTeacherAssessment(groundedAssessment);
                   setBoundNicoleProDraft(proDraft && assessmentContext
                     ? bindAssessmentIfCurrent(assessmentContext, currentAnalysisContextEpochRef.current, proDraft)
+                    : null);
+                  setBoundNicoleAnatomyBundle(anatomyBundle && assessmentContext
+                    ? bindAssessmentIfCurrent(assessmentContext, currentAnalysisContextEpochRef.current, anatomyBundle)
                     : null);
                   updateGroundedTeacherDraft(refreshedDraft);
                 }
@@ -4200,6 +4227,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   selectedTargetIdentity={selectedSkeletonTarget}
                   groundedTeacherDraft={groundedTeacherDraftForCurrentContext}
                   nicoleProDraft={currentNicoleProDraft}
+                  nicoleAnatomyBundle={currentNicoleAnatomyBundle}
                   nicoleProCaptureQuality={nicoleProCaptureQuality}
                   currentAnalysisContext={currentAnalysisContextEpoch}
                   onAddToCueManager={currentNicoleProDraft
