@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BookOpen, FlaskConical, History, LockKeyhole, UserRound, X } from 'lucide-react';
 import type { MotionReferenceLibraryEntry } from '../services/motionReferenceLibrary';
@@ -77,6 +77,10 @@ export const MotionReferenceLibraryPanel: React.FC<MotionReferenceLibraryPanelPr
   const [tab, setTab] = useState<LibraryTab>('nicole');
   const [exercise, setExercise] = useState<ExerciseFilter>(normalizedCurrentExercise);
   const [view, setView] = useState<ViewFilter>('all');
+
+  useEffect(() => {
+    setExercise(normalizedCurrentExercise);
+  }, [normalizedCurrentExercise]);
 
   const filteredNicole = useMemo(() => nicoleRecords.filter(record => {
     const binding = record.versions.find(version => version.versionId === record.currentVersionId)?.phaseBinding;

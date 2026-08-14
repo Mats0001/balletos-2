@@ -124,4 +124,31 @@ describe('cross-video reference library', () => {
     expect(screen.getByText('Fußbahn ruhiger')).toBeTruthy();
     expect(screen.getByText(/keine Sollreferenz und keine Prozentnote/i)).toBeTruthy();
   });
+
+  it('follows the current exercise after the analysis context changes', () => {
+    const { rerender } = render(<MotionReferenceLibraryPanel
+      open
+      onClose={() => undefined}
+      currentExerciseId="plie"
+      currentVideoSourceId="/videos/student-plie.mp4"
+      nicoleRecords={[]}
+      technicalSources={MOTION_REFERENCE_LIBRARY}
+      attempts={[]}
+    />);
+
+    const exerciseFilter = screen.getByRole('combobox', { name: 'Übung filtern' }) as HTMLSelectElement;
+    expect(exerciseFilter.value).toBe('plie');
+
+    rerender(<MotionReferenceLibraryPanel
+      open
+      onClose={() => undefined}
+      currentExerciseId="tendu"
+      currentVideoSourceId="/videos/student-tendu.mp4"
+      nicoleRecords={[]}
+      technicalSources={MOTION_REFERENCE_LIBRARY}
+      attempts={[]}
+    />);
+
+    expect(exerciseFilter.value).toBe('tendu');
+  });
 });
