@@ -10,6 +10,7 @@ import {
   type NicoleAnatomyClaimAnnotationV1,
   type NicoleAnatomyDifferentiationAnnotationV1,
   type NicoleAnatomyHypothesisAnnotationV1,
+  type NicoleAnatomyHypothesisProfileV1,
   type NicoleAnatomyKnowledgeItemV1,
   type NicoleAnatomyKnowledgeRegistryV1,
   type NicoleAnatomyProBundleV1,
@@ -21,7 +22,7 @@ import {
 
 export const NICOLE_PRO_ANATOMY_VALIDATOR_VERSION = 'nicole-pro-anatomy-validator-v1' as const;
 export const NICOLE_PRO_ANATOMY_REGISTRY_ID = 'balletos-nicole-anatomy-pro' as const;
-export const NICOLE_PRO_ANATOMY_REGISTRY_VERSION = '1.0.0' as const;
+export const NICOLE_PRO_ANATOMY_REGISTRY_VERSION = '1.1.0' as const;
 
 type PlainObject = Record<string, unknown>;
 
@@ -96,6 +97,28 @@ const POLICY_SOURCE = Object.freeze({
   limitations: 'Internal product boundary; not a clinical validation or a medical source.',
 });
 
+const ILIOPSOAS_SOURCE = Object.freeze({
+  sourceId: 'ncbi-bookshelf:NBK560799',
+  title: 'Psoas Muscle Procedures — Anatomy and Physiology',
+  locator: 'https://www.ncbi.nlm.nih.gov/books/NBK560799/',
+  evidenceKind: 'textbook' as const,
+  population: 'general human anatomy; not ballet-specific',
+  scope: 'Iliopsoas hip-flexion function and possible spinal stabilization during hip flexion.',
+  versionOrDate: 'accessed 2026-08-14',
+  limitations: 'General anatomy does not establish individual muscle length, strength, dysfunction or causality from video.',
+});
+
+const PIRIFORMIS_SOURCE = Object.freeze({
+  sourceId: 'ncbi-bookshelf:NBK519497',
+  title: 'Anatomy, Bony Pelvis and Lower Limb: Piriformis Muscle',
+  locator: 'https://www.ncbi.nlm.nih.gov/books/NBK519497/',
+  evidenceKind: 'textbook' as const,
+  population: 'general human anatomy; not ballet-specific',
+  scope: 'Piriformis function varies with hip position, including lateral rotation in extension and abduction in flexion.',
+  versionOrDate: 'updated 2023-11-13; accessed 2026-08-14',
+  limitations: 'General anatomy does not establish individual muscle length, strength, dysfunction or causality from video.',
+});
+
 const EPISTEMIC_BOUNDARY_ITEM = Object.freeze({
   schemaVersion: NICOLE_PRO_ANATOMY_SCHEMA_VERSION,
   itemId: 'anatomy:boundary:single-view-does-not-establish-cause',
@@ -131,15 +154,96 @@ const PROFILE_VIEW_BOUNDARY_ITEM = Object.freeze({
   statement: 'A profile-view 2D movement pattern does not establish an individual anatomical cause.',
 });
 
+const ILIOPSOAS_FUNCTION_ITEM = Object.freeze({
+  schemaVersion: NICOLE_PRO_ANATOMY_SCHEMA_VERSION,
+  itemId: 'anatomy:function:iliopsoas-lumbopelvic-v1',
+  version: '1.0.0',
+  reviewState: 'ai_draft' as const,
+  scientificValidation: 'source_supported' as const,
+  sourceRefs: [ILIOPSOAS_SOURCE],
+  applicability: {
+    exerciseIds: ['plie'] as const,
+    phaseIds: ['*'],
+    sides: ['center'] as const,
+    views: ['frontal', 'profile_left', 'profile_right'] as const,
+    ageScopes: ['unspecified'] as const,
+  },
+  internalOnly: true as const,
+  outwardEligibility: false as const,
+  kind: 'functional_chain' as const,
+  epistemicKind: 'general_knowledge' as const,
+  statement: 'Der Iliopsoas wirkt allgemein an der Hüftbeugung mit und kann während der Hüftbeugung zur Wirbelsäulenstabilisierung beitragen; seine individuelle Beteiligung ist aus einem einzelnen 2D-Frame nicht bestimmbar.',
+  steps: [
+    { stepId: 'iliopsoas:hip-flexion', subjectConceptId: 'iliopsoas', relation: 'coordinates_with' as const, objectConceptId: 'hip_flexion' },
+    { stepId: 'iliopsoas:lumbopelvic', subjectConceptId: 'iliopsoas', relation: 'may_influence' as const, objectConceptId: 'lumbopelvic_organization' },
+  ],
+  alternativeKnowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId],
+});
+
+const PIRIFORMIS_FUNCTION_ITEM = Object.freeze({
+  schemaVersion: NICOLE_PRO_ANATOMY_SCHEMA_VERSION,
+  itemId: 'anatomy:function:piriformis-position-dependent-v1',
+  version: '1.0.0',
+  reviewState: 'ai_draft' as const,
+  scientificValidation: 'source_supported' as const,
+  sourceRefs: [PIRIFORMIS_SOURCE],
+  applicability: {
+    exerciseIds: ['plie'] as const,
+    phaseIds: ['*'],
+    sides: ['bilateral'] as const,
+    views: ['frontal'] as const,
+    ageScopes: ['unspecified'] as const,
+  },
+  internalOnly: true as const,
+  outwardEligibility: false as const,
+  kind: 'functional_chain' as const,
+  epistemicKind: 'general_knowledge' as const,
+  statement: 'Die allgemeine Funktion des Piriformis ist hüftpositionsabhängig; daraus folgt weder ein individueller Kraft-/Längenbefund noch eine Ursache für die sichtbare Bewegung.',
+  steps: [
+    { stepId: 'piriformis:extension', subjectConceptId: 'piriformis', relation: 'coordinates_with' as const, objectConceptId: 'lateral_rotation_in_hip_extension' },
+    { stepId: 'piriformis:flexion', subjectConceptId: 'piriformis', relation: 'coordinates_with' as const, objectConceptId: 'abduction_in_hip_flexion' },
+  ],
+  alternativeKnowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId],
+});
+
+const LEGACY_HYPOTHESIS_PROFILES: readonly NicoleAnatomyHypothesisProfileV1[] = cloneAndDeepFreeze([
+  { profileId: 'profile:shoulder-arm-timing', sourceConceptId: 'shoulder_arm_timing', hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:intentional-epaulement', sourceConceptId: 'intentional_epaulement', hypothesisDomain: 'technical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:upper-body-weight-transfer', sourceConceptId: 'upper_body_weight_transfer', hypothesisDomain: 'coordination', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:torso-weight-transfer', sourceConceptId: 'torso_weight_transfer_timing', hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:intentional-torso-line', sourceConceptId: 'intentional_torso_inclination', hypothesisDomain: 'technical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:torso-camera', sourceConceptId: 'torso_camera_projection', hypothesisDomain: 'capture_artifact', hypothesisRole: 'artifact', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:pelvis-weight-shift', sourceConceptId: 'pelvis_weight_shift', hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:pelvis-torso', sourceConceptId: 'pelvis_torso_coordination', hypothesisDomain: 'coordination', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+  { profileId: 'profile:pelvis-camera', sourceConceptId: 'pelvis_camera_projection', hypothesisDomain: 'capture_artifact', hypothesisRole: 'artifact', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId] },
+]);
+
+const CURRENT_HYPOTHESIS_PROFILES: readonly NicoleAnatomyHypothesisProfileV1[] = cloneAndDeepFreeze([
+  ...LEGACY_HYPOTHESIS_PROFILES,
+  { profileId: 'profile:iliopsoas-chain', sourceConceptId: 'iliopsoas_lumbopelvic_coordination_hypothesis', hypothesisDomain: 'anatomical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId, ILIOPSOAS_FUNCTION_ITEM.itemId] },
+  { profileId: 'profile:piriformis-chain', sourceConceptId: 'deep_hip_rotator_piriformis_coordination_hypothesis', hypothesisDomain: 'anatomical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis', knowledgeItemIds: [EPISTEMIC_BOUNDARY_ITEM.itemId, PIRIFORMIS_FUNCTION_ITEM.itemId] },
+]);
+
+const NICOLE_PRO_ANATOMY_TRUSTED_REGISTRY_1_0: NicoleAnatomyKnowledgeRegistryV1 = cloneAndDeepFreeze({
+  schemaVersion: NICOLE_PRO_ANATOMY_SCHEMA_VERSION,
+  registryId: NICOLE_PRO_ANATOMY_REGISTRY_ID,
+  registryVersion: '1.0.0',
+  sources: [POLICY_SOURCE],
+  items: [EPISTEMIC_BOUNDARY_ITEM, PROFILE_VIEW_BOUNDARY_ITEM],
+  hypothesisProfiles: LEGACY_HYPOTHESIS_PROFILES,
+});
+
 export const NICOLE_PRO_ANATOMY_TRUSTED_REGISTRY_V1: NicoleAnatomyKnowledgeRegistryV1 = cloneAndDeepFreeze({
   schemaVersion: NICOLE_PRO_ANATOMY_SCHEMA_VERSION,
   registryId: NICOLE_PRO_ANATOMY_REGISTRY_ID,
   registryVersion: NICOLE_PRO_ANATOMY_REGISTRY_VERSION,
-  sources: [POLICY_SOURCE],
-  items: [EPISTEMIC_BOUNDARY_ITEM, PROFILE_VIEW_BOUNDARY_ITEM],
+  sources: [POLICY_SOURCE, ILIOPSOAS_SOURCE, PIRIFORMIS_SOURCE],
+  items: [EPISTEMIC_BOUNDARY_ITEM, PROFILE_VIEW_BOUNDARY_ITEM, ILIOPSOAS_FUNCTION_ITEM, PIRIFORMIS_FUNCTION_ITEM],
+  hypothesisProfiles: CURRENT_HYPOTHESIS_PROFILES,
 });
 
 export const NICOLE_PRO_ANATOMY_REGISTRY_ARCHIVE: readonly NicoleAnatomyKnowledgeRegistryV1[] = cloneAndDeepFreeze([
+  NICOLE_PRO_ANATOMY_TRUSTED_REGISTRY_1_0,
   NICOLE_PRO_ANATOMY_TRUSTED_REGISTRY_V1,
 ]);
 
@@ -234,23 +338,6 @@ const HYPOTHESIS_DOMAINS = new Set(['anatomical', 'coordination', 'technical', '
 const HYPOTHESIS_ROLES = new Set(['working', 'alternative', 'artifact']);
 const ALLOWED_PERFORMERS = new Set(['nicole', 'qualified_teacher', 'health_professional']);
 const TEST_SAFETY_CLASSES = new Set(['observation_only', 'low_load_teacher_task', 'clinical_only']);
-type HypothesisClassification = Readonly<Pick<
-  NicoleAnatomyHypothesisAnnotationV1,
-  'hypothesisDomain' | 'hypothesisRole' | 'epistemicKind'
->>;
-
-/** Product-owned classification of the current deterministic Nicole-Pro hypothesis statements. */
-const SOURCE_CLAIM_CLASSIFICATION_BY_CONCEPT: Readonly<Record<string, HypothesisClassification>> = cloneAndDeepFreeze({
-  shoulder_arm_timing: { hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis' },
-  intentional_epaulement: { hypothesisDomain: 'technical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis' },
-  upper_body_weight_transfer: { hypothesisDomain: 'coordination', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis' },
-  torso_weight_transfer_timing: { hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis' },
-  intentional_torso_inclination: { hypothesisDomain: 'technical', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis' },
-  torso_camera_projection: { hypothesisDomain: 'capture_artifact', hypothesisRole: 'artifact', epistemicKind: 'counter_hypothesis' },
-  pelvis_weight_shift: { hypothesisDomain: 'coordination', hypothesisRole: 'working', epistemicKind: 'working_hypothesis' },
-  pelvis_torso_coordination: { hypothesisDomain: 'coordination', hypothesisRole: 'alternative', epistemicKind: 'counter_hypothesis' },
-  pelvis_camera_projection: { hypothesisDomain: 'capture_artifact', hypothesisRole: 'artifact', epistemicKind: 'counter_hypothesis' },
-});
 const CONTRAINDICATION_CODES = new Set(['pain_reported', 'acute_injury_reported', 'not_cleared']);
 
 function reviewStateValid(value: unknown): boolean {
@@ -353,6 +440,7 @@ function validateClaimAnnotations(
   bundle: NicoleAnatomyProBundleV1,
   bindingById: ReadonlyMap<string, NicoleAnatomyProBundleV1['claimBindings'][number]>,
   knowledgeById: ReadonlyMap<string, NicoleAnatomyKnowledgeItemV1>,
+  profileBySourceConcept: ReadonlyMap<string, NicoleAnatomyHypothesisProfileV1>,
   claimById: ReadonlyMap<string, NicoleProClaimV1>,
   issues: NicoleAnatomyValidationIssueV1[],
 ): void {
@@ -398,18 +486,25 @@ function validateClaimAnnotations(
         return;
       }
       const sourceClaim = claimById.get(annotation.sourceClaimId);
-      const sourceClassifications = sourceClaim
-        ? [...new Set(sourceClaim.conceptIds.map(conceptId => SOURCE_CLAIM_CLASSIFICATION_BY_CONCEPT[conceptId])
-          .filter(Boolean).map(canonicalJson))].map(value => JSON.parse(value) as HypothesisClassification)
+      const sourceProfiles = sourceClaim
+        ? [...new Set(sourceClaim.conceptIds.map(conceptId => profileBySourceConcept.get(conceptId))
+          .filter(Boolean).map(profile => profile!.profileId))].map(profileId => (
+          [...profileBySourceConcept.values()].find(profile => profile.profileId === profileId)!
+        ))
         : [];
       if (!sourceClaim || sourceClaim.type !== 'teacher_hypothesis') {
         issue(issues, 'unknown_reference', `${path}.sourceClaimId`, 'Annotation must reference an exact deterministic current Nicole-Pro hypothesis claim.');
-      } else if (sourceClassifications.length !== 1
-        || canonicalJson(sourceClassifications[0]) !== canonicalJson({
+      } else if (sourceProfiles.length !== 1
+        || canonicalJson({
+          hypothesisDomain: sourceProfiles[0].hypothesisDomain,
+          hypothesisRole: sourceProfiles[0].hypothesisRole,
+          epistemicKind: sourceProfiles[0].epistemicKind,
+        }) !== canonicalJson({
           hypothesisDomain: annotation.hypothesisDomain,
           hypothesisRole: annotation.hypothesisRole,
           epistemicKind: annotation.epistemicKind,
-        })) {
+        })
+        || !sameStringSet(sourceProfiles[0].knowledgeItemIds, annotation.knowledgeItemIds)) {
         issue(issues, 'invalid_epistemic_kind', path, 'Hypothesis epistemic kind, role and domain must match the product-owned source-claim classification.');
       }
       const bindings = annotation.claimBindingIds.map(id => bindingById.get(id));
@@ -579,6 +674,13 @@ export function validateNicoleAnatomyProBundle(
     const evidenceIds = new Set(authority.nicoleProDraft.evidence.map(evidence => evidence.evidenceId));
     const bindingById = validateClaimBindings(bundle, claimById, evidenceIds, issues);
     const knowledgeById = validateKnowledgeItems(bundle, authority.knowledgeRegistry, authority.expectedContext, issues);
+    const profileBySourceConcept = new Map<string, NicoleAnatomyHypothesisProfileV1>();
+    for (const profile of authority.knowledgeRegistry.hypothesisProfiles) {
+      if (profileBySourceConcept.has(profile.sourceConceptId)) {
+        issue(issues, 'invalid_shape', 'knowledgeRegistry.hypothesisProfiles', 'Source concepts must have one product-owned Anatomy profile.');
+      }
+      profileBySourceConcept.set(profile.sourceConceptId, profile);
+    }
 
     if (bundle.origin === 'ai_suggestion') {
       if (bundle.claimBindings.length === 0 || bundle.knowledgeItems.length === 0 || bundle.claimAnnotations.length === 0) {
@@ -593,7 +695,7 @@ export function validateNicoleAnatomyProBundle(
       if (bundle.expertNotes.length > 0) {
         issue(issues, 'non_computational_boundary', 'expertNotes', 'AI output cannot author Nicole expert notes.');
       }
-      validateClaimAnnotations(bundle, bindingById, knowledgeById, claimById, issues);
+      validateClaimAnnotations(bundle, bindingById, knowledgeById, profileBySourceConcept, claimById, issues);
     } else {
       if (bundle.claimBindings.length > 0 || bundle.knowledgeItems.length > 0 || bundle.claimAnnotations.length > 0
         || bundle.humanSignals.length > 0 || bundle.safetyActions.length > 0 || bundle.expertNotes.length === 0) {

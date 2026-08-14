@@ -6,9 +6,12 @@ import { planNicoleProDraft } from '../services/nicoleProContentPlanner';
 import {
   anatomyAnnotationTargetClaimType,
   createNicoleAnatomyValidationAuthority,
+  NICOLE_PRO_ANATOMY_REGISTRY_ARCHIVE,
   NICOLE_PRO_ANATOMY_TRUSTED_REGISTRY_V1,
+  resolveNicoleProAnatomyRegistry,
   validateNicoleAnatomyProBundle,
 } from '../services/nicoleProAnatomyValidator';
+import { planNicoleAnatomyProBundle } from '../services/nicoleProAnatomyPlanner';
 import type { NicoleProClaimV1, NicoleProEvidencePacketV1 } from '../types/nicoleProContent';
 import type {
   NicoleAnatomyDifferentiationAnnotationV1,
@@ -62,19 +65,25 @@ const context = {
   generation: evidence.analysisContextGeneration,
 };
 
-function fixture() {
+function fixture(packet: NicoleProEvidencePacketV1 = evidence) {
+  const currentContext = {
+    ...context,
+    context: { ...context.context, sourceId: packet.sourceId, exerciseId: packet.exerciseId },
+    fingerprint: packet.analysisContextFingerprint,
+    generation: packet.analysisContextGeneration,
+  };
   const nicoleProAuthority = createNicoleProValidationAuthority({
-    currentContext: context,
+    currentContext,
     assessment: {
       schemaVersion: 1,
-      contextFingerprint: context.fingerprint,
-      contextGeneration: context.generation,
+      contextFingerprint: currentContext.fingerprint,
+      contextGeneration: currentContext.generation,
       value: {
-        analysisArtifactId: evidence.analysisArtifactId,
-        sourceId: evidence.sourceId,
-        exerciseId: evidence.exerciseId,
-        policyVersion: evidence.policyVersion,
-        evidence: [evidence],
+        analysisArtifactId: packet.analysisArtifactId,
+        sourceId: packet.sourceId,
+        exerciseId: packet.exerciseId,
+        policyVersion: packet.policyVersion,
+        evidence: [packet],
       },
     },
   });
@@ -82,18 +91,18 @@ function fixture() {
   const draft = planNicoleProDraft({
     draftId: 'draft:anatomy-contract',
     generatedAt: '2026-08-14T08:00:00.000Z',
-    evidenceId: evidence.evidenceId,
+    evidenceId: packet.evidenceId,
     authority: nicoleProAuthority,
-    currentContext: context,
+    currentContext,
   });
   if (!draft) throw new Error('Fixture must plan the parent Nicole-Pro draft.');
   const authority = createNicoleAnatomyValidationAuthority({
     draft,
     nicoleProAuthority,
-    currentContext: context,
-    phaseId: evidence.phaseId,
-    side: evidence.side,
-    view: evidence.view,
+    currentContext,
+    phaseId: packet.phaseId,
+    side: packet.side,
+    view: packet.view,
   });
   if (!authority) throw new Error('Fixture must mint the Anatomy Pro authority.');
   const visual = draft.claims.find(claim => claim.type === 'visual_observation');
@@ -102,7 +111,7 @@ function fixture() {
   const hypotheses = draft.claims.filter(claim => claim.type === 'teacher_hypothesis');
   const tests = draft.claims.filter(claim => claim.type === 'differentiation_test');
   if (hypotheses.length < 3 || tests.length < 3) throw new Error('Fixture requires multiple paired hypotheses and tests.');
-  return { authority, draft, visual, metric, hypotheses, tests };
+  return { authority, currentContext, draft, visual, metric, hypotheses, tests };
 }
 
 function hypothesis(
@@ -377,6 +386,10 @@ describe('Nicole Anatomy Pro contract V1', () => {
     expect(Object.isFrozen(item)).toBe(true);
     expect(Object.isFrozen(item.sourceRefs[0])).toBe(true);
     expect(Object.isFrozen(item.applicability.exerciseIds)).toBe(true);
+    expect(resolveNicoleProAnatomyRegistry('balletos-nicole-anatomy-pro', '1.0.0'))
+      .toBe(NICOLE_PRO_ANATOMY_REGISTRY_ARCHIVE[0]);
+    expect(resolveNicoleProAnatomyRegistry('balletos-nicole-anatomy-pro', '1.1.0'))
+      .toBe(NICOLE_PRO_ANATOMY_REGISTRY_ARCHIVE[1]);
   });
 
   it('requires a counterhypothesis including a capture-artifact alternative', () => {
@@ -475,5 +488,74 @@ describe('Nicole Anatomy Pro contract V1', () => {
       'teacher_hypothesis', 'teacher_hypothesis', 'teacher_hypothesis',
       'differentiation_test', 'differentiation_test', 'differentiation_test',
     ]);
+  });
+
+  it('plans a deterministic internal Iliopsoas knowledge chain over existing torso claims', () => {
+    const built = fixture();
+    const bundle = planNicoleAnatomyProBundle({
+      bundleId: 'anatomy:planned:spine',
+      createdAt: '2026-08-14T09:00:00.000Z',
+      authority: built.authority,
+      currentContext: built.currentContext,
+    });
+    expect(bundle).not.toBeNull();
+    expect(bundle?.internalOnly).toBe(true);
+    expect(bundle?.outwardEligibility).toBe(false);
+    expect(bundle?.humanSignals).toEqual([]);
+    expect(bundle?.safetyActions).toEqual([]);
+    expect(bundle?.claimAnnotations.filter(item => item.kind === 'hypothesis_annotation')).toHaveLength(4);
+    expect(bundle?.claimAnnotations.filter(item => item.kind === 'differentiation_annotation')).toHaveLength(4);
+    const muscleClaim = built.draft.claims.find(claim => claim.type === 'teacher_hypothesis'
+      && claim.text.includes('Iliopsoas'));
+    const muscleAnnotation = bundle?.claimAnnotations.find(item => item.kind === 'hypothesis_annotation'
+      && item.sourceClaimId === muscleClaim?.claimId);
+    expect(muscleAnnotation).toMatchObject({
+      epistemicKind: 'counter_hypothesis',
+      hypothesisDomain: 'anatomical',
+      hypothesisRole: 'alternative',
+      scientificValidation: 'curated_internal',
+    });
+    expect(muscleAnnotation && 'knowledgeItemIds' in muscleAnnotation
+      ? muscleAnnotation.knowledgeItemIds : []).toContain('anatomy:function:iliopsoas-lumbopelvic-v1');
+    expect(bundle?.knowledgeItems.find(item => item.itemId === 'anatomy:function:iliopsoas-lumbopelvic-v1'))
+      .toMatchObject({ scientificValidation: 'source_supported', outwardEligibility: false });
+    expect(bundle?.claimAnnotations.some(item => 'text' in item || 'prompt' in item)).toBe(false);
+    expect(validateNicoleAnatomyProBundle(bundle, built.authority, built.currentContext).valid).toBe(true);
+  });
+
+  it('plans the position-dependent Piriformis chain without strength, length or cause claims', () => {
+    const pelvisEvidence: NicoleProEvidencePacketV1 = {
+      ...evidence,
+      evidenceId: 'evidence:pelvis:frame-2500',
+      side: 'bilateral',
+      metricId: 'projected_hip_line_obliquity',
+      definitionVersion: 'pelvis-line-image-v1',
+      value: 6.4,
+    };
+    const built = fixture(pelvisEvidence);
+    const bundle = planNicoleAnatomyProBundle({
+      bundleId: 'anatomy:planned:pelvis',
+      createdAt: '2026-08-14T09:01:00.000Z',
+      authority: built.authority,
+      currentContext: built.currentContext,
+    });
+    const piriformisKnowledge = bundle?.knowledgeItems.find(item => (
+      item.itemId === 'anatomy:function:piriformis-position-dependent-v1'
+    ));
+    expect(piriformisKnowledge?.statement).toContain('hüftpositionsabhängig');
+    expect(piriformisKnowledge?.statement).toContain('weder ein individueller Kraft-/Längenbefund noch eine Ursache');
+    expect(piriformisKnowledge?.sourceRefs[0].sourceId).toBe('ncbi-bookshelf:NBK519497');
+    expect(piriformisKnowledge?.statement).not.toMatch(/diagnos|schwach|verkürzt|verursacht/iu);
+    expect(bundle && validateNicoleAnatomyProBundle(bundle, built.authority, built.currentContext).valid).toBe(true);
+  });
+
+  it('refuses to plan with a stale A0 Anatomy authority after A to B to A2', () => {
+    const built = fixture();
+    expect(planNicoleAnatomyProBundle({
+      bundleId: 'anatomy:planned:stale',
+      createdAt: '2026-08-14T09:02:00.000Z',
+      authority: built.authority,
+      currentContext: { ...built.currentContext, generation: built.currentContext.generation + 2 },
+    })).toBeNull();
   });
 });

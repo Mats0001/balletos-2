@@ -93,12 +93,22 @@ export type NicoleAnatomyKnowledgeItemV1 =
   | NicoleAnatomyFactV1
   | NicoleAnatomyFunctionalChainV1;
 
+export interface NicoleAnatomyHypothesisProfileV1 {
+  profileId: string;
+  sourceConceptId: string;
+  epistemicKind: 'working_hypothesis' | 'counter_hypothesis';
+  hypothesisDomain: 'anatomical' | 'coordination' | 'technical' | 'capture_artifact';
+  hypothesisRole: 'working' | 'alternative' | 'artifact';
+  knowledgeItemIds: readonly string[];
+}
+
 export interface NicoleAnatomyKnowledgeRegistryV1 {
   schemaVersion: typeof NICOLE_PRO_ANATOMY_SCHEMA_VERSION;
   registryId: string;
   registryVersion: string;
   sources: readonly NicoleAnatomyStructuredSourceRefV1[];
   items: readonly NicoleAnatomyKnowledgeItemV1[];
+  hypothesisProfiles: readonly NicoleAnatomyHypothesisProfileV1[];
 }
 
 export interface NicoleAnatomyClaimBindingV1 {
