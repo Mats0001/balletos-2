@@ -64,6 +64,7 @@ import {
   cueReviewAuditIsValid,
   cueReviewExpectedState,
   projectCueReviewAudit,
+  projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
   nicoleProStudentDerivationReadiness,
@@ -511,6 +512,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [claimEditState, setClaimEditState] = useState<Readonly<{
     cueId: string;
     claimId: string;
+    text: string;
+  }> | null>(null);
+  const [anatomyNoteEditState, setAnatomyNoteEditState] = useState<Readonly<{
+    cueId: string;
     text: string;
   }> | null>(null);
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
@@ -2610,6 +2615,23 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     } catch (error) {
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
       showAnalyseToast(error instanceof Error ? error.message : 'Claim-Prüfung konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleNicoleAnatomyExpertNote = (cueId: string, text: string) => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.recordNicoleAnatomyExpertNote(
+        selectedDevVideoUrl,
+        cueId,
+        text,
+        cueReviewExpectedState(cue.reviewAudit),
+      ));
+      setAnatomyNoteEditState(null);
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Interne Fachnotiz konnte nicht gespeichert werden.');
     }
   };
 
@@ -5066,6 +5088,10 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 ? projectNicoleProClaimReviews(cue.reviewAudit)
                 : [];
               const anatomySnapshot = nicoleProOrigin?.anatomyBundle ?? null;
+              const currentAnatomyExpertNote = cue.reviewAudit && anatomySnapshot
+                ? projectCurrentNicoleAnatomyExpertNote(cue.reviewAudit)
+                : null;
+              const editingAnatomyExpertNote = anatomyNoteEditState?.cueId === cue.id;
               const nicoleProClaimReviewById = new Map(
                 nicoleProClaimReviews.map(item => [item.claim.claimId, item]),
               );
@@ -5619,6 +5645,40 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                 </div>
                               );
                             })}
+                            <div style={{ borderTop: '1px solid rgba(94,234,212,0.14)', paddingTop: '7px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '9px', color: '#99f6e4', fontWeight: 900 }}>Interne Fachnotiz</span>
+                                <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.38)' }}>lokaler Eintrag · Autorenschaft nicht kryptografisch bestätigt</span>
+                              </div>
+                              {editingAnatomyExpertNote ? (
+                                <>
+                                  <textarea
+                                    value={anatomyNoteEditState.text}
+                                    onChange={event => setAnatomyNoteEditState({ cueId: cue.id, text: event.target.value })}
+                                    onClick={event => event.stopPropagation()}
+                                    placeholder="Nicoles interne anatomische oder biomechanische Arbeitshypothese …"
+                                    style={{ width: '100%', minHeight: '82px', resize: 'vertical', boxSizing: 'border-box', background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(94,234,212,0.28)', color: '#fff', borderRadius: '6px', padding: '7px', fontSize: '10px', lineHeight: 1.5 }}
+                                  />
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                    <button onClick={event => { event.stopPropagation(); handleNicoleAnatomyExpertNote(cue.id, anatomyNoteEditState.text); }} style={{ background: 'rgba(94,234,212,0.12)', border: '1px solid rgba(94,234,212,0.3)', color: '#99f6e4', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Notiz revisionssicher speichern</button>
+                                    <button onClick={event => { event.stopPropagation(); setAnatomyNoteEditState(null); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.55)', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Abbrechen</button>
+                                  </div>
+                                </>
+                              ) : currentAnatomyExpertNote ? (
+                                <>
+                                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.8)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{currentAnatomyExpertNote.text}</div>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.35)' }}>{currentAnatomyExpertNote.actorId} · {new Date(currentAnatomyExpertNote.recordedAt).toLocaleString('de-DE')}</span>
+                                    <button disabled={auditProjection.provenance === 'nicole_rejected'} onClick={event => { event.stopPropagation(); if (auditProjection.provenance === 'nicole_rejected') return; setAnatomyNoteEditState({ cueId: cue.id, text: currentAnatomyExpertNote.text }); }} style={{ background: 'transparent', border: '1px solid rgba(94,234,212,0.24)', color: auditProjection.provenance === 'nicole_rejected' ? 'rgba(255,255,255,0.28)' : '#99f6e4', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: auditProjection.provenance === 'nicole_rejected' ? 'not-allowed' : 'pointer' }}>Bearbeiten</button>
+                                  </div>
+                                </>
+                              ) : (
+                                <button disabled={auditProjection.provenance === 'nicole_rejected'} onClick={event => { event.stopPropagation(); if (auditProjection.provenance === 'nicole_rejected') return; setAnatomyNoteEditState({ cueId: cue.id, text: '' }); }} style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid rgba(94,234,212,0.24)', color: auditProjection.provenance === 'nicole_rejected' ? 'rgba(255,255,255,0.28)' : '#99f6e4', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: auditProjection.provenance === 'nicole_rejected' ? 'not-allowed' : 'pointer' }}>+ Interne Fachnotiz</button>
+                              )}
+                              <div style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.4)', lineHeight: 1.45 }}>
+                                Freier interner Arbeitsraum für Nicole. Die Notiz verändert keine Messung, Ampel, Hypothesenwertung, Safety-Aktion oder Schüler-/Elternfassung.
+                              </div>
+                            </div>
                             <div style={{ borderTop: '1px solid rgba(129,140,248,0.16)', paddingTop: '6px', fontSize: '8.5px', color: 'rgba(255,255,255,0.44)', lineHeight: 1.45 }}>
                               Dieser einzelne 2D-Frame bestimmt weder Muskelkraft, Muskellänge noch eine alleinige Ursache. Nicole prüft die fallbezogenen Arbeitshypothesen separat.
                             </div>

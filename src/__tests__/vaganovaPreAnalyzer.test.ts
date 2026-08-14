@@ -14,6 +14,7 @@ import {
   approveCueReviewAudit,
   contentFromGroundedDraft,
   createGroundedCueReviewAudit,
+  projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
   setCueReviewAudience,
@@ -361,6 +362,39 @@ describe('audited cue persistence guard', () => {
     expect(first[0].reviewAudit?.origin.nicoleProPayload?.draft).toEqual(proDraft);
     expect(first[0].reviewAudit?.origin.nicoleProPayload?.anatomyBundle).toEqual(anatomyBundle);
     expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual(first);
+  });
+
+  it('persists an append-only internal Anatomy expert note and reloads its latest revision', () => {
+    installMemoryStorage();
+    const fixture = nicoleProFixture();
+    if (!fixture.anatomyBundle) throw new Error('Expected Anatomy-Pro fixture.');
+    let [point] = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, fixture.proDraft, target,
+      fixture.currentContext, 'ready', 'Plié – Tiefpunkt', fixture.anatomyBundle,
+    );
+    const stale = cueReviewExpectedState(point.reviewAudit!);
+    [point] = vaganovaPreAnalyzer.recordNicoleAnatomyExpertNote(
+      target.sourceId,
+      point.id,
+      'Piriformis und Iliopsoas werden als getrennte interne Arbeitshypothesen geprüft.',
+      stale,
+    );
+    [point] = vaganovaPreAnalyzer.recordNicoleAnatomyExpertNote(
+      target.sourceId,
+      point.id,
+      'Nicole dokumentiert den sicheren Differenzierungsschritt; Kraft, Länge und Ursache bleiben offen.',
+      cueReviewExpectedState(point.reviewAudit!),
+    );
+
+    const reloaded = vaganovaPreAnalyzer.getCuePoints(target.sourceId)[0];
+    expect(projectCurrentNicoleAnatomyExpertNote(reloaded.reviewAudit!)).toMatchObject({
+      text: 'Nicole dokumentiert den sicheren Differenzierungsschritt; Kraft, Länge und Ursache bleiben offen.',
+      authorship: 'local_reviewer_entry_unverified',
+    });
+    expect(reloaded.reviewAudit?.events.filter(item => item.type === 'anatomy_expert_note_recorded')).toHaveLength(2);
+    expect(() => vaganovaPreAnalyzer.recordNicoleAnatomyExpertNote(
+      target.sourceId, point.id, 'Stale write', stale,
+    )).toThrow(/changed/i);
   });
 
   it('persists append-only claim reviews and a separate derived student copy', () => {

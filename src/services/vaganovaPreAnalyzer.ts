@@ -17,6 +17,7 @@ import {
   freezeCueReviewAudit,
   nicoleProImmutableOriginKey,
   projectCueReviewAudit,
+  recordNicoleAnatomyExpertNote as recordNicoleAnatomyExpertNoteAudit,
   rejectCueReviewAudit,
   reviewNicoleProClaim,
   reopenCueReviewAudit,
@@ -629,6 +630,12 @@ export class VaganovaPreAnalyzerService {
     this.writeCuePoints(videoUrl, updated);
     return updated;
   }
+
+  public recordNicoleAnatomyExpertNote(videoUrl: string, cueId: string, text: string, expected: CueReviewExpectedState): VaganovaCuePoint[] {
+    const updated = recordAuditedNicoleAnatomyExpertNote(this.getCuePoints(videoUrl), cueId, text, expected);
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
 }
 
 type AuditTransition = 'approve' | 'reject' | 'reopen';
@@ -690,6 +697,21 @@ export function reviewAuditedNicoleProClaim(
     ? projectAuditedCuePoint({
       ...point,
       reviewAudit: reviewNicoleProClaim(point.reviewAudit, claimId, decision, editedText, selectedForStudentDerivation, expected),
+    })
+    : point);
+}
+
+export function recordAuditedNicoleAnatomyExpertNote(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  text: string,
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({
+      ...point,
+      reviewAudit: recordNicoleAnatomyExpertNoteAudit(point.reviewAudit, text, expected),
     })
     : point);
 }
