@@ -196,9 +196,9 @@ describe('cue review audit', () => {
     expect(cueReviewAuditIsValid(audit)).toBe(true);
     expect(audit.origin.kind).toBe('nicole_pro_draft');
     expect(payload?.draft).toEqual(proDraft);
-    expect(payload?.knowledgeRegistryVersion).toBe('1.2.0');
+    expect(payload?.knowledgeRegistryVersion).toBe('1.3.0');
     expect(payload?.ruleVersions).toEqual([
-      { ruleId: 'knowledge:spine-aplomb:teacher-v1', version: '1.1.0' },
+      { ruleId: 'knowledge:spine-aplomb:teacher-v1', version: '1.2.0' },
     ]);
     expect(projectCueReviewAudit(audit)).toMatchObject({
       provenance: 'nicole_draft', learnerVisible: false, parentVisible: false,
@@ -496,6 +496,7 @@ describe('cue review audit', () => {
       '1.2.0',
     );
     expect(archived).toBe(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE[0]);
+    expect(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE[1].registryVersion).toBe('1.3.0');
     expect(Object.isFrozen(NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE)).toBe(true);
     expect(Object.isFrozen(archived?.rules[0].statements[0])).toBe(true);
     expect(resolveNicoleProTrustedKnowledgeRegistry('balletos-nicole-pro-knowledge', '99.0.0')).toBeNull();

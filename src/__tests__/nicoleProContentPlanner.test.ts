@@ -261,7 +261,7 @@ describe('Nicole-Pro deterministic grounded vertical slice', () => {
     expect(identity(a0)).toBe(identity(context(4)));
     expect(identity(a0)).not.toBe(identity(b1));
     expect(identity(a0)).not.toBe(identity(a2));
-    expect(identity(a0)).toContain('registry@balletos-nicole-pro-knowledge@1.2.0');
+    expect(identity(a0)).toContain('registry@balletos-nicole-pro-knowledge@1.3.0');
     expect(identity(a0)).toContain('planner@balletos-nicole-pro-deterministic-planner@1.0.0');
     expect(identity(a0)).toContain('validator@nicole-pro-validator-v1');
   });
@@ -284,12 +284,33 @@ describe('Nicole-Pro deterministic grounded vertical slice', () => {
     expect(contentQualityScore(
       fixture.draft, profile.keyword, profile.metaphorKeyword, fixture.authority, fixture.currentContext,
     )).toBe(10);
-    expect(fixture.draft.claims.filter(claim => claim.type === 'teacher_hypothesis')).toHaveLength(3);
-    expect(fixture.draft.claims.filter(claim => claim.type === 'differentiation_test')).toHaveLength(3);
+    const expectedHypothesisCount = metricId === 'shoulder_horizontal' ? 3 : 4;
+    expect(fixture.draft.claims.filter(claim => claim.type === 'teacher_hypothesis')).toHaveLength(expectedHypothesisCount);
+    expect(fixture.draft.claims.filter(claim => claim.type === 'differentiation_test')).toHaveLength(expectedHypothesisCount);
     expect(fixture.draft.claims.find(claim => claim.type === 'metric_observation')?.text)
       .toContain(value.toFixed(1).replace('.', ',') + '°');
     for (const [type, expectedText] of Object.entries(GOLDEN_ACTION_COPY[metricId])) {
       expect(fixture.draft.claims.find(claim => claim.type === type)?.text).toBe(expectedText);
+    }
+    if (metricId === 'spine_tilt_aplomb') {
+      const muscleHypothesis = fixture.draft.claims.find(claim => claim.type === 'teacher_hypothesis'
+        && claim.text.includes('Iliopsoas'));
+      const muscleTest = fixture.draft.claims.find(claim => claim.type === 'differentiation_test'
+        && muscleHypothesis && claim.relatedClaimIds.includes(muscleHypothesis.claimId));
+      expect(muscleHypothesis?.text).toContain('nicht bestimmt');
+      expect(muscleHypothesis?.text).not.toMatch(/diagnos|schwach|verkürzt|verursacht|alleinige ursache/iu);
+      expect(muscleTest?.text).toContain('ohne daraus einen einzelnen Muskelbefund abzuleiten');
+      expect(fixture.draft.knowledgeRules[0].sourceRefs).toContainEqual(expect.stringContaining('NBK560799'));
+    }
+    if (metricId === 'projected_hip_line_obliquity') {
+      const muscleHypothesis = fixture.draft.claims.find(claim => claim.type === 'teacher_hypothesis'
+        && claim.text.includes('Piriformis'));
+      const muscleTest = fixture.draft.claims.find(claim => claim.type === 'differentiation_test'
+        && muscleHypothesis && claim.relatedClaimIds.includes(muscleHypothesis.claimId));
+      expect(muscleHypothesis?.text).toContain('weder Kraft, Länge noch Ursache');
+      expect(muscleHypothesis?.text).not.toMatch(/diagnos|schwach|verkürzt|verursacht|alleinige ursache/iu);
+      expect(muscleTest?.text).toContain('ohne daraus einen isolierten Piriformis-Befund abzuleiten');
+      expect(fixture.draft.knowledgeRules[0].sourceRefs).toContainEqual(expect.stringContaining('NBK519497'));
     }
   });
 

@@ -32,7 +32,7 @@ import {
 
 export const NICOLE_PRO_VALIDATOR_VERSION = 'nicole-pro-validator-v1' as const;
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID = 'balletos-nicole-pro-knowledge' as const;
-export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.2.0' as const;
+export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION = '1.3.0' as const;
 
 interface GroundedRuleProfile {
   key: string;
@@ -47,6 +47,7 @@ interface GroundedRuleProfile {
   metric: string;
   interpretation: string;
   hypotheses: readonly Readonly<{ key: string; conceptId: string; text: string; test: string }>[];
+  sourceRefs?: readonly string[];
   target: string;
   cue: string;
   practice: string;
@@ -116,7 +117,7 @@ function createGroundedKnowledgeRule(profile: GroundedRuleProfile): NicoleProKno
       'teacher_review_action',
       ...profile.hypotheses.map(item => item.conceptId),
     ],
-    sourceRefs: [`BalletOS Nicole-Pro knowledge review queue: ${profile.key}`],
+    sourceRefs: profile.sourceRefs ?? [`BalletOS Nicole-Pro knowledge review queue: ${profile.key}`],
     requiresNicoleCalibration: true,
     requiresExternalValidation: false,
     statements: [
@@ -210,11 +211,54 @@ const GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = [
   },
 ];
 
+const CURRENT_GROUNDED_RULE_PROFILES: readonly GroundedRuleProfile[] = GROUNDED_RULE_PROFILES.map((profile) => {
+  if (profile.key === 'spine-aplomb') {
+    return {
+      ...profile,
+      ruleVersion: '1.2.0',
+      sourceRefs: [
+        'BalletOS Nicole-Pro knowledge review queue: spine-aplomb',
+        'NCBI Bookshelf NBK560799: Iliopsoas anatomy and possible spinal stabilization during hip flexion; accessed 2026-08-14; general anatomy, not individual causality.',
+      ],
+      hypotheses: [...profile.hypotheses, {
+        key: 'iliopsoas-chain',
+        conceptId: 'iliopsoas_lumbopelvic_coordination_hypothesis',
+        text: 'Eine Beteiligung der lumbopelvinen Muskelkoordination, einschließlich des Iliopsoas, kann als eine von mehreren Arbeitshypothesen mit dem sichtbaren Muster vereinbar sein; Kraft, Länge oder Ursache sind im Bild nicht bestimmt.',
+        test: 'Nicole wiederholt denselben Moment in kleinerem Bewegungsumfang mit identischer Kamera und verändert nur die lumbopelvine Organisation; wird die Rumpfachse reproduzierbar ruhiger, prüft sie diese Koordinationshypothese weiter, ohne daraus einen einzelnen Muskelbefund abzuleiten.',
+      }],
+    };
+  }
+  if (profile.key === 'pelvis-line') {
+    return {
+      ...profile,
+      ruleVersion: '1.1.0',
+      sourceRefs: [
+        'BalletOS Nicole-Pro knowledge review queue: pelvis-line',
+        'NCBI Bookshelf NBK519497: Piriformis function varies with hip position; accessed 2026-08-14; general anatomy, not individual causality.',
+      ],
+      hypotheses: [...profile.hypotheses, {
+        key: 'deep-rotator-chain',
+        conceptId: 'deep_hip_rotator_piriformis_coordination_hypothesis',
+        text: 'Die Koordination der tiefen Hüftrotatoren, einschließlich des Piriformis, kann als eine von mehreren Arbeitshypothesen mit der sichtbaren Beckenorganisation vereinbar sein; das Bild bestimmt weder Kraft, Länge noch Ursache.',
+        test: 'Nicole wiederholt das Plié weniger tief bei gleicher Kamera und prüft stützende Basis, Knie-Fuß-Linie und Becken gemeinsam; wird die Organisation reproduzierbar ruhiger, prüft sie die Koordinationsaufgabe weiter, ohne daraus einen isolierten Piriformis-Befund abzuleiten.',
+      }],
+    };
+  }
+  return profile;
+});
+
+const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_1_2: NicoleProTrustedKnowledgeRegistryV1 = cloneAndDeepFreeze({
+  schemaVersion: 1,
+  registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+  registryVersion: '1.2.0',
+  rules: GROUNDED_RULE_PROFILES.map(createGroundedKnowledgeRule),
+});
+
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1: NicoleProTrustedKnowledgeRegistryV1 = cloneAndDeepFreeze({
   schemaVersion: 1,
   registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
   registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
-  rules: GROUNDED_RULE_PROFILES.map(createGroundedKnowledgeRule),
+  rules: CURRENT_GROUNDED_RULE_PROFILES.map(createGroundedKnowledgeRule),
 });
 
 /**
@@ -223,17 +267,18 @@ export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1: NicoleProTrustedKnowledge
  * reviewed Nicole-Pro origins retain the exact version that created them.
  */
 export const NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ARCHIVE: readonly NicoleProTrustedKnowledgeRegistryV1[] = cloneAndDeepFreeze([
+  NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_1_2,
   NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_V1,
 ]);
 
-const NICOLE_PRO_REGISTRY_RUNTIME_ARCHIVE = cloneAndDeepFreeze([{
-  registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
-  registryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
-  validatorVersions: [NICOLE_PRO_VALIDATOR_VERSION],
-  planners: [{ id: 'balletos-nicole-pro-deterministic-planner', version: '1.0.0' }],
-  artifactKeyScheme: NICOLE_PRO_ARTIFACT_KEY_SCHEME_V1,
-  landmarkModels: [NICOLE_PRO_LANDMARK_MODEL_V1],
-}]);
+const NICOLE_PRO_REGISTRY_RUNTIME_ARCHIVE = cloneAndDeepFreeze(['1.2.0', NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION].map((registryVersion) => ({
+    registryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+    registryVersion,
+    validatorVersions: [NICOLE_PRO_VALIDATOR_VERSION],
+    planners: [{ id: 'balletos-nicole-pro-deterministic-planner', version: '1.0.0' }],
+    artifactKeyScheme: NICOLE_PRO_ARTIFACT_KEY_SCHEME_V1,
+    landmarkModels: [NICOLE_PRO_LANDMARK_MODEL_V1],
+  })));
 
 export function resolveNicoleProTrustedKnowledgeRegistry(
   registryId: string,
