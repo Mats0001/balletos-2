@@ -34,6 +34,7 @@ const PHASE_LABELS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 function sourceExercise(entry: MotionReferenceLibraryEntry): ExerciseFilter | null {
+  if (entry.exerciseId) return entry.exerciseId;
   const match = entry.id.match(/^dryad-(tendu|passe|jete|changement)-/);
   return (match?.[1] as ExerciseFilter | undefined) ?? null;
 }
@@ -46,7 +47,8 @@ function sourceName(sourceId: string): string {
 function productStatus(entry: MotionReferenceLibraryEntry): Readonly<{ label: string; color: string }> {
   if (entry.productStatus === 'technical_runtime_allowed') return { label: 'Technisch nutzbar', color: '#67e8f9' };
   if (entry.productStatus === 'internal_pilot_only') return { label: 'Nur interner Pilot', color: '#fbbf24' };
-  return { label: 'Sonderlizenz erforderlich', color: '#fb7185' };
+  if (entry.productStatus === 'license_required') return { label: 'Sonderlizenz erforderlich', color: '#fb7185' };
+  return { label: 'Nicht freigegeben', color: '#fb7185' };
 }
 
 const panelCard: React.CSSProperties = {
@@ -160,6 +162,7 @@ export const MotionReferenceLibraryPanel: React.FC<MotionReferenceLibraryPanelPr
               </div>
               <div style={{ marginTop: '9px', display: 'flex', gap: '5px', flexWrap: 'wrap' }}>{entry.technicalUse.map(use => <span key={use} style={{ borderRadius: '7px', background: 'rgba(255,255,255,0.055)', padding: '4px 7px', color: 'rgba(255,255,255,0.66)', fontSize: '8px' }}>{use}</span>)}</div>
               {entry.id === 'balletmoves-ii' && <div style={{ marginTop: '9px', color: '#fbbf24', fontSize: '9px' }}>Ein kontrollierter Rechner · keine Cloud-/Teamweitergabe · keine Produktintegration ohne Sonderlizenz.</div>}
+              {entry.id === 'gold-pilot-plie-video-20260814' && <div style={{ marginTop: '9px', color: '#fbbf24', fontSize: '9px' }}>Hashverifizierter technischer Handoff · Plié-Zuordnung aus Quelltext, fachlich ungeprüft · keine Nicole‑Referenz · Video bleibt bis zur Rechte- und Releaseprüfung außerhalb des Produktbundles.</div>}
               {entry.sourceUrl.startsWith('http') && <a href={entry.sourceUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '9px', color: '#67e8f9', fontSize: '9px' }}>Quelle öffnen ↗</a>}
             </article>;
           }) : <EmptyState text="Für diesen Filter ist keine technische Quelle registriert." />)}

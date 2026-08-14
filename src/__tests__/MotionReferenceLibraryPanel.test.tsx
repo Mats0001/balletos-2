@@ -97,6 +97,7 @@ describe('cross-video reference library', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Technische Quellen/i }));
     expect(screen.getByText('Dryad · Tendu timing & foot path')).toBeTruthy();
+    expect(screen.queryByText('Gold-Pilot Video · Plié · technische Sichtung')).toBeNull();
     expect(screen.getAllByText('Technik · keine Sollreferenz').length).toBeGreaterThan(0);
     expect(screen.getByText(/Ein kontrollierter Rechner · keine Cloud/i)).toBeTruthy();
 
@@ -150,5 +151,23 @@ describe('cross-video reference library', () => {
     />);
 
     expect(exerciseFilter.value).toBe('tendu');
+  });
+
+  it('shows the Gold pilot only as a blocked technical Plié source', () => {
+    render(<MotionReferenceLibraryPanel
+      open
+      onClose={() => undefined}
+      currentExerciseId="plie"
+      currentVideoSourceId="/videos/student-plie.mp4"
+      nicoleRecords={[]}
+      technicalSources={MOTION_REFERENCE_LIBRARY}
+      attempts={[]}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Technische Quellen/i }));
+    expect(screen.getByText('Gold-Pilot Video · Plié · technische Sichtung')).toBeTruthy();
+    expect(screen.getByText(/Plié-Zuordnung aus Quelltext, fachlich ungeprüft.*keine Nicole.Referenz.*außerhalb des Produktbundles/i)).toBeTruthy();
+    expect(screen.getByText('Split-Screen-Prüfkandidat')).toBeTruthy();
+    expect(screen.getByText('Nicht freigegeben')).toBeTruthy();
   });
 });
