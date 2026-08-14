@@ -123,16 +123,17 @@ export const SynchronizedMotionAvatarViewport = memo(function SynchronizedMotion
       : null;
   const sourceLabels = reference?.sourceLabels ?? [];
   const phaseOrder = reference ? motionAvatarPhaseOrder(reference.exerciseId) : [];
+  const mirrorX = resolution.kind === 'mapped' && resolution.mirrorX;
   const technicalFootPaths = useMemo(() => reference?.workingSides.map(side => ({
     side,
     points: reference.frames.flatMap(({ frame }) => {
-      const skeleton = projectCanonicalFrameToSkeleton({ frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: reference.projectionBounds });
+      const skeleton = projectCanonicalFrameToSkeleton({ frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: reference.projectionBounds, mirrorX });
       const point = side === 'left' ? skeleton.footL : skeleton.footR;
       return pointIsUsable(point) ? [{ x: point.x, y: point.y }] : [];
     }),
-  })) ?? [], [reference]);
+  })) ?? [], [mirrorX, reference]);
   const avatarSkeleton = resolution.kind === 'mapped'
-    ? projectCanonicalFrameToSkeleton({ frame: resolution.frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: resolution.reference.projectionBounds })
+    ? projectCanonicalFrameToSkeleton({ frame: resolution.frame, width: 360, height: 360, paddingRatio: 0.08, sourceBounds: resolution.reference.projectionBounds, mirrorX })
     : null;
   const projectedLiveSkeleton = useMemo(() => liveSkeleton
     ? projectVideoSkeletonToAvatar({ skeleton: liveSkeleton, videoWidth, videoHeight, width: 360, height: 360, padding: 10 })
@@ -169,6 +170,7 @@ export const SynchronizedMotionAvatarViewport = memo(function SynchronizedMotion
       data-testid="tendu-single-clock-avatar"
       data-avatar-state={resolution.kind}
       data-motion-id={analysis?.exerciseId ?? 'unknown'}
+      data-reference-mirrored={mirrorX ? 'true' : 'false'}
       aria-label="Phasensynchroner technischer Bewegungs-Linienavatar"
       style={{
         position: 'relative', width: '100%', height: '100%', minHeight: 0, overflowX: 'hidden', overflowY: 'auto',
@@ -180,7 +182,7 @@ export const SynchronizedMotionAvatarViewport = memo(function SynchronizedMotion
       <header style={{ padding: '12px 14px 7px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ color: '#67e8f9', fontSize: 10, fontWeight: 900, letterSpacing: '.06em' }}>SINGLE-CLOCK · TECHNISCHER {analysis?.exerciseLabel?.toLocaleUpperCase('de-DE') ?? 'BEWEGUNGS'}-PILOT</div>
-          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>{reference ? `Dryad-Kohorte aus ${reference.sourceSampleCount} Versuchen` : 'Technische Bewegungsquelle'} · BalletOS-eigener neutraler Linienkörper · nicht Nicole-geprüft</div>
+          <div className="tendu-avatar-subtitle" style={{ marginTop: 3, fontSize: 11, color: 'rgba(255,255,255,.6)' }}>{reference ? `Dryad-Kohorte aus ${reference.sourceSampleCount} Versuchen` : 'Technische Bewegungsquelle'} · BalletOS-eigener neutraler Linienkörper{mirrorX ? ' · für linke Arbeitsseite gespiegelt' : ''} · nicht Nicole-geprüft</div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 7 }}>
             {([
               ['avatar', 'Avatar'], ['overlay', 'Overlay'], ['before_after', 'Vorher/Nachher'],

@@ -32,6 +32,8 @@ export interface TechnicalMotionAvatarReference {
 export type TechnicalMotionAvatarResolution = Readonly<{
   kind: 'mapped';
   reference: TechnicalMotionAvatarReference;
+  /** Display transform only: a right-sided technical source may be mirrored for a detected left working side. */
+  mirrorX: boolean;
   phase: TeacherPhaseResult;
   phaseProgress: number;
   referenceProgress: number;
@@ -236,6 +238,15 @@ function nearestReferenceFrame(
   }, null)?.frame ?? null;
 }
 
+function mirrorForWorkingSide(
+  reference: TechnicalMotionAvatarReference,
+  workingSide: 'left' | 'right' | null,
+): boolean {
+  if (!workingSide || reference.workingSides.includes(workingSide)) return false;
+  const opposite = workingSide === 'left' ? 'right' : 'left';
+  return reference.workingSides.includes(opposite);
+}
+
 export function resolveTechnicalMotionAvatarFrame(
   analysis: TeacherPhaseAnalysis | null,
   currentTimeMs: number,
@@ -254,7 +265,7 @@ export function resolveTechnicalMotionAvatarFrame(
     const phaseIndex = order.indexOf(resolution.phase.id);
     const referenceProgress = clamp01((Math.max(0, phaseIndex) + resolution.phaseProgress) / order.length);
     return Object.freeze({
-      kind: 'mapped', reference: TENDU_REFERENCE, phase: resolution.phase,
+      kind: 'mapped', reference: TENDU_REFERENCE, mirrorX: mirrorForWorkingSide(TENDU_REFERENCE, analysis.workingSide), phase: resolution.phase,
       phaseProgress: resolution.phaseProgress, referenceProgress, frame: resolution.frame,
     });
   }
@@ -270,5 +281,8 @@ export function resolveTechnicalMotionAvatarFrame(
   const reference = motionAvatarReference(analysis.exerciseId);
   const frame = nearestReferenceFrame(reference, referenceProgress);
   if (!frame) return Object.freeze({ kind: 'blocked', reason: 'reference_missing' });
-  return Object.freeze({ kind: 'mapped', reference, phase, phaseProgress, referenceProgress, frame });
+  return Object.freeze({
+    kind: 'mapped', reference, mirrorX: mirrorForWorkingSide(reference, analysis.workingSide),
+    phase, phaseProgress, referenceProgress, frame,
+  });
 }

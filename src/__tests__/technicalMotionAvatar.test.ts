@@ -104,6 +104,24 @@ describe('technical single-clock motion avatar', () => {
     expect(flight.neck.y).not.toBe(first.neck.y);
   });
 
+  it('mirrors a right-sided technical source for a detected left working side', () => {
+    const leftPasse = { ...analysis('passe'), workingSide: 'left' as const };
+    const resolution = resolveTechnicalMotionAvatarFrame(leftPasse, 500);
+    expect(resolution.kind).toBe('mapped');
+    if (resolution.kind !== 'mapped') return;
+    expect(resolution.reference.workingSides).toEqual(['right']);
+    expect(resolution.mirrorX).toBe(true);
+    const normal = projectCanonicalFrameToSkeleton({
+      frame: resolution.frame, width: 360, height: 360, sourceBounds: resolution.reference.projectionBounds,
+    });
+    const mirrored = projectCanonicalFrameToSkeleton({
+      frame: resolution.frame, width: 360, height: 360, sourceBounds: resolution.reference.projectionBounds, mirrorX: resolution.mirrorX,
+    });
+    expect(normal.footR).toBeTruthy();
+    expect(mirrored.footR).toBeTruthy();
+    expect(mirrored.footR!.x).toBeCloseTo(360 - normal.footR!.x, 8);
+  });
+
   it('fails closed for Plié, recording problems and missing phase windows', () => {
     expect(resolveTechnicalMotionAvatarFrame({ ...analysis('passe'), exerciseId: 'plie' }, 100)).toEqual({
       kind: 'blocked', reason: 'unsupported_exercise',

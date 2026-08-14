@@ -73,6 +73,18 @@ describe('single-clock Tendu avatar viewport', () => {
     expect(screen.getByTestId('tendu-rich-feedback').getAttribute('data-content-id')).toContain(':passe:placement:');
   });
 
+  it('labels and mirrors a right-sided technical source for a left working side', () => {
+    render(<SynchronizedTenduAvatarViewport
+      analysis={{ ...analysis, workingSide: 'left' }}
+      isPlaying={false}
+      currentTimeMs={200}
+      getCurrentTimeMs={() => 200}
+    />);
+
+    expect(screen.getByTestId('tendu-single-clock-avatar').getAttribute('data-reference-mirrored')).toBe('true');
+    expect(screen.getByText(/für linke Arbeitsseite gespiegelt/i)).toBeTruthy();
+  });
+
   it('shows recording correction instead of a guessed technical comparison', () => {
     render(<SynchronizedTenduAvatarViewport analysis={{ ...analysis, gate: { ...analysis.gate, status: 'needs_correction' } }} isPlaying={false} currentTimeMs={200} getCurrentTimeMs={() => 200} />);
 
