@@ -14,6 +14,7 @@ import {
   approveCueReviewAudit,
   contentFromGroundedDraft,
   createGroundedCueReviewAudit,
+  projectCurrentNicoleAnatomyDifferentiationResults,
   projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
@@ -394,6 +395,47 @@ describe('audited cue persistence guard', () => {
     expect(reloaded.reviewAudit?.events.filter(item => item.type === 'anatomy_expert_note_recorded')).toHaveLength(2);
     expect(() => vaganovaPreAnalyzer.recordNicoleAnatomyExpertNote(
       target.sourceId, point.id, 'Stale write', stale,
+    )).toThrow(/changed/i);
+  });
+
+  it('persists and reloads append-only human outcomes for immutable Anatomy differentiation steps', () => {
+    installMemoryStorage();
+    const fixture = nicoleProFixture();
+    if (!fixture.anatomyBundle) throw new Error('Expected Anatomy-Pro fixture.');
+    const differentiation = fixture.anatomyBundle.claimAnnotations.find(
+      item => item.kind === 'differentiation_annotation',
+    );
+    if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+      throw new Error('Expected an immutable differentiation step.');
+    }
+    let [point] = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
+      target.sourceId, fixture.proGrounded, fixture.proDraft, target,
+      fixture.currentContext, 'ready', 'Plié – Tiefpunkt', fixture.anatomyBundle,
+    );
+    const stale = cueReviewExpectedState(point.reviewAudit!);
+    [point] = vaganovaPreAnalyzer.recordNicoleAnatomyDifferentiationResult(
+      target.sourceId, point.id, differentiation.statementId, 'supports',
+      'Die Linie wurde im kontrollierten Vergleich ruhiger.', 'nicole', stale,
+    );
+    [point] = vaganovaPreAnalyzer.recordNicoleAnatomyDifferentiationResult(
+      target.sourceId, point.id, differentiation.statementId, 'inconclusive',
+      'Mehrere Variablen änderten sich gleichzeitig.', 'nicole',
+      cueReviewExpectedState(point.reviewAudit!),
+    );
+
+    const reloaded = vaganovaPreAnalyzer.getCuePoints(target.sourceId)[0];
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(reloaded.reviewAudit!)).toEqual([
+      expect.objectContaining({
+        differentiationStatementId: differentiation.statementId,
+        result: 'inconclusive',
+        note: 'Mehrere Variablen änderten sich gleichzeitig.',
+      }),
+    ]);
+    expect(reloaded.reviewAudit?.events.filter(
+      item => item.type === 'anatomy_test_result_recorded',
+    )).toHaveLength(2);
+    expect(() => vaganovaPreAnalyzer.recordNicoleAnatomyDifferentiationResult(
+      target.sourceId, point.id, differentiation.statementId, 'weakens', null, 'nicole', stale,
     )).toThrow(/changed/i);
   });
 

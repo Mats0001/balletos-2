@@ -4,7 +4,7 @@
 import { VaganovaAngleCalculator } from './vaganovaAngleCalculator';
 import { vaganovaFrameCache } from './vaganovaFrameCache';
 import { BUILD_POLICY, canGenerateLegacyUngroundedCues } from '../config/buildPolicy';
-import type { CueNicoleProClaimDecision, CueReviewAudit, CueReviewContent, CueReviewEditablePatch, CueReviewExpectedState } from '../types/cueReviewAudit';
+import type { CueNicoleAnatomyDifferentiationResult, CueNicoleProClaimDecision, CueReviewAudit, CueReviewContent, CueReviewEditablePatch, CueReviewExpectedState } from '../types/cueReviewAudit';
 import {
   approveCueReviewAudit,
   canonicalJson,
@@ -17,6 +17,7 @@ import {
   freezeCueReviewAudit,
   nicoleProImmutableOriginKey,
   projectCueReviewAudit,
+  recordNicoleAnatomyDifferentiationResult as recordNicoleAnatomyDifferentiationResultAudit,
   recordNicoleAnatomyExpertNote as recordNicoleAnatomyExpertNoteAudit,
   rejectCueReviewAudit,
   reviewNicoleProClaim,
@@ -636,6 +637,23 @@ export class VaganovaPreAnalyzerService {
     this.writeCuePoints(videoUrl, updated);
     return updated;
   }
+
+  public recordNicoleAnatomyDifferentiationResult(
+    videoUrl: string,
+    cueId: string,
+    differentiationStatementId: string,
+    result: CueNicoleAnatomyDifferentiationResult['result'],
+    note: string | null,
+    recordedByRole: CueNicoleAnatomyDifferentiationResult['recordedByRole'],
+    expected: CueReviewExpectedState,
+  ): VaganovaCuePoint[] {
+    const updated = recordAuditedNicoleAnatomyDifferentiationResult(
+      this.getCuePoints(videoUrl), cueId, differentiationStatementId,
+      result, note, recordedByRole, expected,
+    );
+    this.writeCuePoints(videoUrl, updated);
+    return updated;
+  }
 }
 
 type AuditTransition = 'approve' | 'reject' | 'reopen';
@@ -712,6 +730,26 @@ export function recordAuditedNicoleAnatomyExpertNote(
     ? projectAuditedCuePoint({
       ...point,
       reviewAudit: recordNicoleAnatomyExpertNoteAudit(point.reviewAudit, text, expected),
+    })
+    : point);
+}
+
+export function recordAuditedNicoleAnatomyDifferentiationResult(
+  points: VaganovaCuePoint[],
+  cueId: string,
+  differentiationStatementId: string,
+  result: CueNicoleAnatomyDifferentiationResult['result'],
+  note: string | null,
+  recordedByRole: CueNicoleAnatomyDifferentiationResult['recordedByRole'],
+  expected: CueReviewExpectedState,
+): VaganovaCuePoint[] {
+  if (!points.some(point => point.id === cueId && point.reviewAudit)) throw new Error('Audited cue not found.');
+  return points.map(point => point.id === cueId && point.reviewAudit
+    ? projectAuditedCuePoint({
+      ...point,
+      reviewAudit: recordNicoleAnatomyDifferentiationResultAudit(
+        point.reviewAudit, differentiationStatementId, result, note, recordedByRole, expected,
+      ),
     })
     : point);
 }

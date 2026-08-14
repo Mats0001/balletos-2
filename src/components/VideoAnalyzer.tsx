@@ -64,13 +64,14 @@ import {
   cueReviewAuditIsValid,
   cueReviewExpectedState,
   projectCueReviewAudit,
+  projectCurrentNicoleAnatomyDifferentiationResults,
   projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
   nicoleProStudentDerivationReadiness,
   nicoleProClaimCanEnterStudentDerivation,
 } from '../services/cueReviewAudit';
-import type { CueNicoleProClaimDecision, CueReviewEditablePatch } from '../types/cueReviewAudit';
+import type { CueNicoleAnatomyDifferentiationResult, CueNicoleProClaimDecision, CueReviewEditablePatch } from '../types/cueReviewAudit';
 import {
   getNicoleReferenceLine,
   loadNicoleReferenceLines,
@@ -140,6 +141,13 @@ const ANATOMY_SCIENCE_LABELS: Readonly<Record<NicoleAnatomyScientificValidation,
   curated_internal: 'intern kuratiert',
   source_supported: 'quellengestütztes Fachwissen',
   externally_validated_for_stated_scope: 'extern validiert · definierter Scope',
+});
+
+const ANATOMY_TEST_RESULT_LABELS: Readonly<Record<CueNicoleAnatomyDifferentiationResult['result'], string>> = Object.freeze({
+  supports: 'Spricht im Vergleich dafür',
+  weakens: 'Spricht im Vergleich dagegen',
+  inconclusive: 'Vergleich unklar',
+  not_performed: 'Nicht durchgeführt',
 });
 
 interface VideoAnalyzerProps {
@@ -517,6 +525,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
   const [anatomyNoteEditState, setAnatomyNoteEditState] = useState<Readonly<{
     cueId: string;
     text: string;
+  }> | null>(null);
+  const [anatomyTestResultEditState, setAnatomyTestResultEditState] = useState<Readonly<{
+    cueId: string;
+    differentiationStatementId: string;
+    result: CueNicoleAnatomyDifferentiationResult['result'];
+    note: string;
   }> | null>(null);
   const [expandedCueIds, setExpandedCueIds] = useState<Set<string>>(new Set());
   const [summaryOpen, setSummaryOpen] = useState<boolean>(true);
@@ -2632,6 +2646,31 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
     } catch (error) {
       setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
       showAnalyseToast(error instanceof Error ? error.message : 'Interne Fachnotiz konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleNicoleAnatomyDifferentiationResult = (
+    cueId: string,
+    differentiationStatementId: string,
+    result: CueNicoleAnatomyDifferentiationResult['result'],
+    note: string,
+  ) => {
+    const cue = cuePoints.find(item => item.id === cueId && item.reviewAudit);
+    if (!cue?.reviewAudit) return;
+    try {
+      setCuePoints(vaganovaPreAnalyzer.recordNicoleAnatomyDifferentiationResult(
+        selectedDevVideoUrl,
+        cueId,
+        differentiationStatementId,
+        result,
+        note,
+        'nicole',
+        cueReviewExpectedState(cue.reviewAudit),
+      ));
+      setAnatomyTestResultEditState(null);
+    } catch (error) {
+      setCuePoints(vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl));
+      showAnalyseToast(error instanceof Error ? error.message : 'Prüfergebnis konnte nicht gespeichert werden.');
     }
   };
 
@@ -5091,6 +5130,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
               const currentAnatomyExpertNote = cue.reviewAudit && anatomySnapshot
                 ? projectCurrentNicoleAnatomyExpertNote(cue.reviewAudit)
                 : null;
+              const currentAnatomyTestResultByStatementId = new Map(
+                cue.reviewAudit && anatomySnapshot
+                  ? projectCurrentNicoleAnatomyDifferentiationResults(cue.reviewAudit).map(
+                    item => [item.differentiationStatementId, item] as const,
+                  )
+                  : [],
+              );
               const editingAnatomyExpertNote = anatomyNoteEditState?.cueId === cue.id;
               const nicoleProClaimReviewById = new Map(
                 nicoleProClaimReviews.map(item => [item.claim.claimId, item]),
@@ -5632,8 +5678,18 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                               const accent = annotation.epistemicKind === 'differentiation_step'
                                 ? '#64d2ff'
                                 : annotation.epistemicKind === 'working_hypothesis' ? '#fbbf24' : '#d6a65c';
+                              const currentTestResult = annotation.kind === 'differentiation_annotation'
+                                ? currentAnatomyTestResultByStatementId.get(annotation.statementId) ?? null
+                                : null;
+                              const editingTestResult = annotation.kind === 'differentiation_annotation'
+                                && anatomyTestResultEditState?.cueId === cue.id
+                                && anatomyTestResultEditState.differentiationStatementId === annotation.statementId;
+                              const canRecordTestResult = annotation.kind === 'differentiation_annotation'
+                                && annotation.allowedPerformer === 'nicole'
+                                && annotation.safetyClass !== 'clinical_only'
+                                && auditProjection.provenance !== 'nicole_rejected';
                               return (
-                                <div key={annotation.statementId} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: '7px' }}>
+                                <div key={annotation.statementId} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: '7px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '3px' }}>
                                     <span style={{ fontSize: '8px', color: accent, fontWeight: 900, textTransform: 'uppercase' }}>{ANATOMY_EPISTEMIC_LABELS[annotation.epistemicKind]}</span>
                                     <span style={{ fontSize: '8px', color: review.decision === 'rejected' ? '#ff7b72' : review.decision ? '#99f6e4' : 'rgba(255,255,255,0.42)' }}>{reviewLabel}</span>
@@ -5642,6 +5698,61 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                                   <div style={{ fontSize: '10px', color: review.decision === 'rejected' ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.8)', lineHeight: 1.5 }}>
                                     {review.reviewedText ?? review.claim.text}
                                   </div>
+                                  {annotation.kind === 'differentiation_annotation' && (
+                                    <div style={{ background: 'rgba(100,210,255,0.045)', border: '1px solid rgba(100,210,255,0.14)', borderRadius: '6px', padding: '6px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <span style={{ fontSize: '8.5px', color: '#93c5fd', fontWeight: 900 }}>Menschlich beobachtetes Prüfergebnis</span>
+                                        <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.38)' }}>intern · nicht diagnostisch</span>
+                                      </div>
+                                      {editingTestResult && anatomyTestResultEditState ? (
+                                        <>
+                                          <select
+                                            value={anatomyTestResultEditState.result}
+                                            onChange={event => setAnatomyTestResultEditState({
+                                              ...anatomyTestResultEditState,
+                                              result: event.target.value as CueNicoleAnatomyDifferentiationResult['result'],
+                                            })}
+                                            onClick={event => event.stopPropagation()}
+                                            style={{ width: '100%', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(100,210,255,0.28)', color: '#fff', borderRadius: '5px', padding: '4px 6px', fontSize: '10px' }}
+                                          >
+                                            {(Object.entries(ANATOMY_TEST_RESULT_LABELS) as [CueNicoleAnatomyDifferentiationResult['result'], string][]).map(([value, label]) => (
+                                              <option key={value} value={value}>{label}</option>
+                                            ))}
+                                          </select>
+                                          <textarea
+                                            value={anatomyTestResultEditState.note}
+                                            onChange={event => setAnatomyTestResultEditState({ ...anatomyTestResultEditState, note: event.target.value })}
+                                            onClick={event => event.stopPropagation()}
+                                            placeholder="Optionale Beobachtung zum kontrollierten Vergleich …"
+                                            maxLength={1_200}
+                                            style={{ width: '100%', minHeight: '58px', resize: 'vertical', boxSizing: 'border-box', background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(100,210,255,0.24)', color: '#fff', borderRadius: '5px', padding: '6px', fontSize: '10px', lineHeight: 1.45 }}
+                                          />
+                                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                            <button onClick={event => { event.stopPropagation(); handleNicoleAnatomyDifferentiationResult(cue.id, annotation.statementId, anatomyTestResultEditState.result, anatomyTestResultEditState.note); }} style={{ background: 'rgba(100,210,255,0.12)', border: '1px solid rgba(100,210,255,0.3)', color: '#93c5fd', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Prüfergebnis speichern</button>
+                                            <button onClick={event => { event.stopPropagation(); setAnatomyTestResultEditState(null); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.55)', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>Abbrechen</button>
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <>
+                                          {currentTestResult ? (
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                              <span style={{ fontSize: '9px', color: '#bfdbfe', fontWeight: 800 }}>{ANATOMY_TEST_RESULT_LABELS[currentTestResult.result]}</span>
+                                              {currentTestResult.note && <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{currentTestResult.note}</span>}
+                                              <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.34)' }}>{currentTestResult.actorId} · {new Date(currentTestResult.recordedAt).toLocaleString('de-DE')} · lokal eingetragen, Identität nicht kryptografisch bestätigt</span>
+                                            </div>
+                                          ) : (
+                                            <span style={{ fontSize: '8.5px', color: 'rgba(255,255,255,0.4)' }}>Noch kein menschliches Ergebnis dokumentiert.</span>
+                                          )}
+                                          {canRecordTestResult ? (
+                                            <button onClick={event => { event.stopPropagation(); setAnatomyTestResultEditState({ cueId: cue.id, differentiationStatementId: annotation.statementId, result: currentTestResult?.result ?? 'not_performed', note: currentTestResult?.note ?? '' }); }} style={{ alignSelf: 'flex-start', background: 'transparent', border: '1px solid rgba(100,210,255,0.24)', color: '#93c5fd', borderRadius: '5px', padding: '3px 7px', fontSize: '9px', cursor: 'pointer' }}>{currentTestResult ? 'Ergebnis ändern' : '+ Ergebnis eintragen'}</button>
+                                          ) : (
+                                            <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.32)' }}>Nur durch {annotation.allowedPerformer} im erlaubten Prüfkontext erfassbar.</span>
+                                          )}
+                                        </>
+                                      )}
+                                      <span style={{ fontSize: '8px', color: 'rgba(255,255,255,0.34)', lineHeight: 1.4 }}>Das Ergebnis dokumentiert nur diesen Vergleich. Es ändert weder Hypothesenstatus noch Ampel, Safety-Aktion oder Schüler-/Elternfassung.</span>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
