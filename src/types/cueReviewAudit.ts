@@ -83,6 +83,7 @@ export type CueReviewAuditEventType =
   | 'reopened'
   | 'claim_reviewed'
   | 'anatomy_expert_note_recorded'
+  | 'anatomy_test_result_recorded'
   | 'student_derivation_created'
   | 'audience_granted'
   | 'audience_revoked'
@@ -111,6 +112,23 @@ export interface CueNicoleAnatomyExpertNote {
   text: string;
   authorship: 'local_reviewer_entry_unverified';
   nonComputational: true;
+  internalOnly: true;
+  outwardEligibility: false;
+}
+
+/** Human-recorded outcome of one immutable, safe Anatomy-Pro differentiation step. */
+export interface CueNicoleAnatomyDifferentiationResult {
+  schemaVersion: 1;
+  resultId: string;
+  anatomyBundleId: string;
+  differentiationStatementId: string;
+  sourceClaimId: string;
+  previousResultEventId: string | null;
+  result: 'supports' | 'weakens' | 'inconclusive' | 'not_performed';
+  note: string | null;
+  recordedByRole: 'nicole' | 'qualified_teacher' | 'health_professional';
+  authorship: 'local_human_entry_unverified';
+  nonDiagnostic: true;
   internalOnly: true;
   outwardEligibility: false;
 }
@@ -153,6 +171,7 @@ export interface CueReviewAuditEvent {
   reason?: 'superseded_by_revision' | 'teacher_action' | 'legacy_migration';
   claimReview?: CueNicoleProClaimReview;
   anatomyExpertNote?: CueNicoleAnatomyExpertNote;
+  anatomyTestResult?: CueNicoleAnatomyDifferentiationResult;
   studentDerivation?: CueStudentDerivation;
   previousEventDigest: string | null;
   digestAlgorithm: 'sha256-canonical-json-v1';

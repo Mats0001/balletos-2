@@ -13,11 +13,13 @@ import {
   cueReviewExpectedState,
   projectCueReviewAudit,
   projectCueReviewForAudience,
+  projectCurrentNicoleAnatomyDifferentiationResults,
   projectCurrentNicoleAnatomyExpertNote,
   projectCurrentStudentDerivation,
   projectNicoleProClaimReviews,
   nicoleProStudentDerivationReadiness,
   rejectCueReviewAudit,
+  recordNicoleAnatomyDifferentiationResult,
   recordNicoleAnatomyExpertNote,
   reopenCueReviewAudit,
   reviseCueReviewAudit,
@@ -318,6 +320,116 @@ describe('cue review audit', () => {
       (stored: any) => { stored.events[stored.events.length - 1].anatomyExpertNote.clinicalDiagnosis = 'forged'; },
     ]) {
       const stored = JSON.parse(JSON.stringify(first));
+      mutate(stored);
+      redigestStoredEvents(stored);
+      expect(cueReviewAuditIsValid(stored)).toBe(false);
+    }
+  });
+
+  it('records human differentiation results append-only against the immutable Anatomy step', () => {
+    const { audit, anatomyBundle, context } = createNicoleProFixture();
+    const differentiation = anatomyBundle.claimAnnotations.find(item => item.kind === 'differentiation_annotation');
+    if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+      throw new Error('Fixture requires a differentiation annotation.');
+    }
+    const stale = cueReviewExpectedState(audit);
+    const first = recordNicoleAnatomyDifferentiationResult(
+      audit, differentiation.statementId, 'supports', '  Linie wurde im Vergleich ruhiger.  ',
+      'nicole', stale, context,
+    );
+    expect(cueReviewAuditIsValid(first)).toBe(true);
+    expect(first.origin).toEqual(audit.origin);
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(first)).toEqual([
+      expect.objectContaining({
+        differentiationStatementId: differentiation.statementId,
+        sourceClaimId: differentiation.sourceClaimId,
+        result: 'supports',
+        note: 'Linie wurde im Vergleich ruhiger.',
+        recordedByRole: 'nicole',
+        authorship: 'local_human_entry_unverified',
+      }),
+    ]);
+    expect(() => recordNicoleAnatomyDifferentiationResult(
+      first, differentiation.statementId, 'weakens', null, 'nicole', stale, context,
+    )).toThrow(/changed/i);
+
+    const second = recordNicoleAnatomyDifferentiationResult(
+      first, differentiation.statementId, 'inconclusive', 'Mehrere Variablen änderten sich.',
+      'nicole', cueReviewExpectedState(first), context,
+    );
+    const resultEvents = second.events.filter(item => item.type === 'anatomy_test_result_recorded');
+    expect(resultEvents).toHaveLength(2);
+    expect(resultEvents[1].anatomyTestResult?.previousResultEventId).toBe(resultEvents[0].eventId);
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(second)[0]).toMatchObject({
+      result: 'inconclusive', note: 'Mehrere Variablen änderten sich.',
+    });
+    expect(recordNicoleAnatomyDifferentiationResult(
+      second, differentiation.statementId, 'inconclusive', 'Mehrere Variablen änderten sich.',
+      'nicole', cueReviewExpectedState(second), context,
+    )).toBe(second);
+  });
+
+  it('keeps differentiation results internal and outside assessment and audience decisions', () => {
+    const { derived, context, anatomyBundle } = reviewAndDeriveStudentCopy();
+    const differentiation = anatomyBundle.claimAnnotations.find(item => item.kind === 'differentiation_annotation');
+    if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+      throw new Error('Fixture requires a differentiation annotation.');
+    }
+    const granted = setCueReviewAudience(
+      derived, 'learner', true, cueReviewExpectedState(derived), context,
+    );
+    const before = projectCueReviewForAudience(granted, 'learner');
+    const recorded = recordNicoleAnatomyDifferentiationResult(
+      granted, differentiation.statementId, 'weakens',
+      'Interner menschlicher Vergleich; keine Diagnose.', 'nicole',
+      cueReviewExpectedState(granted), context,
+    );
+    expect(projectCueReviewForAudience(recorded, 'learner')).toEqual(before);
+    expect(canonicalJson(projectCueReviewForAudience(recorded, 'learner'))).not.toMatch(
+      /weakens|Differenzierung|Diagnose|menschlicher Vergleich/i,
+    );
+    expect(projectCueReviewAudit(recorded).learnerVisible).toBe(true);
+
+    const revised = reviseCueReviewAudit(
+      recorded, { headline: 'Neue Lehrerrevision nach dem Prüfschritt' },
+      cueReviewExpectedState(recorded), context,
+    );
+    expect(projectCurrentNicoleAnatomyDifferentiationResults(revised)).toEqual([]);
+    expect(projectCueReviewAudit(revised).learnerVisible).toBe(false);
+  });
+
+  it('rejects differentiation results without exact origin, performer and append linkage', () => {
+    const grounded = createAudit();
+    expect(() => recordNicoleAnatomyDifferentiationResult(
+      grounded.audit, 'unknown', 'supports', null, 'nicole',
+      cueReviewExpectedState(grounded.audit), grounded.context,
+    )).toThrow(/Anatomy-Pro origin/i);
+
+    const { audit, anatomyBundle, context } = createNicoleProFixture();
+    const differentiation = anatomyBundle.claimAnnotations.find(item => item.kind === 'differentiation_annotation');
+    if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+      throw new Error('Fixture requires a differentiation annotation.');
+    }
+    expect(() => recordNicoleAnatomyDifferentiationResult(
+      audit, 'unknown', 'supports', null, 'nicole', cueReviewExpectedState(audit), context,
+    )).toThrow(/not part/i);
+    expect(() => recordNicoleAnatomyDifferentiationResult(
+      audit, differentiation.statementId, 'supports', null, 'qualified_teacher',
+      cueReviewExpectedState(audit), context,
+    )).toThrow(/allowed performer/i);
+
+    const recorded = recordNicoleAnatomyDifferentiationResult(
+      audit, differentiation.statementId, 'not_performed', '   ', 'nicole',
+      cueReviewExpectedState(audit), context,
+    );
+    expect(recorded.events[recorded.events.length - 1]?.anatomyTestResult?.note).toBeNull();
+    for (const mutate of [
+      (stored: any) => { stored.events.at(-1).anatomyTestResult.previousResultEventId = 'forged-event'; },
+      (stored: any) => { stored.events.at(-1).anatomyTestResult.anatomyBundleId = 'forged-bundle'; },
+      (stored: any) => { stored.events.at(-1).anatomyTestResult.sourceClaimId = 'forged-claim'; },
+      (stored: any) => { stored.events.at(-1).anatomyTestResult.diagnosis = 'forged'; },
+    ]) {
+      const stored = JSON.parse(JSON.stringify(recorded));
       mutate(stored);
       redigestStoredEvents(stored);
       expect(cueReviewAuditIsValid(stored)).toBe(false);

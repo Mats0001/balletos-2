@@ -28,6 +28,7 @@ import type {
   CueReviewEditablePatch,
   CueReviewExpectedState,
   CueReviewProjection,
+  CueNicoleAnatomyDifferentiationResult,
   CueNicoleAnatomyExpertNote,
   CueNicoleProClaimDecision,
   CueNicoleProClaimReview,
@@ -160,7 +161,7 @@ function event(
   revisionId: string,
   revisionDigest: string,
   context: CueReviewCommandContext,
-  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason' | 'claimReview' | 'anatomyExpertNote' | 'studentDerivation' | 'studentDerivationRef'> = {},
+  extra: Pick<CueReviewAuditEvent, 'audience' | 'reason' | 'claimReview' | 'anatomyExpertNote' | 'anatomyTestResult' | 'studentDerivation' | 'studentDerivationRef'> = {},
   previousEvents: readonly CueReviewAuditEvent[] = [],
 ): CueReviewAuditEvent {
   const previousEventDigest = previousEvents.length > 0
@@ -663,6 +664,61 @@ export function projectCurrentNicoleAnatomyExpertNote(
   });
 }
 
+export interface NicoleAnatomyDifferentiationResultProjection {
+  resultId: string;
+  differentiationStatementId: string;
+  sourceClaimId: string;
+  result: CueNicoleAnatomyDifferentiationResult['result'];
+  note: string | null;
+  recordedByRole: CueNicoleAnatomyDifferentiationResult['recordedByRole'];
+  authorship: CueNicoleAnatomyDifferentiationResult['authorship'];
+  eventId: string;
+  actorId: string;
+  recordedAt: string;
+}
+
+function anatomyTestResultId(audit: CueReviewAudit, statementId: string): string {
+  return `anatomy-test-result:${audit.origin.originId}:${statementId}`;
+}
+
+function latestAnatomyTestResultEvents(
+  audit: CueReviewAudit,
+  revisionId: string,
+): Map<string, CueReviewAuditEvent> {
+  const latest = new Map<string, CueReviewAuditEvent>();
+  for (const auditEvent of audit.events) {
+    if (auditEvent.revisionId === revisionId
+      && auditEvent.type === 'anatomy_test_result_recorded'
+      && auditEvent.anatomyTestResult) {
+      latest.set(auditEvent.anatomyTestResult.differentiationStatementId, auditEvent);
+    }
+  }
+  return latest;
+}
+
+export function projectCurrentNicoleAnatomyDifferentiationResults(
+  audit: CueReviewAudit,
+): readonly NicoleAnatomyDifferentiationResultProjection[] {
+  if (!cueReviewAuditIsValid(audit) || audit.origin.kind !== 'nicole_pro_draft'
+    || !audit.origin.nicoleProPayload?.anatomyBundle) return Object.freeze([]);
+  const latest = latestAnatomyTestResultEvents(audit, audit.currentRevisionId);
+  return cloneFreeze([...latest.values()].map(auditEvent => {
+    const result = auditEvent.anatomyTestResult!;
+    return {
+      resultId: result.resultId,
+      differentiationStatementId: result.differentiationStatementId,
+      sourceClaimId: result.sourceClaimId,
+      result: result.result,
+      note: result.note,
+      recordedByRole: result.recordedByRole,
+      authorship: result.authorship,
+      eventId: auditEvent.eventId,
+      actorId: auditEvent.actorId,
+      recordedAt: auditEvent.at,
+    };
+  }));
+}
+
 export function projectCurrentStudentDerivation(audit: CueReviewAudit): CueStudentDerivation | null {
   if (!cueReviewAuditIsValid(audit)) return null;
   return latestStudentDerivation(audit, audit.currentRevisionId);
@@ -1013,6 +1069,73 @@ export function recordNicoleAnatomyExpertNote(
   });
 }
 
+export function recordNicoleAnatomyDifferentiationResult(
+  audit: CueReviewAudit,
+  differentiationStatementId: string,
+  result: CueNicoleAnatomyDifferentiationResult['result'],
+  note: string | null,
+  recordedByRole: CueNicoleAnatomyDifferentiationResult['recordedByRole'],
+  expected: CueReviewExpectedState,
+  context: CueReviewCommandContext = defaultCueReviewContext(),
+): CueReviewAudit {
+  assertExpectedState(audit, expected);
+  if (audit.events.some(item => item.type === 'archived')) {
+    throw new Error('Archived reviews cannot be changed.');
+  }
+  if (projectCueReviewAudit(audit).provenance === 'nicole_rejected') {
+    throw new Error('Reopen the rejected Nicole revision before recording a differentiation result.');
+  }
+  const anatomyBundle = audit.origin.nicoleProPayload?.anatomyBundle;
+  if (audit.origin.kind !== 'nicole_pro_draft' || !anatomyBundle) {
+    throw new Error('Differentiation results require an immutable Anatomy-Pro origin.');
+  }
+  const differentiation = anatomyBundle.claimAnnotations.find(annotation => (
+    annotation.kind === 'differentiation_annotation'
+    && annotation.statementId === differentiationStatementId
+  ));
+  if (!differentiation || differentiation.kind !== 'differentiation_annotation') {
+    throw new Error('Differentiation step is not part of the immutable Anatomy-Pro origin.');
+  }
+  if (differentiation.allowedPerformer !== recordedByRole) {
+    throw new Error('Differentiation result must be recorded by the allowed performer.');
+  }
+  if (!['supports', 'weakens', 'inconclusive', 'not_performed'].includes(result)) {
+    throw new Error('Unknown differentiation result.');
+  }
+  const trimmedNote = note?.trim() ?? '';
+  const normalizedNote = trimmedNote.length > 0 ? trimmedNote : null;
+  if (normalizedNote !== null && normalizedNote.length > 1_200) {
+    throw new Error('A differentiation-result note may contain at most 1200 characters.');
+  }
+  const revision = currentRevision(audit);
+  const previous = latestAnatomyTestResultEvents(audit, revision.revisionId).get(differentiationStatementId);
+  if (previous?.anatomyTestResult?.result === result
+    && previous.anatomyTestResult.note === normalizedNote
+    && previous.anatomyTestResult.recordedByRole === recordedByRole) return audit;
+  const testResult = cloneFreeze({
+    schemaVersion: 1 as const,
+    resultId: anatomyTestResultId(audit, differentiationStatementId),
+    anatomyBundleId: anatomyBundle.bundleId,
+    differentiationStatementId,
+    sourceClaimId: differentiation.sourceClaimId,
+    previousResultEventId: previous?.eventId ?? null,
+    result,
+    note: normalizedNote,
+    recordedByRole,
+    authorship: 'local_human_entry_unverified' as const,
+    nonDiagnostic: true as const,
+    internalOnly: true as const,
+    outwardEligibility: false as const,
+  });
+  return cloneFreeze({
+    ...audit,
+    events: [...audit.events, event(
+      'anatomy_test_result_recorded', audit, revision.revisionId, revision.revisionDigest,
+      context, { anatomyTestResult: testResult }, audit.events,
+    )],
+  });
+}
+
 export function createNicoleProStudentDerivation(
   audit: CueReviewAudit,
   selectedClaimReviewEventIds: readonly string[],
@@ -1234,7 +1357,8 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   const revisionIds = new Set(candidate.revisions.map(revision => revision.revisionId));
   const eventTypes = new Set([
     'revision_created', 'approved', 'rejected', 'reopened', 'claim_reviewed',
-    'anatomy_expert_note_recorded', 'student_derivation_created', 'audience_granted',
+    'anatomy_expert_note_recorded', 'anatomy_test_result_recorded',
+    'student_derivation_created', 'audience_granted',
     'audience_revoked', 'archived', 'legacy_import',
   ]);
   const structurallyValid = candidate.events.every((auditEvent, index) => {
@@ -1242,9 +1366,11 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
     const audienceEvent = auditEvent.type === 'audience_granted' || auditEvent.type === 'audience_revoked';
     const claimReviewEvent = auditEvent.type === 'claim_reviewed';
     const anatomyNoteEvent = auditEvent.type === 'anatomy_expert_note_recorded';
+    const anatomyTestResultEvent = auditEvent.type === 'anatomy_test_result_recorded';
     const studentDerivationEvent = auditEvent.type === 'student_derivation_created';
     const claimReview = auditEvent.claimReview;
     const anatomyExpertNote = auditEvent.anatomyExpertNote;
+    const anatomyTestResult = auditEvent.anatomyTestResult;
     const studentDerivation = auditEvent.studentDerivation;
     const claimReviewValid = !claimReviewEvent ? claimReview === undefined : (
       candidate.origin.kind === 'nicole_pro_draft'
@@ -1283,6 +1409,40 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
       && anatomyExpertNote.nonComputational === true
       && anatomyExpertNote.internalOnly === true
       && anatomyExpertNote.outwardEligibility === false
+    );
+    const differentiation = anatomyTestResultEvent
+      ? candidate.origin.nicoleProPayload?.anatomyBundle?.claimAnnotations.find(annotation => (
+        annotation.kind === 'differentiation_annotation'
+        && annotation.statementId === anatomyTestResult?.differentiationStatementId
+      ))
+      : undefined;
+    const anatomyTestResultValid = !anatomyTestResultEvent ? anatomyTestResult === undefined : (
+      candidate.origin.kind === 'nicole_pro_draft'
+      && candidate.origin.nicoleProPayload?.anatomyBundle !== undefined
+      && anatomyTestResult !== undefined
+      && differentiation?.kind === 'differentiation_annotation'
+      && Object.keys(anatomyTestResult).every(key => [
+        'schemaVersion', 'resultId', 'anatomyBundleId', 'differentiationStatementId',
+        'sourceClaimId', 'previousResultEventId', 'result', 'note', 'recordedByRole',
+        'authorship', 'nonDiagnostic', 'internalOnly', 'outwardEligibility',
+      ].includes(key))
+      && anatomyTestResult.schemaVersion === 1
+      && anatomyTestResult.resultId === anatomyTestResultId(candidate, anatomyTestResult.differentiationStatementId)
+      && anatomyTestResult.anatomyBundleId === candidate.origin.nicoleProPayload.anatomyBundle.bundleId
+      && anatomyTestResult.sourceClaimId === differentiation.sourceClaimId
+      && (anatomyTestResult.previousResultEventId === null || typeof anatomyTestResult.previousResultEventId === 'string')
+      && ['supports', 'weakens', 'inconclusive', 'not_performed'].includes(anatomyTestResult.result)
+      && (anatomyTestResult.note === null || (
+        typeof anatomyTestResult.note === 'string'
+        && anatomyTestResult.note.trim() === anatomyTestResult.note
+        && anatomyTestResult.note.length > 0
+        && anatomyTestResult.note.length <= 1_200
+      ))
+      && anatomyTestResult.recordedByRole === differentiation.allowedPerformer
+      && anatomyTestResult.authorship === 'local_human_entry_unverified'
+      && anatomyTestResult.nonDiagnostic === true
+      && anatomyTestResult.internalOnly === true
+      && anatomyTestResult.outwardEligibility === false
     );
     const studentContentValid = studentDerivation?.content
       && typeof studentDerivation.content.poseName === 'string'
@@ -1323,8 +1483,9 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
         ? ['studentDerivationRef'] : [])]
       : claimReviewEvent ? ['claimReview']
         : anatomyNoteEvent ? ['anatomyExpertNote']
-          : studentDerivationEvent ? ['studentDerivation']
-            : auditEvent.type === 'legacy_import' ? ['reason'] : [];
+          : anatomyTestResultEvent ? ['anatomyTestResult']
+            : studentDerivationEvent ? ['studentDerivation']
+              : auditEvent.type === 'legacy_import' ? ['reason'] : [];
     const exactEventShape = Object.keys(auditEvent).every(key => [...baseEventKeys, ...allowedExtraKeys].includes(key));
     const canonicalIso = (value: string) => {
       try { return new Date(value).toISOString() === value; } catch { return false; }
@@ -1347,6 +1508,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
         : auditEvent.studentDerivationRef === undefined)
       && claimReviewValid
       && anatomyNoteValid
+      && anatomyTestResultValid
       && studentDerivationValid
       && (!studentDerivationEvent || (
         studentDerivation!.actorId === auditEvent.actorId
@@ -1378,6 +1540,7 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
   const state = new Map<string, 'pending' | 'approved' | 'rejected'>();
   const latestClaimReview = new Map<string, number>();
   const latestAnatomyNoteEventId = new Map<string, string>();
+  const latestAnatomyTestResultEventId = new Map<string, string>();
   const latestStudentDerivationSequence = new Map<string, number>();
   const latestStudentDerivationValue = new Map<string, CueStudentDerivation>();
   let archived = false;
@@ -1407,6 +1570,12 @@ export function cueReviewAuditIsValid(audit: unknown): audit is CueReviewAudit {
       if (auditEvent.revisionId !== activeRevisionId || current === 'rejected'
         || auditEvent.anatomyExpertNote?.previousNoteEventId !== (latestAnatomyNoteEventId.get(auditEvent.revisionId) ?? null)) return false;
       latestAnatomyNoteEventId.set(auditEvent.revisionId, auditEvent.eventId);
+    } else if (auditEvent.type === 'anatomy_test_result_recorded') {
+      const result = auditEvent.anatomyTestResult;
+      if (auditEvent.revisionId !== activeRevisionId || current === 'rejected' || !result) return false;
+      const key = `${auditEvent.revisionId}:${result.differentiationStatementId}`;
+      if (result.previousResultEventId !== (latestAnatomyTestResultEventId.get(key) ?? null)) return false;
+      latestAnatomyTestResultEventId.set(key, auditEvent.eventId);
     } else if (auditEvent.type === 'student_derivation_created') {
       if (auditEvent.revisionId !== activeRevisionId || current !== 'approved') return false;
       latestStudentDerivationSequence.set(auditEvent.revisionId, auditEvent.eventSequence);
