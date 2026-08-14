@@ -2,6 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, Sparkles, Activity, Users, Smartphone, MessageSquare, Send, Mic, MicOff, User } from 'lucide-react';
 import { Location, AgeGroup } from '../types';
 
+const NAV_TABS = Object.freeze([
+  { id: 'cam', label: 'Saal-Kamera', mobileLabel: 'Kamera', icon: Camera },
+  { id: 'metaphor', label: 'KI-Metaphern', mobileLabel: 'Metaphern', icon: Sparkles },
+  { id: 'analyzer', label: 'Video-Analyse', mobileLabel: 'Analyse', icon: Activity },
+  { id: 'students', label: 'Schüler-Historie', mobileLabel: 'Schüler', icon: Users },
+  { id: 'remote', label: 'Remote-Handy', mobileLabel: 'Remote', icon: Smartphone },
+]);
+
 interface Props {
   activeTab: string;
   onTabChange: (tab: string) => void;
@@ -66,14 +74,6 @@ export const Navbar: React.FC<Props> = ({
       setIsRecording(false);
     }
   };
-  const tabs = [
-    { id: 'cam', label: 'Saal-Kamera', icon: Camera },
-    { id: 'metaphor', label: 'KI-Metaphern', icon: Sparkles },
-    { id: 'analyzer', label: 'Video-Analyse', icon: Activity },
-    { id: 'students', label: 'Schüler-Historie', icon: Users },
-    { id: 'remote', label: 'Remote-Handy', icon: Smartphone }
-  ];
-
   const studentsSSOT = [
     'Emma Berger (Minis)',
     'Clara Schulze (Kids)',
@@ -82,6 +82,7 @@ export const Navbar: React.FC<Props> = ({
   ];
 
   return (
+    <>
     <aside className="side-nav">
       {/* Brand Header */}
       <div>
@@ -107,7 +108,7 @@ export const Navbar: React.FC<Props> = ({
 
         {/* Vertical Navigation Items */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '20px' }}>
-          {tabs.map(tab => {
+          {NAV_TABS.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -279,7 +280,26 @@ export const Navbar: React.FC<Props> = ({
           </button>
         </div>
       </div>
-
     </aside>
+    <nav className="mobile-bottom-nav" aria-label="Mobile Hauptnavigation">
+      {NAV_TABS.map(tab => {
+        const Icon = tab.icon;
+        const isActive = activeTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            aria-label={tab.label}
+            aria-current={isActive ? 'page' : undefined}
+            className="mobile-bottom-nav__item"
+            onClick={() => onTabChange(tab.id)}
+          >
+            <Icon size={17} aria-hidden="true" />
+            <span>{tab.mobileLabel}</span>
+          </button>
+        );
+      })}
+    </nav>
+    </>
   );
 };
