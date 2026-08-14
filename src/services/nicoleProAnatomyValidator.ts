@@ -1,6 +1,9 @@
 import type { AnalysisContextEpochV1 } from './analysisContextGuard';
 import { MOTION_REGISTRY } from './motionRegistry';
 import {
+  createNicoleProValidationAuthority,
+  nicoleProContextEpochFromStoredEvidence,
+  resolveNicoleProTrustedKnowledgeRegistry,
   type NicoleProTrustedValidationAuthorityV1,
   validateNicoleProDraft,
 } from './nicoleProContentValidator';
@@ -707,6 +710,81 @@ export function validateNicoleAnatomyProBundle(
     issue(issues, 'invalid_shape', '$', 'Malformed Anatomy Pro data was rejected without throwing.');
   }
   return Object.freeze({ valid: issues.length === 0, issues: Object.freeze(issues) });
+}
+
+/**
+ * Replays a persisted Anatomy snapshot against both archived product registries
+ * and the exact context encoded by its immutable Nicole-Pro evidence.
+ */
+export function validateStoredNicoleAnatomyProBundle(
+  value: unknown,
+  draft: NicoleProDraftV1,
+  nicoleProRegistryId: string,
+  nicoleProRegistryVersion: string,
+): NicoleAnatomyValidationResultV1 {
+  const invalid = (message: string): NicoleAnatomyValidationResultV1 => Object.freeze({
+    valid: false,
+    issues: Object.freeze([Object.freeze({
+      code: 'invalid_shape' as const,
+      path: '$',
+      message,
+    })]),
+  });
+  try {
+    if (!isObject(value) || draft.evidence.length !== 1) {
+      return invalid('Stored Anatomy Pro snapshot is malformed.');
+    }
+    const bundle = value as unknown as NicoleAnatomyProBundleV1;
+    const evidence = draft.evidence[0];
+    const currentContext = nicoleProContextEpochFromStoredEvidence(evidence);
+    const nicoleProRegistry = resolveNicoleProTrustedKnowledgeRegistry(
+      nicoleProRegistryId,
+      nicoleProRegistryVersion,
+    );
+    const anatomyRegistry = resolveNicoleProAnatomyRegistry(
+      bundle.knowledgeRegistryId,
+      bundle.knowledgeRegistryVersion,
+    );
+    if (!currentContext || !nicoleProRegistry || !anatomyRegistry
+      || bundle.bundleId !== `anatomy:${bundle.knowledgeRegistryId}@${bundle.knowledgeRegistryVersion}:${draft.draftId}`
+      || bundle.contentVersion !== 1
+      || bundle.createdAt !== draft.generatedAt
+      || bundle.supersedesBundleId !== null
+      || bundle.origin !== 'ai_suggestion') {
+      return invalid('Stored Anatomy Pro snapshot identity is not canonical.');
+    }
+    const nicoleProAuthority = createNicoleProValidationAuthority({
+      currentContext,
+      assessment: {
+        schemaVersion: 1,
+        contextFingerprint: currentContext.fingerprint,
+        contextGeneration: currentContext.generation,
+        value: {
+          analysisArtifactId: evidence.analysisArtifactId,
+          sourceId: evidence.sourceId,
+          exerciseId: evidence.exerciseId,
+          policyVersion: evidence.policyVersion,
+          evidence: draft.evidence,
+        },
+      },
+      knowledgeRegistry: nicoleProRegistry,
+    });
+    if (!nicoleProAuthority) return invalid('Stored Nicole-Pro parent authority cannot be reconstructed.');
+    const anatomyAuthority = createNicoleAnatomyValidationAuthority({
+      draft,
+      nicoleProAuthority,
+      currentContext,
+      phaseId: bundle.context.phaseId,
+      side: bundle.context.side,
+      view: bundle.context.view,
+      knowledgeRegistry: anatomyRegistry,
+    });
+    return anatomyAuthority
+      ? validateNicoleAnatomyProBundle(bundle, anatomyAuthority, currentContext)
+      : invalid('Stored Anatomy Pro authority cannot be reconstructed.');
+  } catch {
+    return invalid('Stored Anatomy Pro snapshot was rejected without throwing.');
+  }
 }
 
 export function assertNicoleAnatomyProBundle(

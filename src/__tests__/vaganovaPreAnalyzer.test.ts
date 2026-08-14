@@ -28,6 +28,7 @@ import {
   NICOLE_PRO_LANDMARK_MODEL_V1,
   planNicoleProGroundedDraft,
 } from '../services/nicoleProContentPlanner';
+import { planNicoleAnatomyForNicoleProDraft } from '../services/nicoleProAnatomyPlanner';
 
 function installMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -301,7 +302,11 @@ describe('audited cue persistence guard', () => {
       generatedAt: '2026-08-13T20:00:00.000Z',
     });
     if (!proDraft) throw new Error('Test Nicole-Pro draft must be planned.');
-    return { currentContext, proDraft, proGrounded };
+    const anatomyBundle = landmarkModel.modelId === NICOLE_PRO_LANDMARK_MODEL_V1.modelId
+      && landmarkModel.modelVersion === NICOLE_PRO_LANDMARK_MODEL_V1.modelVersion
+      ? planNicoleAnatomyForNicoleProDraft({ draft: proDraft, currentContext })
+      : null;
+    return { anatomyBundle, currentContext, proDraft, proGrounded };
   }
 
   it('roundtrips an audited draft and blocks generic mutation, deletion and reset', () => {
@@ -327,7 +332,8 @@ describe('audited cue persistence guard', () => {
 
   it('persists one exact Nicole-Pro origin and deduplicates the same planned draft', () => {
     installMemoryStorage();
-    const { currentContext, proDraft, proGrounded } = nicoleProFixture();
+    const { anatomyBundle, currentContext, proDraft, proGrounded } = nicoleProFixture();
+    if (!anatomyBundle) throw new Error('Expected Anatomy-Pro fixture.');
     const first = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
       target.sourceId,
       proGrounded,
@@ -336,6 +342,7 @@ describe('audited cue persistence guard', () => {
       currentContext,
       'ready',
       'Plié – Tiefpunkt',
+      anatomyBundle,
     );
     const second = vaganovaPreAnalyzer.addNicoleProTeacherDraft(
       target.sourceId,
@@ -345,12 +352,14 @@ describe('audited cue persistence guard', () => {
       currentContext,
       'ready',
       'Plié – Tiefpunkt',
+      anatomyBundle,
     );
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
     expect(first[0].reviewAudit?.origin.kind).toBe('nicole_pro_draft');
     expect(first[0].reviewAudit?.origin.nicoleProPayload?.draft).toEqual(proDraft);
+    expect(first[0].reviewAudit?.origin.nicoleProPayload?.anatomyBundle).toEqual(anatomyBundle);
     expect(vaganovaPreAnalyzer.getCuePoints(target.sourceId)).toEqual(first);
   });
 

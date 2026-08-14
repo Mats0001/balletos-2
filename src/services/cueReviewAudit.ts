@@ -1,5 +1,6 @@
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { NicoleProClaimV1, NicoleProDraftV1 } from '../types/nicoleProContent';
+import type { NicoleAnatomyProBundleV1 } from '../types/nicoleProAnatomy';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 import {
   createNicoleProValidationAuthority,
@@ -15,6 +16,7 @@ import {
   createNicoleProExactFrameArtifactId,
   NICOLE_PRO_LANDMARK_MODEL_V1,
 } from './nicoleProArtifactIdentity';
+import { validateStoredNicoleAnatomyProBundle } from './nicoleProAnatomyValidator';
 import type {
   CueAudienceProjection,
   CueAiOriginSnapshot,
@@ -280,6 +282,7 @@ const ALLOWED_TARGETS_BY_PRO_METRIC = Object.freeze({
 
 export function createNicoleProCueReviewAudit(input: {
   draft: NicoleProDraftV1;
+  anatomyBundle?: NicoleAnatomyProBundleV1;
   target: SelectedSkeletonTarget;
   poseName: string;
   currentContext: AnalysisContextEpochV1;
@@ -329,6 +332,12 @@ export function createNicoleProCueReviewAudit(input: {
       NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
       NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
     ).valid
+    || (input.anatomyBundle !== undefined && !validateStoredNicoleAnatomyProBundle(
+      input.anatomyBundle,
+      input.draft,
+      NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
+      NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
+    ).valid)
     || content.jointFocusId !== (evidence.metricId === 'shoulder_horizontal'
       ? 'shoulder_line'
       : evidence.metricId === 'projected_hip_line_obliquity' ? 'pelvis_core' : 'spine_center')) {
@@ -349,6 +358,7 @@ export function createNicoleProCueReviewAudit(input: {
       knowledgeRegistryId: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_ID,
       knowledgeRegistryVersion: NICOLE_PRO_TRUSTED_KNOWLEDGE_REGISTRY_VERSION,
       ruleVersions: input.draft.knowledgeRules.map(rule => ({ ruleId: rule.ruleId, version: rule.version })),
+      ...(input.anatomyBundle !== undefined ? { anatomyBundle: input.anatomyBundle } : {}),
     }),
   });
   const revision = revisionWithDigest(content, 1, 1, null, commandContext);
@@ -1001,6 +1011,9 @@ export function setCueReviewAudience(
 function nicoleProPayloadIsValid(value: unknown): value is NicoleProAiOriginPayload {
   if (!value || typeof value !== 'object') return false;
   const payload = value as NicoleProAiOriginPayload;
+  if (!Object.keys(payload).every(key => [
+    'draft', 'knowledgeRegistryId', 'knowledgeRegistryVersion', 'ruleVersions', 'anatomyBundle',
+  ].includes(key))) return false;
   const draft = payload.draft;
   const archivedRegistry = resolveNicoleProTrustedKnowledgeRegistry(
     payload.knowledgeRegistryId,
@@ -1042,6 +1055,12 @@ function nicoleProPayloadIsValid(value: unknown): value is NicoleProAiOriginPayl
   const trustedRules = new Map(archivedRegistry.rules.map(rule => [rule.ruleId, rule]));
   return canonicalJson(payload.ruleVersions) === canonicalJson(expectedRuleVersions)
     && draft.knowledgeRules.every(rule => canonicalJson(rule) === canonicalJson(trustedRules.get(rule.ruleId)))
+    && (payload.anatomyBundle === undefined || validateStoredNicoleAnatomyProBundle(
+      payload.anatomyBundle,
+      draft,
+      payload.knowledgeRegistryId,
+      payload.knowledgeRegistryVersion,
+    ).valid)
     && validateStoredNicoleProDraft(
       draft,
       payload.knowledgeRegistryId,

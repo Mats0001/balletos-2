@@ -26,6 +26,7 @@ import {
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 import type { NicoleProDraftV1 } from '../types/nicoleProContent';
+import type { NicoleAnatomyProBundleV1 } from '../types/nicoleProAnatomy';
 import type { AnalysisContextEpochV1 } from './analysisContextGuard';
 import {
   nicoleProDraftMatchesGroundedSelection,
@@ -550,6 +551,7 @@ export class VaganovaPreAnalyzerService {
     currentContext: AnalysisContextEpochV1,
     captureQuality: NicoleProCaptureQuality,
     poseName: string,
+    anatomyBundle?: NicoleAnatomyProBundleV1,
   ): VaganovaCuePoint[] {
     if (videoUrl !== groundedDraft.evidence.sourceId || videoUrl !== target.sourceId
       || !nicoleProDraftMatchesGroundedSelection({
@@ -564,6 +566,7 @@ export class VaganovaPreAnalyzerService {
     }
     const reviewAudit = createNicoleProCueReviewAudit({
       draft: proDraft,
+      anatomyBundle,
       target,
       poseName,
       currentContext,

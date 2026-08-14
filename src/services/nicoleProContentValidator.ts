@@ -1190,7 +1190,10 @@ export function createNicoleProValidationAuthority(input: Readonly<{
   return trusted;
 }
 
-function contextEpochFromStoredEvidence(evidence: NicoleProEvidencePacketV1): AnalysisContextEpochV1 | null {
+/** Reconstructs the exact V1 context encoded in a stored canonical evidence packet. */
+export function nicoleProContextEpochFromStoredEvidence(
+  evidence: NicoleProEvidencePacketV1,
+): AnalysisContextEpochV1 | null {
   try {
     const parsed = JSON.parse(evidence.analysisContextFingerprint) as unknown;
     if (!Array.isArray(parsed) || parsed.length !== 5 || parsed[0] !== 1
@@ -1227,7 +1230,7 @@ export function validateStoredNicoleProDraft(
     return invalid('Stored Nicole-Pro draft requires one exact evidence packet.');
   }
   const evidence = draft.evidence[0];
-  const context = contextEpochFromStoredEvidence(evidence);
+  const context = nicoleProContextEpochFromStoredEvidence(evidence);
   const registry = resolveNicoleProTrustedKnowledgeRegistry(registryId, registryVersion);
   const runtime = registryRuntimeFor(registryId, registryVersion);
   const plannerRuntime = runtime?.planners.find(planner => (

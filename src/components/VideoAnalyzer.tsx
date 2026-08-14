@@ -2681,6 +2681,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         currentContext,
         captureQuality,
         motionClass.detectedPoseName,
+        currentNicoleAnatomyBundle ?? undefined,
       );
     } catch (error) {
       showAnalyseToast(error instanceof Error ? error.message : 'Nicole-Pro-Entwurf konnte nicht gespeichert werden.');

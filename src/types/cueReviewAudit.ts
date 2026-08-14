@@ -4,6 +4,7 @@ import type {
   GroundedTeacherEvidence,
 } from './groundedTeacherDraft';
 import type { NicoleProDraftV1 } from './nicoleProContent';
+import type { NicoleAnatomyProBundleV1 } from './nicoleProAnatomy';
 
 export type CueReviewStatus = 'GOOD' | 'CORRECTION' | 'WARNING' | 'NEUTRAL';
 export type CueAudience = 'learner' | 'parent';
@@ -36,6 +37,11 @@ export interface NicoleProAiOriginPayload {
   knowledgeRegistryId: string;
   knowledgeRegistryVersion: string;
   ruleVersions: readonly Readonly<{ ruleId: string; version: string }>[];
+  /**
+   * Optional for backward-compatible reload of older reviewed Pro records.
+   * New exact-frame takeovers persist the validated internal Anatomy snapshot.
+   */
+  anatomyBundle?: NicoleAnatomyProBundleV1;
 }
 
 export interface CueAiOriginSnapshot {

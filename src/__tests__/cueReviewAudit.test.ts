@@ -36,6 +36,7 @@ import {
   resolveNicoleProTrustedKnowledgeRegistry,
   validateStoredNicoleProDraft,
 } from '../services/nicoleProContentValidator';
+import { planNicoleAnatomyForNicoleProDraft } from '../services/nicoleProAnatomyPlanner';
 import type { ReadyGroundedTeacherDraft } from '../types/groundedTeacherDraft';
 import type { SelectedSkeletonTarget } from '../types/skeletonTarget';
 
@@ -118,16 +119,22 @@ function createNicoleProFixture() {
     generatedAt: '2026-08-13T20:00:00.000Z',
   });
   if (!proDraft) throw new Error('Test Nicole-Pro draft must be planned.');
+  const anatomyBundle = planNicoleAnatomyForNicoleProDraft({
+    draft: proDraft,
+    currentContext,
+  });
+  if (!anatomyBundle) throw new Error('Test Anatomy-Pro bundle must be planned.');
   const context = deterministicContext();
   const content = contentFromNicoleProDraft(proDraft, 'Plié – Tiefpunkt');
   const audit = createNicoleProCueReviewAudit({
     draft: proDraft,
+    anatomyBundle,
     target,
     poseName: content.poseName,
     currentContext,
     context,
   });
-  return { audit, content, context, currentContext, proDraft };
+  return { audit, anatomyBundle, content, context, currentContext, proDraft };
 }
 
 function reviewAndDeriveStudentCopy() {
@@ -190,12 +197,14 @@ describe('cue review audit', () => {
   });
 
   it('captures the complete Nicole-Pro draft and rule versions as an immutable origin', () => {
-    const { audit, proDraft } = createNicoleProFixture();
+    const { audit, anatomyBundle, content, context, currentContext, proDraft } = createNicoleProFixture();
     const payload = audit.origin.nicoleProPayload;
 
     expect(cueReviewAuditIsValid(audit)).toBe(true);
     expect(audit.origin.kind).toBe('nicole_pro_draft');
     expect(payload?.draft).toEqual(proDraft);
+    expect(payload?.anatomyBundle).toEqual(anatomyBundle);
+    expect(Object.isFrozen(payload?.anatomyBundle?.knowledgeItems[0])).toBe(true);
     expect(payload?.knowledgeRegistryVersion).toBe('1.3.0');
     expect(payload?.ruleVersions).toEqual([
       { ruleId: 'knowledge:spine-aplomb:teacher-v1', version: '1.2.0' },
@@ -206,6 +215,24 @@ describe('cue review audit', () => {
     });
     expect(projectCueReviewForAudience(audit, 'learner')).toBeNull();
     expect(() => { (payload!.draft as { draftId: string }).draftId = 'forged'; }).toThrow();
+
+    const priorVersionWithoutAnatomy = createNicoleProCueReviewAudit({
+      draft: proDraft,
+      target,
+      poseName: content.poseName,
+      currentContext,
+      context,
+    });
+    expect(cueReviewAuditIsValid(priorVersionWithoutAnatomy)).toBe(true);
+    expect(priorVersionWithoutAnatomy.origin.nicoleProPayload?.anatomyBundle).toBeUndefined();
+    expect(() => createNicoleProCueReviewAudit({
+      draft: proDraft,
+      anatomyBundle: null as never,
+      target,
+      poseName: content.poseName,
+      currentContext,
+      context,
+    })).toThrow(/exact-frame origin/i);
   });
 
   it('publishes only the narrow approved current revision and revokes it after an edit', () => {
@@ -446,6 +473,11 @@ describe('cue review audit', () => {
     const tamperedRegistry = JSON.parse(JSON.stringify(audit));
     tamperedRegistry.origin.nicoleProPayload.knowledgeRegistryVersion = '99.0.0';
     expect(cueReviewAuditIsValid(tamperedRegistry)).toBe(false);
+    const tamperedAnatomy = JSON.parse(JSON.stringify(audit));
+    tamperedAnatomy.origin.nicoleProPayload.anatomyBundle.knowledgeItems[0].statement = 'Iliopsoas ist sicher die alleinige Ursache.';
+    const { originDigest: _anatomyDigest, digestAlgorithm: _anatomyAlgorithm, ...tamperedAnatomyCore } = tamperedAnatomy.origin;
+    tamperedAnatomy.origin.originDigest = sha256Canonical(tamperedAnatomyCore);
+    expect(cueReviewAuditIsValid(tamperedAnatomy)).toBe(false);
     expect(() => createNicoleProCueReviewAudit({
       draft: proDraft,
       target: { ...target, sourceId: '/videos/other.mp4' },
