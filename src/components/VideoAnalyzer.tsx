@@ -903,6 +903,7 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
 
         // ABER: KI-Analyse (Cue-Points + Report) trotzdem generieren,
         // falls sie noch nicht vorliegen (z.B. nach Page-Reload)
+        const assessmentContextAtCacheHit = currentAnalysisContextEpochRef.current;
         const { autoCuePoints, report } = analyzeFrameCacheForHighlights(selectedDevVideoUrl);
         const merged = replaceAutoCuePoints(
           vaganovaPreAnalyzer.getCuePoints(selectedDevVideoUrl),
@@ -910,8 +911,15 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
         );
         vaganovaPreAnalyzer.saveCuePoints(selectedDevVideoUrl, merged);
         setCuePoints(merged);
-        setAnalysisReport(report);
-        requestTeacherPhaseAssessment(currentAnalysisContextEpochRef.current);
+        // Raw pose extraction is source-scoped and reusable. The phase assessment
+        // is published separately and only if the context that started this
+        // cache-hit analysis is still the current context epoch.
+        const assessmentContextStillCurrent = sameAnalysisContextEpoch(
+          assessmentContextAtCacheHit,
+          currentAnalysisContextEpochRef.current,
+        );
+        setAnalysisReport(assessmentContextStillCurrent ? report : null);
+        requestTeacherPhaseAssessment(assessmentContextAtCacheHit);
       } else {
         // Automatisch starten – Nicole muss nichts tun
         triggerPreIndexingScan();
@@ -5148,6 +5156,13 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                 ? nicoleProStudentDerivationReadiness(cue.reviewAudit)
                 : null;
               const audienceNeedsStudentDerivation = Boolean(auditProjection && nicoleProOrigin && !currentStudentDerivation);
+              // Non-audited legacy records have no reviewAudit chain to bind an
+              // audience grant to. Their learner/parent visibility must stay
+              // read-only here rather than being toggled through the
+              // unaudited persistCueUpdate path.
+              const audienceToggleLocked = audienceNeedsStudentDerivation || !auditProjection;
+              const learnerAudienceEnabled = Boolean(auditProjection && cue.learnerVisible);
+              const parentAudienceEnabled = Boolean(auditProjection && cue.parentVisible);
 
               if (isEditing) {
                 return (
@@ -5902,12 +5917,12 @@ export const VideoAnalyzer: React.FC<VideoAnalyzerProps> = ({
                   {((cue.provenance === 'nicole_confirmed' || cue.provenance === 'nicole_edited') && (!auditProjection || auditProjection.isApproved)) && (
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <span style={{ fontSize: '8px', color: '#30d158', fontWeight: 800 }}>✓ Bestätigt</span>
-                      <button disabled={audienceNeedsStudentDerivation} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceNeedsStudentDerivation) return; auditProjection ? handleReviewedAudience(cue.id, 'learner', !cue.learnerVisible) : persistCueUpdate(cue.id, { learnerVisible: !cue.learnerVisible }); }}
-                        style={{ background: cue.learnerVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.learnerVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.learnerVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceNeedsStudentDerivation ? 'not-allowed' : 'pointer', opacity: audienceNeedsStudentDerivation ? 0.55 : 1 }}
-                      >{cue.learnerVisible ? '👁 Lernende: an' : audienceNeedsStudentDerivation ? '👁 Schülerfassung zuerst' : '👁 Für Lernende'}</button>
-                      <button disabled={audienceNeedsStudentDerivation} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceNeedsStudentDerivation) return; auditProjection ? handleReviewedAudience(cue.id, 'parent', !cue.parentVisible) : persistCueUpdate(cue.id, { parentVisible: !cue.parentVisible }); }}
-                        style={{ background: cue.parentVisible ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cue.parentVisible ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: cue.parentVisible ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceNeedsStudentDerivation ? 'not-allowed' : 'pointer', opacity: audienceNeedsStudentDerivation ? 0.55 : 1 }}
-                      >{cue.parentVisible ? '👨‍👩‍👧 Eltern: an' : audienceNeedsStudentDerivation ? '👨‍👩‍👧 Schülerfassung zuerst' : '👨‍👩‍👧 Für Eltern'}</button>
+                      <button disabled={audienceToggleLocked} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : !auditProjection ? 'Nicht auditierter Eintrag: Sichtbarkeit gesperrt' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceToggleLocked) return; handleReviewedAudience(cue.id, 'learner', !cue.learnerVisible); }}
+                        style={{ background: learnerAudienceEnabled ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${learnerAudienceEnabled ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: learnerAudienceEnabled ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceToggleLocked ? 'not-allowed' : 'pointer', opacity: audienceToggleLocked ? 0.55 : 1 }}
+                      >{!auditProjection ? '👁 Nicht auditiert' : learnerAudienceEnabled ? '👁 Lernende: an' : audienceNeedsStudentDerivation ? '👁 Schülerfassung zuerst' : '👁 Für Lernende'}</button>
+                      <button disabled={audienceToggleLocked} title={audienceNeedsStudentDerivation ? 'Zuerst sichere Schülerfassung erzeugen' : !auditProjection ? 'Nicht auditierter Eintrag: Sichtbarkeit gesperrt' : undefined} onClick={(e) => { e.stopPropagation(); if (audienceToggleLocked) return; handleReviewedAudience(cue.id, 'parent', !cue.parentVisible); }}
+                        style={{ background: parentAudienceEnabled ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.05)', border: `1px solid ${parentAudienceEnabled ? 'rgba(48,209,88,0.5)' : 'rgba(255,255,255,0.15)'}`, color: parentAudienceEnabled ? '#30d158' : 'rgba(255,255,255,0.45)', padding: '2px 7px', borderRadius: '5px', fontSize: '8px', fontWeight: 800, cursor: audienceToggleLocked ? 'not-allowed' : 'pointer', opacity: audienceToggleLocked ? 0.55 : 1 }}
+                      >{!auditProjection ? '👨‍👩‍👧 Nicht auditiert' : parentAudienceEnabled ? '👨‍👩‍👧 Eltern: an' : audienceNeedsStudentDerivation ? '👨‍👩‍👧 Schülerfassung zuerst' : '👨‍👩‍👧 Für Eltern'}</button>
                     </div>
                   )}
 
